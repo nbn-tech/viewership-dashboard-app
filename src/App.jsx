@@ -780,10 +780,14 @@ function computeCornerStats(corner,cache,metric){
 // 本番デプロイ時は API_CONFIG.useMock=false / baseUrl を実URLに変更すれば
 // バックエンド経由に切り替わる。
 // ============================================================
+// const API_CONFIG = {
+//   useMock: true,  // true=Claude API直叩き(デモ用) / false=自社バックエンド経由
+//   baseUrl: "",    // 本番例: "https://api.your-domain.com"
+//   mockDelayMs: 0, // 疑似レイテンシ
+// };
 const API_CONFIG = {
-  useMock: true,  // true=Claude API直叩き(デモ用) / false=自社バックエンド経由
-  baseUrl: "",    // 本番例: "https://api.your-domain.com"
-  mockDelayMs: 0, // 疑似レイテンシ
+  useMock: false,
+  baseUrl: "https://b6otkip8zb.execute-api.ap-northeast-1.amazonaws.com",
 };
 
 // コーナーのテキスト表現
