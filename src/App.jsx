@@ -820,17 +820,22 @@ async function _callBackend(path,body){
 
 const apiClient = {
   // 意味検索
-  async semanticSearch(query, subset){
-    if(API_CONFIG.useMock){
-      if(API_CONFIG.mockDelayMs>0)await new Promise(r=>setTimeout(r,API_CONFIG.mockDelayMs));
-      const candidates=subset.map((c,i)=>`${i}\t${cornerToText(c).slice(0,120)}`).join("\n");
-      const prompt=`あなたはテレビ番組コーナーの検索アシスタントです。以下のコーナー一覧から、ユーザーのクエリに意味的に関連するものを最大30件選び、関連度の高い順に番号(タブ前の数字)だけをカンマ区切りで返してください。説明は一切不要、番号のみ。\n\nクエリ: ${query}\n\nコーナー一覧:\n${candidates}\n\n回答形式: 12,45,3,...`;
-      const text=await _callClaudeDirect([{role:"user",content:prompt}],1000);
-      const nums=text.match(/\d+/g)||[];
-      return nums.map(n=>parseInt(n)).filter(n=>!isNaN(n)&&n>=0&&n<subset.length).map(n=>subset[n]._origIdx);
-    }
-    const{corner_ids}=await _callBackend("/api/search/semantic", {query,top_k: 30,items: subset.map(c => ({id: c.id,text: cornerToText(c)}))});
-    return corner_ids.map(id=>subset.find(c=>c.id===id)).filter(Boolean).map(c=>c._origIdx);
+  async semanticSearch(query, subset) {
+    const { keywords = [] } = await _callBackend("/api/search/semantic", {
+      query,
+      top_k: 30,
+    });
+
+    const normalizedKeywords = keywords
+      .map(k => String(k).toLowerCase())
+      .filter(Boolean);
+
+    const results = subset.filter(c => {
+      const text = cornerToText(c).toLowerCase();
+      return normalizedKeywords.some(k => text.includes(k));
+    });
+
+    return results.map(c => c._origIdx);
   },
 
   // 統括分析
