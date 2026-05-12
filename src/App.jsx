@@ -922,7 +922,7 @@ const apiClient = {
 
   // 統括分析
   async generateOverview(periodLabel, ctx){
-    const prompt=`あなたはテレビ視聴率の専門アナリストです。以下は在名7局(東海テレビ/中京テレビ/CBCテレビ/名古屋テレビ/テレビ愛知/NHK総合/NHKEテレ)の${periodLabel}の番組・コーナー別占拠率データです。\n\n【データの読み方(必ず守ること)】\n- 指標は占拠率(その時間帯の総視聴者のうち何%がその局を見ているか)\n- 「裏局↓マイナス」= 裏局の占拠率が下がった = 視聴者が裏局から自局に移動(自局への流入)\n- 「裏局↑プラス」= 裏局の占拠率が上がった = 視聴者が自局から裏局に移動(自局からの流出)\n\n${ctx}\n\n上記データをもとに「占拠率の攻防・全体統括」として、各局の動向、番組間の視聴者流入・流出、時間帯ごとの流れ、特徴的な動きを詳しく分析してください。裏番組の流入・流出は上記ルールに従い自局視点で正確に記述してください。専門的かつ具体的な数値を引用しながら記述してください。`;
+    const prompt=`あなたは名古屋テレビ(NBN)の視聴率担当アナリストです。以下は在名7局の${periodLabel}の番組・コーナー別占拠率データです。NBN現場スタッフ向けの視聴率レポートを作成してください。\n\n【データの読み方(必ず守ること)】\n- 指標は占拠率(その時間帯に視聴中のテレビ全世帯のうち何%がその局を見ているか)\n- 「裏局↓マイナス(NBNへ流入)」= 視聴者がNBNに流れてきた\n- 「裏局↑プラス(NBNから流出)」= 視聴者がNBNから他局へ流れた\n\n${ctx}\n\n【出力形式(必ず守ること)】\n・■ で始まる行はセクション見出しとして使用\n・具体的な時刻・番組名・数値を必ず記載(例: 7:03 CTV「ZIP!」終了後に+1.4pt流入)\n・→ を使って流れや因果を表現\n\n以下のセクション構成で作成してください:\n\n■ NBN各番組の動き\n(番組ごとに冒頭・中盤・終盤の流れ、ピーク・ボトムの時刻と数値、急上昇・急降下した箇所)\n\n■ 競合各局の動き\n(各局の主要番組の概況、NBNへの影響)\n\n■ 流入・流出まとめ\n(NBN視点で、どの局の何の番組終了/開始時に視聴者が動いたか、時刻と数値を箇条書きで)\n\n■ 総評\n(この期間のNBNパフォーマンス評価、2〜3行)`;
     if(API_CONFIG.useMock){
       const text=await _callClaudeDirect([{role:"user",content:prompt}],8000);
       return{prompt,text};
@@ -933,7 +933,7 @@ const apiClient = {
 
   // ハイライト分析
   async generateHighlight(prevPrompt, prevText){
-    const followup=`同じデータについて、「全体視聴率ハイライト」として、最高占拠率のタイミング、急上昇・急降下したコーナー、各局で効果があった話題、独自に扱って占拠率が上がった話題、逆に下がった話題などを箇条書きで具体的に抽出してください。`;
+    const followup=`同じデータについて「視聴率ハイライト」として以下のセクション構成で作成してください。具体的な時刻・番組名・数値を必ず記載すること。\n\n■ 最高占拠率のタイミング\n(何時何分・どのコーナー・何%・なぜ高かったか)\n\n■ 急上昇コーナー TOP3\n(コーナー名・時間帯・上昇幅・要因)\n\n■ 急降下コーナー TOP3\n(コーナー名・時間帯・下降幅・要因)\n\n■ 注目の視聴者移動\n(裏番組との流入・流出で特に大きかった動き、具体的な時刻と局名)\n\n■ 今後の示唆\n(編成・制作への提言を箇条書きで2〜3点)`;
     if(API_CONFIG.useMock){
       return await _callClaudeDirect([
         {role:"user",content:prevPrompt},
@@ -1393,40 +1393,79 @@ function computeRivalFlow(sid,sM,eM,slot,sData,date){
 }
 
 function buildAnalysisContext(dates,slot,ratingsCache){
+  const SKIP_SEG=new Set(["cm","sponsor","opening","ending","other","kids"]);
+  const MAX_CHARS=18000;
   const lines=[];
   for(const date of dates){
     const key=`${date}|${slot}`;
     const rData=ratingsCache[key]||[];
-    const sData=toShare(rData); // 占拠率データ
+    const sData=toShare(rData);
     const dow=["日","月","火","水","木","金","土"][new Date(date).getDay()];
-    lines.push(`\n=== ${date}(${dow}) ${slot==="morning"?"朝帯(6:00-8:00)":"夕方帯(16:40-19:00)"} ===`);
-    for(const sid of ST.map(s=>s.id)){
-      const tpl=slot==="morning"?getDailyMorn(date):getDailyEve(date);
-      const progs=tpl[sid]||[];
-      for(const[progName,,,corners] of progs){
-        for(const cn of corners){
-          const[title,cs,ce,seg,,summary]=cn;
-          if(seg==="cm"||seg==="sponsor")continue;
-          const sM=t2m(cs),eM=t2m(ce);
-          const slice=sData.filter(d=>d.minute>=sM&&d.minute<eM);
-          if(!slice.length)continue;
-          const avg=slice.reduce((s,d)=>s+d[sid],0)/slice.length;
-          const iV=slice[0][sid],oV=slice[slice.length-1][sid],df=oV-iV;
-          // 自局の行（占拠率）
-          lines.push(`[${sid}/${progName}]「${title}」(${cs}-${ce}) 自局占拠率: IN${iV.toFixed(1)}% AVG${avg.toFixed(1)}% OUT${oV.toFixed(1)}% DIFF${df>=0?"+":""}${df.toFixed(1)}%`);
-          // 裏番組の流入・流出（占拠率）
-          const rivals=computeRivalFlow(sid,sM,eM,slot,sData,date);
-          const rivalLines=rivals.map(r=>{
-            const flow=r.df<=-1.0?`↓${r.df.toFixed(1)}pt【自局への流入】`:r.df>=1.0?`↑+${r.df.toFixed(1)}pt【自局からの流出】`:r.df>0?`±微増+${r.df.toFixed(1)}pt`:`±微減${r.df.toFixed(1)}pt`;
-            const corner=r.cornerTitle?`「${r.cornerTitle}」放送中`:"";
-            return `  裏${r.rid}${corner}: IN${r.iV.toFixed(1)}%→OUT${r.oV.toFixed(1)}% ${flow}`;
+    lines.push(`\n=== ${date}(${dow}) ${slot==="morning"?"朝帯":"夕方帯"} ===`);
+    const tpl=slot==="morning"?getDailyMorn(date):getDailyEve(date);
+
+    // NBN 詳細（番組ごと → コーナーごと + 裏局の有意な動き）
+    const nbnProgs=tpl["NBN"]||[];
+    for(const[progName,progStart,progEnd,corners] of nbnProgs){
+      const psM=t2m(progStart),peM=t2m(progEnd);
+      const ps=sData.filter(d=>d.minute>=psM&&d.minute<peM);
+      if(!ps.length)continue;
+      const pavg=ps.reduce((s,d)=>s+d["NBN"],0)/ps.length;
+      const ppeak=Math.max(...ps.map(d=>d["NBN"]));
+      const plow=Math.min(...ps.map(d=>d["NBN"]));
+      lines.push(`\n■ NBN「${progName}」(${progStart}–${progEnd}) AVG${pavg.toFixed(1)}% 最高${ppeak.toFixed(1)}% 最低${plow.toFixed(1)}%`);
+      for(const cn of corners){
+        const[title,cs,ce,seg]=cn;
+        if(SKIP_SEG.has(seg))continue;
+        const sM=t2m(cs),eM=t2m(ce);
+        if(eM-sM<5)continue;
+        const slice=sData.filter(d=>d.minute>=sM&&d.minute<eM);
+        if(!slice.length)continue;
+        const avg=slice.reduce((s,d)=>s+d["NBN"],0)/slice.length;
+        const iV=slice[0]["NBN"],oV=slice[slice.length-1]["NBN"],df=oV-iV;
+        lines.push(`  ・「${title}」(${cs}–${ce}) IN${iV.toFixed(1)}% AVG${avg.toFixed(1)}% OUT${oV.toFixed(1)}% ${df>=0?"+":""}${df.toFixed(1)}pt`);
+        const rivals=computeRivalFlow("NBN",sM,eM,slot,sData,date);
+        rivals
+          .filter(r=>Math.abs(r.df)>=1.0)
+          .forEach(r=>{
+            const flow=r.df<=-1.0?`↓${r.df.toFixed(1)}pt(NBNへ流入)`:`↑+${r.df.toFixed(1)}pt(NBNから流出)`;
+            const corner=r.cornerTitle?`「${r.cornerTitle}」`:"";
+            lines.push(`    裏${r.rid}${corner}: ${r.iV.toFixed(1)}→${r.oV.toFixed(1)}% ${flow}`);
           });
-          if(rivalLines.length)lines.push(...rivalLines);
+      }
+    }
+
+    // 競合各局（番組サマリー＋上位2コーナー）
+    lines.push(`\n【競合各局の概況】`);
+    for(const sid of ST.map(s=>s.id)){
+      if(sid==="NBN")continue;
+      const progs=tpl[sid]||[];
+      for(const[progName,progStart,progEnd,corners] of progs){
+        const psM=t2m(progStart),peM=t2m(progEnd);
+        const ps=sData.filter(d=>d.minute>=psM&&d.minute<peM);
+        if(!ps.length)continue;
+        const pavg=ps.reduce((s,d)=>s+d[sid],0)/ps.length;
+        const ppeak=Math.max(...ps.map(d=>d[sid]));
+        const topC=[];
+        for(const cn of corners){
+          const[title,cs,ce,seg]=cn;
+          if(SKIP_SEG.has(seg))continue;
+          const sM=t2m(cs),eM=t2m(ce);
+          if(eM-sM<5)continue;
+          const sl=sData.filter(d=>d.minute>=sM&&d.minute<eM);
+          if(!sl.length)continue;
+          const a=sl.reduce((s,d)=>s+d[sid],0)/sl.length;
+          topC.push({title,cs,ce,avg:a});
         }
+        topC.sort((a,b)=>b.avg-a.avg);
+        const top2=topC.slice(0,2).map(c=>`「${c.title}」(${c.cs}–${c.ce})${c.avg.toFixed(1)}%`).join(" / ");
+        lines.push(`  ${sid}「${progName}」(${progStart}–${progEnd}) AVG${pavg.toFixed(1)}% 最高${ppeak.toFixed(1)}%${top2?` 主要:${top2}`:""}`);
       }
     }
   }
-  return lines.join("\n");
+  const result=lines.join("\n");
+  if(result.length>MAX_CHARS)return result.substring(0,MAX_CHARS)+"\n\n[... データ省略 ...]";
+  return result;
 }
 
 // トピック分析: 局別サマリー集計
@@ -1577,6 +1616,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,
 
   // Markdown-lite renderer
   const renderMd=text=>text.split("\n").map((line,i)=>{
+    if(line.startsWith("■ "))return <div key={i} style={{fontSize:13,fontWeight:700,color:"#D94F00",margin:"14px 0 4px",borderBottom:"1px solid #FEE2E2",paddingBottom:3}}>{line}</div>;
     if(line.startsWith("### "))return <div key={i} style={{fontSize:13,fontWeight:700,color:"#111827",margin:"12px 0 4px"}}>{line.slice(4)}</div>;
     if(line.startsWith("## "))return <div key={i} style={{fontSize:14,fontWeight:700,color:"#111827",margin:"14px 0 5px",borderBottom:"1px solid #F3F4F6",paddingBottom:3}}>{line.slice(3)}</div>;
     if(line.startsWith("# "))return <div key={i} style={{fontSize:15,fontWeight:800,color:"#111827",margin:"16px 0 6px"}}>{line.slice(2)}</div>;
