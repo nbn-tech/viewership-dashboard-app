@@ -1910,21 +1910,27 @@ export default function App(){
   const dow=ds=>["日","月","火","水","木","金","土"][new Date(ds).getDay()];
   const isWd=ds=>{const d=new Date(ds).getDay();return d!==0&&d!==6;};
 
-  const NavBar=()=><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 18px",borderBottom:"1px solid #E5E7EB",background:"#fff",position:"sticky",top:0,zIndex:100}}>
-    <div style={{display:"flex",alignItems:"center",gap:10}}>
-      <div style={{width:30,height:30,borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,background:"linear-gradient(135deg,#D94F00,#DC2626)",color:"#fff"}}>📺</div>
-      <div>
-        <div style={{fontSize:14,fontWeight:700}}>視聴率ダッシュボード</div>
-        <div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",letterSpacing:"0.12em"}}>ANALYTICS PLATFORM — 在名7局</div>
+  const NavBar=()=><div style={{background:"#fff",position:"sticky",top:0,zIndex:100,borderBottom:"1px solid #E5E7EB"}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 18px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <div style={{width:30,height:30,borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,background:"linear-gradient(135deg,#D94F00,#DC2626)",color:"#fff"}}>📺</div>
+        <div>
+          <div style={{fontSize:14,fontWeight:700}}>視聴率ダッシュボード</div>
+          <div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",letterSpacing:"0.12em"}}>ANALYTICS PLATFORM — 在名7局</div>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+        <div style={{display:"flex",borderRadius:7,overflow:"hidden",border:"1px solid #E5E7EB"}}>
+          {[{id:"rating",l:"視聴率"},{id:"share",l:"占拠率"}].map(m=><button key={m.id} onClick={()=>setMetric(m.id)} style={{padding:"4px 13px",border:"none",background:metric===m.id?"#EFF6FF":"#fff",color:metric===m.id?"#2563EB":"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600}}>{m.l}</button>)}
+        </div>
+        <div style={{display:"flex",gap:3}}>
+          {[{id:"dashboard",i:"📊",l:"Dashboard"},{id:"search",i:"🔍",l:"Search"},{id:"analysis",i:"✨",l:"Analysis"}].map(p=><button key={p.id} onClick={()=>setPage(p.id)} style={{padding:"5px 14px",borderRadius:6,border:"none",background:page===p.id?"#FFF7ED":"transparent",color:page===p.id?"#D94F00":"#9CA3AF",cursor:"pointer",fontSize:11.5,fontWeight:600,fontFamily:"monospace"}}>{p.i} {p.l}</button>)}
+        </div>
       </div>
     </div>
-    <div style={{display:"flex",gap:8,alignItems:"center"}}>
-      <div style={{display:"flex",borderRadius:7,overflow:"hidden",border:"1px solid #E5E7EB"}}>
-        {[{id:"rating",l:"視聴率"},{id:"share",l:"占拠率"}].map(m=><button key={m.id} onClick={()=>setMetric(m.id)} style={{padding:"4px 13px",border:"none",background:metric===m.id?"#EFF6FF":"#fff",color:metric===m.id?"#2563EB":"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600}}>{m.l}</button>)}
-      </div>
-      <div style={{display:"flex",gap:3}}>
-        {[{id:"dashboard",i:"📊",l:"Dashboard"},{id:"search",i:"🔍",l:"Search"},{id:"analysis",i:"✨",l:"Analysis"}].map(p=><button key={p.id} onClick={()=>setPage(p.id)} style={{padding:"5px 14px",borderRadius:6,border:"none",background:page===p.id?"#FFF7ED":"transparent",color:page===p.id?"#D94F00":"#9CA3AF",cursor:"pointer",fontSize:11.5,fontWeight:600,fontFamily:"monospace"}}>{p.i} {p.l}</button>)}
-      </div>
+    <div style={{background:"#FFFBEB",borderTop:"1px solid #FDE68A",padding:"3px 18px",fontSize:10,color:"#92400E",display:"flex",alignItems:"center",gap:5}}>
+      <span style={{fontSize:11}}>⚠️</span>
+      <span>視聴率データは実データ（名古屋地区・世帯視聴率）を使用しています。番組内容・コーナー情報はデモ用のダミーデータです。</span>
     </div>
   </div>;
 
