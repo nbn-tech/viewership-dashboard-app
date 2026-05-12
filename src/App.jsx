@@ -1596,7 +1596,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,
           {WEEK_RANGES.map(w=><option key={w.id} value={w.id}>{w.label}</option>)}
         </select>}
       <div style={{display:"flex",borderRadius:7,overflow:"hidden",border:"1px solid #E5E7EB"}}>
-        {[{id:"morning",l:"朝 6:00–8:00"},{id:"evening",l:"夕方 16:40–19:00"}].map(s=><button key={s.id} onClick={()=>setSlot(s.id)} style={{padding:"4px 13px",border:"none",background:slot===s.id?"#FFF7ED":"#fff",color:slot===s.id?"#D94F00":"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600}}>{s.l}</button>)}
+        {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 16:00–19:30"}].map(s=><button key={s.id} onClick={()=>setSlot(s.id)} style={{padding:"4px 13px",border:"none",background:slot===s.id?"#FFF7ED":"#fff",color:slot===s.id?"#D94F00":"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600}}>{s.l}</button>)}
       </div>
       <button onClick={runAnalysis} disabled={loading} style={{padding:"5px 18px",borderRadius:7,border:"none",background:loading?"#F3F4F6":"linear-gradient(135deg,#D94F00,#DC2626)",color:loading?"#9CA3AF":"#fff",cursor:loading?"wait":"pointer",fontSize:12,fontWeight:700,display:"flex",alignItems:"center",gap:6}}>
         {loading?<><div style={{width:13,height:13,border:"2px solid #D1D5DB",borderTopColor:"#9CA3AF",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/> 分析中…</>:<>✨ 分析する</>}
