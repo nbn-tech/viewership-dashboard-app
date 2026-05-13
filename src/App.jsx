@@ -922,7 +922,7 @@ const apiClient = {
 
   // 統括分析
   async generateOverview(periodLabel, ctx){
-    const prompt=`あなたは名古屋テレビ(NBN)の視聴率担当アナリストです。以下は在名7局の${periodLabel}の番組・コーナー別占拠率データです。NBN現場スタッフ向けの視聴率レポートを作成してください。\n\n【データの読み方(必ず守ること)】\n- 指標は占拠率(その時間帯に視聴中のテレビ全世帯のうち何%がその局を見ているか)\n- 「裏局↓マイナス(NBNへ流入)」= 視聴者がNBNに流れてきた\n- 「裏局↑プラス(NBNから流出)」= 視聴者がNBNから他局へ流れた\n\n${ctx}\n\n【出力形式(必ず守ること)】\n・■ で始まる行はセクション見出しとして使用\n・具体的な時刻・番組名・数値を必ず記載(例: 7:03 CTV「ZIP!」終了後に+1.4pt流入)\n・→ を使って流れや因果を表現\n\n以下のセクション構成で作成してください:\n\n■ NBN各番組の動き\n(番組ごとに冒頭・中盤・終盤の流れ、ピーク・ボトムの時刻と数値、急上昇・急降下した箇所)\n\n■ 競合各局の動き\n(各局の主要番組の概況、NBNへの影響)\n\n■ 流入・流出まとめ\n(NBN視点で、どの局の何の番組終了/開始時に視聴者が動いたか、時刻と数値を箇条書きで)\n\n■ 総評\n(この期間のNBNパフォーマンス評価、2〜3行)`;
+    const prompt=`あなたは名古屋テレビ(NBN)の視聴率担当アナリストです。以下は在名7局の${periodLabel}の番組・コーナー別占拠率データです。NBN現場スタッフ向けの視聴率レポートを作成してください。\n\n【データの読み方(必ず守ること)】\n- 指標は占拠率(その時間帯に視聴中のテレビ全世帯のうち何%がその局を見ているか)\n- 「裏局↓マイナス(NBNへ流入)」= 視聴者がNBNに流れてきた\n- 「裏局↑プラス(NBNから流出)」= 視聴者がNBNから他局へ流れた\n\n${ctx}\n\n【出力形式(必ず守ること)】\n・■ で始まる行はセクション見出しとして使用\n・具体的な時刻・番組名・数値を必ず記載(例: 7:03 CTV「ZIP!」終了後に+1.4pt流入)\n・→ を使って流れや因果を表現\n\n以下のセクション構成で作成してください(総評・示唆は含めないこと):\n\n■ NBN各番組の動き\n(番組ごとに冒頭・中盤・終盤の流れ、ピーク・ボトムの時刻と数値、急上昇・急降下した箇所)\n\n■ 競合各局の動き\n(各局の主要番組の概況、NBNへの影響)\n\n■ 流入・流出まとめ\n(NBN視点で、どの局の何の番組終了/開始時に視聴者が動いたか、時刻と数値を箇条書きで)\n\n■ 最高占拠率のタイミング\n(何時何分・どのコーナー・何%・なぜ高かったか)\n\n■ 急上昇コーナー TOP3\n(コーナー名・時間帯・上昇幅・要因)\n\n■ 急降下コーナー TOP3\n(コーナー名・時間帯・下降幅・要因)`;
     if(API_CONFIG.useMock){
       const text=await _callClaudeDirect([{role:"user",content:prompt}],8000);
       return{prompt,text};
@@ -933,7 +933,7 @@ const apiClient = {
 
   // ハイライト分析
   async generateHighlight(prevPrompt, prevText){
-    const followup=`同じデータについて「視聴率ハイライト」として以下のセクション構成で作成してください。具体的な時刻・番組名・数値を必ず記載すること。\n\n■ 最高占拠率のタイミング\n(何時何分・どのコーナー・何%・なぜ高かったか)\n\n■ 急上昇コーナー TOP3\n(コーナー名・時間帯・上昇幅・要因)\n\n■ 急降下コーナー TOP3\n(コーナー名・時間帯・下降幅・要因)\n\n■ 注目の視聴者移動\n(裏番組との流入・流出で特に大きかった動き、具体的な時刻と局名)\n\n■ 今後の示唆\n(編成・制作への提言を箇条書きで2〜3点)`;
+    const followup=`上記の分析データをもとに、以下の2セクションのみを作成してください。根拠は上の分析に書いてあるので、ここでは結論だけを簡潔に書くこと。\n\n■ 総評\n(この期間のNBNのパフォーマンスを3〜4行で評価。良かった点・課題点を具体的に)\n\n■ 今後の示唆\n(編成・制作担当者への提言を箇条書きで3〜4点。具体的な番組名・コーナー名・時間帯を使って記載)`;
     if(API_CONFIG.useMock){
       return await _callClaudeDirect([
         {role:"user",content:prevPrompt},
@@ -1708,7 +1708,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,
         {overviewText&&<div style={{marginBottom:24}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
             <span style={{background:"linear-gradient(135deg,#D94F00,#DC2626)",color:"#fff",fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:4}}>1</span>
-            <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>視聴率・占拠率の攻防 全体統括</span>
+            <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>傾向・動きの分析（根拠）</span>
           </div>
           <div style={{background:"#fff",border:"1px solid #F3F4F6",borderRadius:8,padding:"16px 18px",lineHeight:1.8}}>
             {renderMd(overviewText)}
@@ -1717,7 +1717,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,
         {highlightText&&<div>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
             <span style={{background:"linear-gradient(135deg,#2563EB,#6366F1)",color:"#fff",fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:4}}>2</span>
-            <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>全体視聴率ハイライト</span>
+            <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>総評・今後の示唆</span>
           </div>
           <div style={{background:"#fff",border:"1px solid #F3F4F6",borderRadius:8,padding:"16px 18px",lineHeight:1.8}}>
             {renderMd(highlightText)}
