@@ -922,7 +922,7 @@ const apiClient = {
 
   // 統括分析
   async generateOverview(periodLabel, ctx){
-    const prompt=`あなたは名古屋テレビ(NBN)の視聴率担当アナリストです。以下は在名7局の${periodLabel}の番組・コーナー別占拠率データです。NBN現場スタッフ向けの視聴率レポートを作成してください。\n\n【データの読み方(必ず守ること)】\n- 指標は占拠率(その時間帯に視聴中のテレビ全世帯のうち何%がその局を見ているか)\n- 「裏局↓マイナス(NBNへ流入)」= 視聴者がNBNに流れてきた\n- 「裏局↑プラス(NBNから流出)」= 視聴者がNBNから他局へ流れた\n\n${ctx}\n\n【出力形式(必ず守ること)】\n・■ で始まる行はセクション見出しとして使用\n・具体的な時刻・番組名・数値を必ず記載(例: 7:03 CTV「ZIP!」終了後に+1.4pt流入)\n・→ を使って流れや因果を表現\n\n以下のセクション構成で作成してください(総評・示唆は含めないこと):\n\n■ NBN各番組の動き\n(番組ごとに冒頭・中盤・終盤の流れ、ピーク・ボトムの時刻と数値、急上昇・急降下した箇所)\n\n■ 競合各局の動き\n(各局の主要番組の概況、NBNへの影響)\n\n■ 流入・流出まとめ\n(NBN視点で、どの局の何の番組終了/開始時に視聴者が動いたか、時刻と数値を箇条書きで)\n\n■ 最高占拠率のタイミング\n(何時何分・どのコーナー・何%・なぜ高かったか)\n\n■ 急上昇コーナー TOP3\n(コーナー名・時間帯・上昇幅・要因)\n\n■ 急降下コーナー TOP3\n(コーナー名・時間帯・下降幅・要因)`;
+    const prompt=`あなたは名古屋テレビ(NBN)の視聴率担当アナリストです。以下は在名7局の${periodLabel}の番組・コーナー別占拠率データです。NBN現場スタッフ向けの視聴率レポートを作成してください。\n\n【データの読み方(必ず守ること)】\n- 指標は占拠率(その時間帯に視聴中のテレビ全世帯のうち何%がその局を見ているか)\n- 「裏局↓マイナス(NBNへ流入)」= 視聴者がNBNに流れてきた\n- 「裏局↑プラス(NBNから流出)」= 視聴者がNBNから他局へ流れた\n\n${ctx}\n\n【出力形式(必ず守ること)】\n・■ で始まる行はセクション見出しとして使用\n・具体的な時刻・番組名・数値を必ず記載(例: 7:03 CTV「ZIP!」終了後に+1.4pt流入)\n・→ を使って流れや因果を表現\n\n以下の2セクションのみ作成してください(他のセクションは含めないこと):\n\n■ NBN各番組の動き\n(番組ごとに冒頭・中盤・終盤の流れ、ピーク・ボトムの時刻と数値、急上昇・急降下した箇所)\n\n■ 競合各局の動き\n(各局の主要番組の概況、NBNへの影響)`;
     if(API_CONFIG.useMock){
       const text=await _callClaudeDirect([{role:"user",content:prompt}],8000);
       return{prompt,text};
@@ -933,7 +933,7 @@ const apiClient = {
 
   // ハイライト分析
   async generateHighlight(prevPrompt, prevText){
-    const followup=`上記の分析データをもとに、以下の2セクションのみを作成してください。根拠は上の分析に書いてあるので、ここでは結論だけを簡潔に書くこと。\n\n■ 総評\n(この期間のNBNのパフォーマンスを3〜4行で評価。良かった点・課題点を具体的に)\n\n■ 今後の示唆\n(編成・制作担当者への提言を箇条書きで3〜4点。具体的な番組名・コーナー名・時間帯を使って記載)`;
+    const followup=`続けて、以下の4セクションを追加してください(総評・示唆は含めないこと)。\n\n■ 流入・流出まとめ\n(NBN視点で、どの局の何の番組終了/開始時に視聴者が動いたか、時刻と数値を箇条書きで)\n\n■ 最高占拠率のタイミング\n(何時何分・どのコーナー・何%・なぜ高かったか)\n\n■ 急上昇コーナー TOP3\n(コーナー名・時間帯・上昇幅・要因)\n\n■ 急降下コーナー TOP3\n(コーナー名・時間帯・下降幅・要因)`;
     if(API_CONFIG.useMock){
       return await _callClaudeDirect([
         {role:"user",content:prevPrompt},
@@ -942,6 +942,16 @@ const apiClient = {
       ],6000);
     }
     const{text}=await _callBackend("/api/analysis/highlight",{prevPrompt,prevText,followup});
+    return text;
+  },
+
+  // 総評・今後の示唆（根拠分析をもとに結論だけ生成）
+  async generateConclusion(combinedAnalysis){
+    const prompt=`以下はNBNの視聴率分析レポートです。この内容をもとに、現場スタッフ向けの総評と今後の示唆を作成してください。\n\n${combinedAnalysis}\n\n【出力形式(必ず守ること)】\n・■ で始まる行はセクション見出しとして使用\n・具体的な番組名・コーナー名・数値を使って記載\n・2セクションのみ出力\n\n■ 総評\n(この期間のNBNのパフォーマンスを3〜4行で評価。良かった点・課題点を具体的に)\n\n■ 今後の示唆\n(編成・制作担当者への提言を箇条書きで3〜4点。具体的な番組名・コーナー名・時間帯を使って記載)`;
+    if(API_CONFIG.useMock){
+      return await _callClaudeDirect([{role:"user",content:prompt}],2000);
+    }
+    const{text}=await _callBackend("/api/analysis/conclusion",{combinedAnalysis});
     return text;
   },
 
@@ -1504,6 +1514,7 @@ function computeTopicSummary(query,ratingsCache){
 function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,
   mode,setMode,selDate,setSelDate,selWeek,setSelWeek,slot,setSlot,
   tab,setTab,overviewText,setOverviewText,highlightText,setHighlightText,
+  conclusionText,setConclusionText,
   topicQuery,setTopicQuery,topicResult,setTopicResult,analysisLabel,setAnalysisLabel,
   topicCandidates,setTopicCandidates,topicSelected,setTopicSelected,topicStep,setTopicStep}){
   const[loading,setLoading]=useState(false);
@@ -1511,6 +1522,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,
   const[topicLoading,setTopicLoading]=useState(false);
   const[error,setError]=useState(null);
   const[cachedAt,setCachedAt]=useState(null);
+  const[showEvidence,setShowEvidence]=useState(false);
 
   const dow=ds=>["日","月","火","水","木","金","土"][new Date(ds).getDay()];
   const activeDates=mode==="daily"?[selDate]:(WEEK_RANGES.find(w=>w.id===selWeek)?.dates||[]);
@@ -1522,18 +1534,17 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,
     try{
       const raw=localStorage.getItem(cacheKey);
       if(raw){
-        const{ov,hl,lb,savedAt}=JSON.parse(raw);
+        const{ov,hl,cl,lb,savedAt}=JSON.parse(raw);
         setOverviewText(ov||"");
         setHighlightText(hl||"");
+        setConclusionText(cl||"");
         setAnalysisLabel(lb||label);
         setCachedAt(savedAt||null);
       }else{
-        setOverviewText("");
-        setHighlightText("");
-        setCachedAt(null);
+        setOverviewText("");setHighlightText("");setConclusionText("");setCachedAt(null);
       }
     }catch{
-      setOverviewText("");setHighlightText("");setCachedAt(null);
+      setOverviewText("");setHighlightText("");setConclusionText("");setCachedAt(null);
     }
   // eslint-disable-next-line
   },[cacheKey]);
@@ -1544,30 +1555,33 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,
       try{
         const raw=localStorage.getItem(cacheKey);
         if(raw){
-          const{ov,hl,lb,savedAt}=JSON.parse(raw);
-          setOverviewText(ov||"");setHighlightText(hl||"");
+          const{ov,hl,cl,lb,savedAt}=JSON.parse(raw);
+          setOverviewText(ov||"");setHighlightText(hl||"");setConclusionText(cl||"");
           setAnalysisLabel(lb||label);setCachedAt(savedAt||null);
           return;
         }
       }catch{}
     }
     setError(null);setLoading(true);setStreaming(true);
-    setOverviewText("");setHighlightText("");setCachedAt(null);
+    setOverviewText("");setHighlightText("");setConclusionText("");setCachedAt(null);
     setAnalysisLabel(label);
     const ctx=buildAnalysisContext(activeDates,slot,ratingsCache);
     const slotLabel=slot==="morning"?"朝帯（6:00-8:00）":"夕方帯（16:40-19:00）";
     const periodLabel=mode==="daily"?`${activeDates[0]} ${slotLabel}`:`${label}`;
 
     try{
-      // Section 1: 全体統括(apiClient経由)
+      // Phase 1: NBNの動き + 競合の動き
       const{prompt:p1,text:t1}=await apiClient.generateOverview(periodLabel,ctx);
       setOverviewText(t1);
-      // Section 2: ハイライト(会話継続)
+      // Phase 2: 流入流出まとめ + ハイライト (Phase1の続き)
       const t2=await apiClient.generateHighlight(p1,t1);
       setHighlightText(t2);
+      // Phase 3: 総評・今後の示唆 (Phase1+2をまとめて渡す)
+      const t3=await apiClient.generateConclusion(t1+"\n\n"+t2);
+      setConclusionText(t3);
       // キャッシュに保存
       const savedAt=new Date().toLocaleString("ja-JP",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});
-      localStorage.setItem(cacheKey,JSON.stringify({ov:t1,hl:t2,lb:label,savedAt}));
+      localStorage.setItem(cacheKey,JSON.stringify({ov:t1,hl:t2,cl:t3,lb:label,savedAt}));
       setCachedAt(savedAt);
     }catch(e){
       setError("分析エラー: "+e.message);
@@ -1698,32 +1712,58 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,
 
     {/* Tab: Overview */}
     {tab==="overview"&&<div style={{padding:"20px 18px",maxWidth:900}}>
-      {!overviewText&&!loading&&<div style={{textAlign:"center",padding:"60px 0",color:"#9CA3AF",fontSize:13}}>
+      {!overviewText&&!conclusionText&&!loading&&<div style={{textAlign:"center",padding:"60px 0",color:"#9CA3AF",fontSize:13}}>
         <div style={{fontSize:40,marginBottom:12,opacity:0.3}}>✨</div>
         条件を選んで「分析する」を押すと、AIによる分析が生成されます<br/>
         <span style={{fontSize:11,marginTop:6,display:"block"}}>対象: {label}</span>
       </div>}
-      {(overviewText||highlightText)&&<>
+      {(overviewText||highlightText||conclusionText)&&<>
         <div style={{fontSize:11,color:"#9CA3AF",fontFamily:"monospace",marginBottom:16}}>分析対象: {analysisLabel||label}</div>
-        {overviewText&&<div style={{marginBottom:24}}>
+
+        {/* ① 総評・今後の示唆（常に上・展開済み） */}
+        {conclusionText&&<div style={{marginBottom:20}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-            <span style={{background:"linear-gradient(135deg,#D94F00,#DC2626)",color:"#fff",fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:4}}>1</span>
-            <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>傾向・動きの分析（根拠）</span>
-          </div>
-          <div style={{background:"#fff",border:"1px solid #F3F4F6",borderRadius:8,padding:"16px 18px",lineHeight:1.8}}>
-            {renderMd(overviewText)}
-          </div>
-        </div>}
-        {highlightText&&<div>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-            <span style={{background:"linear-gradient(135deg,#2563EB,#6366F1)",color:"#fff",fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:4}}>2</span>
+            <span style={{background:"linear-gradient(135deg,#D94F00,#DC2626)",color:"#fff",fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:4}}>★</span>
             <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>総評・今後の示唆</span>
           </div>
-          <div style={{background:"#fff",border:"1px solid #F3F4F6",borderRadius:8,padding:"16px 18px",lineHeight:1.8}}>
-            {renderMd(highlightText)}
+          <div style={{background:"#FFF7ED",border:"1px solid #FED7AA",borderRadius:8,padding:"16px 18px",lineHeight:1.8}}>
+            {renderMd(conclusionText)}
           </div>
         </div>}
-        {loading&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"12px 0",color:"#6B7280",fontSize:12}}>
+        {!conclusionText&&loading&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0",color:"#D94F00",fontSize:12,marginBottom:16}}>
+          <div style={{width:14,height:14,border:"2px solid #FED7AA",borderTopColor:"#D94F00",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>総評・今後の示唆を生成中…
+        </div>}
+
+        {/* ② 根拠となる分析（折りたたみ） */}
+        {(overviewText||highlightText)&&<div style={{marginBottom:16}}>
+          <button onClick={()=>setShowEvidence(v=>!v)} style={{display:"flex",alignItems:"center",gap:6,padding:"7px 12px",borderRadius:7,border:"1px solid #E5E7EB",background:"#F9FAFB",color:"#6B7280",cursor:"pointer",fontSize:12,fontWeight:600,width:"100%",textAlign:"left"}}>
+            <span style={{fontSize:10}}>{showEvidence?"▲":"▼"}</span>
+            根拠となる詳細分析を{showEvidence?"閉じる":"見る"}
+            <span style={{marginLeft:"auto",fontSize:10,color:"#9CA3AF"}}>NBNの動き・競合・流入流出・TOP3</span>
+          </button>
+          {showEvidence&&<div style={{marginTop:10,display:"flex",flexDirection:"column",gap:16}}>
+            {overviewText&&<div>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                <span style={{background:"#E5E7EB",color:"#374151",fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:4}}>1</span>
+                <span style={{fontSize:13,fontWeight:600,color:"#374151"}}>NBNの動き・競合各局の動き</span>
+              </div>
+              <div style={{background:"#fff",border:"1px solid #F3F4F6",borderRadius:8,padding:"14px 16px",lineHeight:1.8}}>
+                {renderMd(overviewText)}
+              </div>
+            </div>}
+            {highlightText&&<div>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                <span style={{background:"#E5E7EB",color:"#374151",fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:4}}>2</span>
+                <span style={{fontSize:13,fontWeight:600,color:"#374151"}}>流入・流出まとめ・ハイライト</span>
+              </div>
+              <div style={{background:"#fff",border:"1px solid #F3F4F6",borderRadius:8,padding:"14px 16px",lineHeight:1.8}}>
+                {renderMd(highlightText)}
+              </div>
+            </div>}
+          </div>}
+        </div>}
+
+        {loading&&overviewText&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"12px 0",color:"#6B7280",fontSize:12}}>
           <div style={{width:14,height:14,border:"2px solid #E5E7EB",borderTopColor:"#D94F00",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>生成中…
         </div>}
       </>}
@@ -1977,6 +2017,7 @@ export default function App(){
   const[aTab,setATab]=useState("overview");
   const[aOverview,setAOverview]=useState("");
   const[aHighlight,setAHighlight]=useState("");
+  const[aConclusion,setAConclusion]=useState("");
   const[aTopicQuery,setATopicQuery]=useState("");
   const[aTopicResult,setATopicResult]=useState(null);
   const[aTopicCandidates,setATopicCandidates]=useState([]); // step2の候補一覧
@@ -2042,6 +2083,7 @@ export default function App(){
         selWeek={aWeek} setSelWeek={setAWeek} slot={aSlot} setSlot={setASlot}
         tab={aTab} setTab={setATab} overviewText={aOverview} setOverviewText={setAOverview}
         highlightText={aHighlight} setHighlightText={setAHighlight}
+        conclusionText={aConclusion} setConclusionText={setAConclusion}
         topicQuery={aTopicQuery} setTopicQuery={setATopicQuery}
         topicResult={aTopicResult} setTopicResult={setATopicResult}
         analysisLabel={aLabel} setAnalysisLabel={setALabel}
