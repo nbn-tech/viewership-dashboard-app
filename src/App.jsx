@@ -2029,7 +2029,7 @@ export default function App(){
   const dData=metric==="share"?sData:rData;
   const tog=id=>setSel(p=>p.includes(id)?p.filter(s=>s!==id):[...p,id]);
   const click=m=>{setSelMin(m);const r=rData.find(d=>d.minute===m),s=sData.find(d=>d.minute===m);setSelData({rating:r,share:s});setHL(null);};
-  const dates=useMemo(()=>{const d=[];for(let i=1;i<=14;i++)d.push(`2026-04-${String(i).padStart(2,"0")}`);return d;},[]);
+  const dates=useMemo(()=>{const d=[];for(let i=1;i<=14;i++)d.push(`2026-04-${String(i).padStart(2,"0")}`);d.push("2026-04-17");return d;},[]);
   const dow=ds=>["日","月","火","水","木","金","土"][new Date(ds).getDay()];
   const isWd=ds=>{const d=new Date(ds).getDay();return d!==0&&d!==6;};
 
