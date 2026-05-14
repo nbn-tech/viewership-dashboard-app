@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s \"https://api.github.com/repos/dbghelp/JCOM-TV-EPG/commits?path=jcom.xml&per_page=100&page=3\" --max-time 30)",
+      "Bash(curl -s \"https://api.github.com/repos/dbghelp/JCOM-TV-EPG/commits?path=jcom.xml&per_page=100&page=5\" --max-time 30)",
+      "Read(//tmp/**)",
+      "Bash(node -e ' *)",
+      "Bash(curl -s \"https://api.github.com/repos/dbghelp/JCOM-TV-EPG/git/commits/f1992e84bb5ef03a1b50411b80f2327f0b533376\" --max-time 20)",
+      "Bash(curl -s \"https://api.github.com/repos/dbghelp/JCOM-TV-EPG/git/trees/3e283f70e905860ea48f79cc29c0b7983815efc8\" --max-time 20)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/dbghelp/JCOM-TV-EPG/f1992e84bb5ef03a1b50411b80f2327f0b533376/jcom.xml\" --max-time 60)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/dbghelp/JCOM-TV-EPG/f1992e84bb5ef03a1b50411b80f2327f0b533376/jcom.xml\" --max-time 120)"
+    ]
+  }
+}
