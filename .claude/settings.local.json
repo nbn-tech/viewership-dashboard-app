@@ -4,7 +4,8 @@
       "Bash(node -e ' *)",
       "Bash(python /tmp/parse_jcom.py)",
       "Bash(python -c ' *)",
-      "Read(//c/Users/NBN/AppData/Local/Temp/**)"
+      "Read(//c/Users/NBN/AppData/Local/Temp/**)",
+      "Bash(npm run *)"
     ]
   }
 }

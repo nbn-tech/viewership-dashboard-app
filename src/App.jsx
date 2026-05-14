@@ -2027,6 +2027,7 @@ export default function App(){
   const[selMin,setSelMin]=useState(null);
   const[selData,setSelData]=useState(null);
   const[hl,setHL]=useState(null);
+  const videoRef=useRef(null);
   const[page,setPage]=useState("dashboard");
   const[metric,setMetric]=useState("rating");
   const[dashMode,setDashMode]=useState("chart");
@@ -2059,6 +2060,12 @@ export default function App(){
   const dData=metric==="share"?sData:rData;
   const tog=id=>setSel(p=>p.includes(id)?p.filter(s=>s!==id):[...p,id]);
   const click=m=>{setSelMin(m);const r=rData.find(d=>d.minute===m),s=sData.find(d=>d.minute===m);setSelData({rating:r,share:s});setHL(null);};
+  useEffect(()=>{
+    if(videoRef.current&&date==="2026-04-17"&&slot==="morning"&&selMin!==null){
+      const offset=(selMin-360)*60;
+      if(offset>=0)videoRef.current.currentTime=offset;
+    }
+  },[selMin,date,slot]);
   const dates=useMemo(()=>{const d=[];for(let i=1;i<=14;i++)d.push(`2026-04-${String(i).padStart(2,"0")}`);d.push("2026-04-17");return d;},[]);
   const dow=ds=>["日","月","火","水","木","金","土"][new Date(ds).getDay()];
   const isWd=ds=>{const d=new Date(ds).getDay();return d!==0&&d!==6;};
@@ -2152,6 +2159,13 @@ export default function App(){
           <SegmentBands slot={slot} sel={sel} selMin={selMin} onClickMinute={click} date={date}/>
         </div>
         <div style={{padding:"0 18px 16px"}}><SegmentLegend/></div>
+        {date==="2026-04-17"&&slot==="morning"&&<div style={{padding:"0 18px 20px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
+            <span style={{fontSize:11,fontWeight:700,color:"#374151"}}>📹 4/17 ドデスカ! 放送動画</span>
+            {selMin!==null&&<span style={{fontSize:10,color:"#6B7280",fontFamily:"monospace"}}>→ {m2t(selMin)} にシーク済み</span>}
+          </div>
+          <video ref={videoRef} src="https://dodesca-video.s3.ap-northeast-1.amazonaws.com/0417.mp4" controls style={{width:"100%",borderRadius:8,background:"#000",maxHeight:240}}/>
+        </div>}
       </div>
       <div style={{width:340,minWidth:290,flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column"}}>
         <Panel selMin={selMin} rData={selData} allR={rData} allS={sData} sel={sel} onHL={setHL} metric={metric} date={date}/>
