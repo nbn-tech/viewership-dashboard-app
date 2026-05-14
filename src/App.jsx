@@ -813,7 +813,7 @@ function TimetableView({slot,sel,allR,allS,metric,date}){
 }
 
 // ============= Search Page =============
-const ALL_DATES=(()=>{const d=[];for(let i=1;i<=14;i++){d.push(`2026-04-${String(i).padStart(2,"0")}`);}return d;})();
+const ALL_DATES=(()=>{const d=[];for(let i=1;i<=14;i++){d.push(`2026-04-${String(i).padStart(2,"0")}`);}d.push("2026-04-17");return d;})();
 const ALL_SLOTS=["morning","evening"];
 
 function buildCornerIndex(){
