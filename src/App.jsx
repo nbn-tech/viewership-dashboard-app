@@ -558,7 +558,8 @@ function getDailyMorn(date){
   const result=buildDaily(MORN_TPL,date);
   if(date==="2026-04-17"){
     const nbnPre=result.NBN.slice(0,2);
-    result.NBN=[...nbnPre,["ドデスカ!","06:00","08:30",DODESCA_0417_CORNERS]];
+    const morning=result.NBN[3];
+    result.NBN=[...nbnPre,["ドデスカ!","06:00","08:00",DODESCA_0417_CORNERS],morning];
   }
   return result;
 }
