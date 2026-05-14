@@ -2062,7 +2062,7 @@ export default function App(){
   const click=m=>{setSelMin(m);const r=rData.find(d=>d.minute===m),s=sData.find(d=>d.minute===m);setSelData({rating:r,share:s});setHL(null);};
   useEffect(()=>{
     if(videoRef.current&&date==="2026-04-17"&&slot==="morning"&&selMin!==null){
-      const offset=(selMin-360)*60;
+      const offset=(selMin-360)*60+77;
       if(offset>=0)videoRef.current.currentTime=offset;
     }
   },[selMin,date,slot]);
@@ -2164,7 +2164,7 @@ export default function App(){
             <span style={{fontSize:11,fontWeight:700,color:"#374151"}}>📹 4/17 ドデスカ! 放送動画</span>
             {selMin!==null&&<span style={{fontSize:10,color:"#6B7280",fontFamily:"monospace"}}>→ {m2t(selMin)} にシーク済み</span>}
           </div>
-          <video ref={videoRef} src="https://dodesca-video.s3.ap-northeast-1.amazonaws.com/0417.mp4" controls style={{width:"100%",borderRadius:8,background:"#000",maxHeight:240}}/>
+          <video ref={videoRef} src="https://dodesca-video.s3.ap-northeast-1.amazonaws.com/0417.mp4" controls style={{width:"100%",borderRadius:8,background:"#000",maxHeight:400}}/>
         </div>}
       </div>
       <div style={{width:340,minWidth:290,flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column"}}>
