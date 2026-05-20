@@ -766,9 +766,8 @@ function SegmentBands({slot,sel,selMin,onClickMinute,date}){
   </div>;
 }
 
-function TimetableView({slot,sel,allR,allS,metric,date}){
+function TimetableView({slot,sel,allR,allS,metric,date,onCornerClick}){
   const startMin=slot==="morning"?330:960, endMin=slot==="morning"?510:1170;
-  const[hoverC,setHoverC]=useState(null);
   const fmt=v=>v!=null?(metric==="share"?v.toFixed(1):v.toFixed(2))+"%":"—";
   const getVal=(src,sid,min)=>{const e=src?.find(d=>d.minute===min);return e?e[sid]:null;};
   const colWidth=220;
@@ -809,8 +808,9 @@ function TimetableView({slot,sel,allR,allS,metric,date}){
               const df=(iV!=null&&oV!=null)?oV-iV:null;
               const isCM=c.segment==="cm";
               const compact=height<40;
-              return <div key={i} onMouseEnter={()=>setHoverC({...c,sid,iV,oV,df})} onMouseLeave={()=>setHoverC(null)}
-                style={{position:"absolute",top,left:4,right:4,height:height-2,background:isCM?"#FAFAFA":"#fff",border:`1px solid #E5E7EB`,borderLeft:`3px solid ${sg.c}`,borderRadius:4,padding:"4px 6px",overflow:"hidden",cursor:"pointer",fontSize:10,display:"flex",flexDirection:"column",gap:2}}>
+              return <div key={i} onClick={()=>onCornerClick&&onCornerClick({...c,stId:sid,date,slot})}
+                style={{position:"absolute",top,left:4,right:4,height:height-2,background:isCM?"#FAFAFA":"#fff",border:`1px solid #E5E7EB`,borderLeft:`3px solid ${sg.c}`,borderRadius:4,padding:"4px 6px",overflow:"hidden",cursor:"pointer",fontSize:10,display:"flex",flexDirection:"column",gap:2}}
+                onMouseEnter={e=>e.currentTarget.style.background=isCM?"#F3F4F6":"#F9FAFB"} onMouseLeave={e=>e.currentTarget.style.background=isCM?"#FAFAFA":"#fff"}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:4}}>
                   <span style={{fontSize:8.5,fontFamily:"monospace",color:"#9CA3AF",flexShrink:0}}>{c.startMin}</span>
                   <span style={{background:sg.c,color:"#fff",fontSize:8,fontWeight:700,padding:"0.5px 4px",borderRadius:2,flexShrink:0}}>{sg.lb}</span>
@@ -829,16 +829,6 @@ function TimetableView({slot,sel,allR,allS,metric,date}){
         </div>;
       })}
     </div>
-    {hoverC&&<div style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",background:"rgba(17,24,39,0.95)",color:"#fff",padding:"10px 14px",borderRadius:6,fontSize:11,maxWidth:500,zIndex:50,boxShadow:"0 4px 20px rgba(0,0,0,0.2)"}}>
-      <div style={{fontSize:10,color:"#9CA3AF",marginBottom:3}}>📺 {hoverC.progName}</div>
-      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
-        <span style={{background:SEG[hoverC.segment]?.c,color:"#fff",fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:3}}>{SEG[hoverC.segment]?.lb}</span>
-        <b style={{fontSize:12}}>{hoverC.title}</b>
-        <span style={{color:"#9CA3AF",fontSize:10}}>({hoverC.startMin}–{hoverC.endMin})</span>
-      </div>
-      <div style={{color:"#D1D5DB",lineHeight:1.5}}>{hoverC.summary}</div>
-      {hoverC.tags.length>0&&<div style={{marginTop:5,display:"flex",gap:3,flexWrap:"wrap"}}>{hoverC.tags.map(t=><span key={t} style={{fontSize:9,padding:"1px 5px",background:"rgba(255,255,255,0.1)",borderRadius:2,color:"#D1D5DB"}}>#{t}</span>)}</div>}
-    </div>}
   </div>;
 }
 
@@ -2031,6 +2021,7 @@ export default function App(){
   const[page,setPage]=useState("dashboard");
   const[metric,setMetric]=useState("rating");
   const[dashMode,setDashMode]=useState("chart");
+  const[timetableModal,setTimetableModal]=useState(null);
   // Search persistent state
   const[sQuery,setSQuery]=useState("");
   const[sMode,setSMode]=useState(null);
@@ -2173,7 +2164,8 @@ export default function App(){
     </div>:<div style={{padding:"8px 18px 16px"}}>
       <div style={{marginBottom:8}}><Toggle sel={sel} onT={tog}/></div>
       <div style={{marginBottom:10}}><SegmentLegend/></div>
-      <TimetableView slot={slot} sel={sel} allR={rData} allS={sData} metric={metric} date={date}/>
+      <TimetableView slot={slot} sel={sel} allR={rData} allS={sData} metric={metric} date={date} onCornerClick={setTimetableModal}/>
     </div>}
+    {timetableModal&&<CornerModal corner={timetableModal} cache={ratingsCache} onClose={()=>setTimetableModal(null)}/>}
   </div>;
 }
