@@ -1026,11 +1026,11 @@ function ModalChart({rData,sData,mainStId,mainStColor,sM,eM,activeRivals,rivals}
 
   const buildPath=(slice,sid,yFn)=>slice.map((d,i)=>`${i===0?"M":"L"}${xP(i)},${yFn(d[sid])}`).join(" ");
   // For rivals: only draw points within the overlap window [max(csM,sM), min(ceM,eM)]
-  const buildRivalPath=(sid,yFn,rv)=>{
+  const buildRivalPath=(base,sid,yFn,rv)=>{
     const csM=t2m(rv.startMin),ceM=t2m(rv.endMin);
     const ovS=Math.max(csM,sM),ovE=Math.min(ceM,eM);
     let started=false;
-    return baseR.map((d,i)=>{
+    return base.map((d,i)=>{
       if(d.minute<ovS||d.minute>ovE){started=false;return null;}
       const cmd=started?"L":"M";
       started=true;
@@ -1043,7 +1043,7 @@ function ModalChart({rData,sData,mainStId,mainStColor,sM,eM,activeRivals,rivals}
 
   return <svg width="100%" viewBox={`0 0 ${W} ${H*2+GAP}`} style={{display:"block"}}>
     {/* ── Rating chart ── */}
-    <text x={1} y={PT+3} fontSize="8" fill="#9CA3AF" fontFamily="monospace">視聴率</text>
+    <text x={1} y={PT-4} fontSize="8" fill="#9CA3AF" fontFamily="monospace">視聴率</text>
     {ticksR.map(v=><g key={v}>
       <line x1={PL} x2={W-PR} y1={yR(v)} y2={yR(v)} stroke="#F0F0F0" strokeWidth="1"/>
       <text x={PL-3} y={yR(v)+3} fontSize="7" fill="#B0B0B0" fontFamily="monospace" textAnchor="end">{v}%</text>
@@ -1052,7 +1052,7 @@ function ModalChart({rData,sData,mainStId,mainStColor,sM,eM,activeRivals,rivals}
     {activeRivals.map(key=>{
       const rv=rivals.find(r=>r.key===key);if(!rv)return null;
       const rst=ST.find(s=>s.id===rv.sid);
-      return <path key={key} d={buildRivalPath(rv.sid,yR,rv)} fill="none" stroke={rst.c} strokeWidth="1.5" strokeDasharray="4,3" opacity="0.75"/>;
+      return <path key={key} d={buildRivalPath(baseR,rv.sid,yR,rv)} fill="none" stroke={rst.c} strokeWidth="1.5" strokeDasharray="4,3" opacity="0.75"/>;
     })}
     {/* main line */}
     <path d={mainPathR} fill="none" stroke={mainStColor} strokeWidth="2.5" strokeLinecap="round"/>
@@ -1061,7 +1061,7 @@ function ModalChart({rData,sData,mainStId,mainStColor,sM,eM,activeRivals,rivals}
 
     {/* ── Share chart ── */}
     <g transform={`translate(0,${H+GAP})`}>
-      <text x={1} y={PT+3} fontSize="8" fill="#9CA3AF" fontFamily="monospace">占拠率</text>
+      <text x={1} y={PT-4} fontSize="8" fill="#9CA3AF" fontFamily="monospace">占拠率</text>
       {ticksS.map(v=><g key={v}>
         <line x1={PL} x2={W-PR} y1={yS(v)} y2={yS(v)} stroke="#F0F0F0" strokeWidth="1"/>
         <text x={PL-3} y={yS(v)+3} fontSize="7" fill="#B0B0B0" fontFamily="monospace" textAnchor="end">{v}%</text>
@@ -1069,7 +1069,7 @@ function ModalChart({rData,sData,mainStId,mainStColor,sM,eM,activeRivals,rivals}
       {activeRivals.map(key=>{
         const rv=rivals.find(r=>r.key===key);if(!rv)return null;
         const rst=ST.find(s=>s.id===rv.sid);
-        return <path key={key} d={buildRivalPath(rv.sid,yS,rv)} fill="none" stroke={rst.c} strokeWidth="1.5" strokeDasharray="4,3" opacity="0.75"/>;
+        return <path key={key} d={buildRivalPath(baseS,rv.sid,yS,rv)} fill="none" stroke={rst.c} strokeWidth="1.5" strokeDasharray="4,3" opacity="0.75"/>;
       })}
       <path d={mainPathS} fill="none" stroke="#6366F1" strokeWidth="2.5" strokeLinecap="round"/>
       <path d={`${mainPathS} L${xP(n-1)},${PT+cH} L${PL},${PT+cH} Z`} fill="#6366F1" opacity="0.07"/>
