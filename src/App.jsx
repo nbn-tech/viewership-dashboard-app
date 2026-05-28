@@ -1105,9 +1105,20 @@ function ModalChart({rData,sData,mainStId,mainStColor,sM,eM,activeRivals,rivals}
   </svg>;
 }
 
-function CornerModal({corner,cache,onClose}){
+function CornerModal({corner,cache,onClose,onNavigate}){
   const[activeRivals,setActiveRivals]=useState(new Set());
   const st=ST.find(s=>s.id===corner.stId);
+  const navCorners=useMemo(()=>{
+    const tpl=corner.slot==="morning"?getDailyMorn(corner.date):getDailyEve(corner.date);
+    const progs=tpl[corner.stId]||[];
+    const list=[];
+    for(const[n,,,cs] of progs)for(const c of cs)list.push({progName:n,title:c[0],startMin:c[1],endMin:c[2],segment:c[3],tags:c[4],summary:c[5],stId:corner.stId,date:corner.date,slot:corner.slot});
+    return list.sort((a,b)=>t2m(a.startMin)-t2m(b.startMin));
+  },[corner.stId,corner.date,corner.slot]);
+  const navIdx=navCorners.findIndex(c=>c.startMin===corner.startMin&&c.title===corner.title);
+  const prevCorner=navIdx>0?navCorners[navIdx-1]:null;
+  const nextCorner=navIdx<navCorners.length-1?navCorners[navIdx+1]:null;
+  const navBtn=(c,label)=><button onClick={()=>c&&onNavigate&&onNavigate(c)} disabled={!c} style={{background:c?"#F3F4F6":"#FAFAFA",border:"1px solid #E5E7EB",borderRadius:6,width:28,height:28,cursor:c?"pointer":"default",fontSize:13,color:c?"#374151":"#D1D5DB",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{label}</button>;
   const sg=SEG[corner.segment]||SEG.other;
   const sM=t2m(corner.startMin),eM=t2m(corner.endMin);
   const rData=cache[`${corner.date}|${corner.slot}`]||[];
@@ -1175,7 +1186,10 @@ function CornerModal({corner,cache,onClose}){
           {corner.tags.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:4}}>{corner.tags.map(t=><span key={t} style={{padding:"1px 6px",fontSize:9,border:"1px solid #E5E7EB",borderRadius:3,color:"#6B7280",background:"#F9FAFB"}}>#{t}</span>)}</div>}
           <div style={{fontSize:10.5,color:"#6B7280",lineHeight:1.55,padding:"6px 10px",background:"#F9FAFB",borderRadius:5,borderLeft:`2px solid ${st.c}`}}>{corner.summary}</div>
         </div>
-        <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:6,width:28,height:28,cursor:"pointer",fontSize:14,color:"#6B7280",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:5,flexShrink:0}}>
+          <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:6,width:28,height:28,cursor:"pointer",fontSize:14,color:"#6B7280",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+          <div style={{display:"flex",gap:4}}>{navBtn(prevCorner,"◀")}{navBtn(nextCorner,"▶")}</div>
+        </div>
       </div>
 
       {/* Body: left (stats+chart) | right (rivals) */}
@@ -2355,6 +2369,6 @@ export default function App(){
       <div style={{marginBottom:10}}><SegmentLegend/></div>
       <TimetableView slot={slot} sel={sel} allR={rData} allS={sData} metric={metric} date={date} onCornerClick={setTimetableModal}/>
     </div>}
-    {timetableModal&&<CornerModal corner={timetableModal} cache={ratingsCache} onClose={()=>setTimetableModal(null)}/>}
+    {timetableModal&&<CornerModal corner={timetableModal} cache={ratingsCache} onClose={()=>setTimetableModal(null)} onNavigate={setTimetableModal}/>}
   </div>;
 }
