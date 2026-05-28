@@ -30,6 +30,33 @@ const SEG_ORDER = ["news","weather","sports","feature","ent","live","opening","e
 const t2m = t => { const [h,m] = t.split(":").map(Number); return h*60+m; };
 const m2t = m => `${String(Math.floor(m/60)).padStart(2,"0")}:${String(m%60).padStart(2,"0")}`;
 
+// 番組表用: S3 CSV ステーションマッピング & ユーティリティ
+const STATION_MAP={"1":"THK","2":"NHKE","3":"NHK","4":"CTV","5":"CBC","6":"NBN","10":"TVA"};
+const GUIDE_ST_ORDER=["NBN","THK","CTV","CBC","NHK","NHKE","TVA"];
+const ZOOM_HALF=[5,10,15,20,30,45,60,90,120,180]; // 各ズームレベルの片側分数
+
+// 深夜 0:00〜4:59 は翌日扱い（分 + 1440）にして連続した時系列に変換
+function tvt2m(t){const m=t2m(t);return m<300?m+1440:m;}
+
+// S3 CSV をパース: station,title,description,...,start_time,end_time
+function parseGuideCSV(text){
+  const lines=text.split('\n');const programs=[];
+  for(let i=1;i<lines.length;i++){
+    const line=lines[i].trim();if(!line)continue;
+    const cols=line.split(',');if(cols.length<5)continue;
+    const stationStr=cols[0];const title=cols[1];
+    const end_time=cols[cols.length-1].trim();
+    const start_time=cols[cols.length-2].trim();
+    const stMatch=stationStr.match(/^(\d+)\s/);if(!stMatch)continue;
+    const stId=STATION_MAP[stMatch[1]];if(!stId)continue;
+    if(!/^\d{2}:\d{2}$/.test(start_time)||!/^\d{2}:\d{2}$/.test(end_time))continue;
+    const startMin=tvt2m(start_time);let endMin=tvt2m(end_time);
+    if(endMin<=startMin)endMin+=1440;
+    programs.push({stId,title,startMin,endMin,start_time,end_time});
+  }
+  return programs;
+}
+
 // ============================================================
 // デモデータ: コンテンツプール + 番組テンプレート
 // 番組枠・時間・セグメントは毎日固定、コーナーの中身は日替わり
@@ -736,9 +763,9 @@ function SegmentLegend(){
   </div>;
 }
 
-function SegmentBands({slot,sel,selMin,onClickMinute,date}){
+function SegmentBands({slot,sel,selMin,onClickMinute,date,customStart,customEnd}){
   const[hoverC,setHoverC]=useState(null);
-  const startMin=slot==="morning"?330:960, endMin=slot==="morning"?510:1170;
+  const startMin=customStart!==undefined?customStart:(slot==="morning"?330:960), endMin=customEnd!==undefined?customEnd:(slot==="morning"?510:1170);
   const total=endMin-startMin;
   const nowLeft=selMin!=null?((selMin-startMin)/total)*100:-1;
   const containerRef=useRef(null);
@@ -2010,15 +2037,153 @@ function Panel({selMin,rData,allR,allS,sel,onHL,metric,date}){
   </div>;
 }
 
+// ============================================================
+// URL パラメータ (番組グラフ新規タブ用)
+// ============================================================
+const _UP=new URLSearchParams(window.location.search);
+const PROGRAM_MODE=_UP.get('mode')==='program';
+const PM_STATION=_UP.get('station')||'NBN';
+const PM_DATE=_UP.get('date')||'2026-04-01';
+const PM_START=parseInt(_UP.get('start')||'330');
+const PM_END=parseInt(_UP.get('end')||'510');
+const PM_NAME=_UP.get('name')?decodeURIComponent(_UP.get('name')):'';
+const PM_SLOT=_UP.get('slot')||(PM_START>=960?'evening':'morning');
+
+// ============================================================
+// 番組表ページ (ランディング)
+// ============================================================
+function ProgramGuidePage(){
+  const today=new Date().toISOString().slice(0,10);
+  const[guideDate,setGuideDate]=useState(today);
+  const[programs,setPrograms]=useState(null);
+  const[loading,setLoading]=useState(false);
+  const[error,setError]=useState(null);
+
+  // 朝・夕方の視聴率データを事前計算
+  const mornR=useMemo(()=>genRatings(guideDate,'morning'),[guideDate]);
+  const eveR=useMemo(()=>genRatings(guideDate,'evening'),[guideDate]);
+
+  // S3 から CSV を取得
+  useEffect(()=>{
+    const yyyymmdd=guideDate.replace(/-/g,'');
+    const url=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/epg-all/bangumi_${yyyymmdd}.csv`;
+    setLoading(true);setError(null);setPrograms(null);
+    fetch(url)
+      .then(r=>{if(!r.ok)throw new Error(`データ取得エラー (HTTP ${r.status})`);return r.text();})
+      .then(text=>{const p=parseGuideCSV(text);setPrograms(p);})
+      .catch(e=>setError(e.message))
+      .finally(()=>setLoading(false));
+  },[guideDate]);
+
+  // 番組の平均視聴率を計算 (朝・夕方帯のみ)
+  const calcAvg=(stId,startMin,endMin)=>{
+    const adj=m=>m>1440?m-1440:m;
+    const aS=adj(startMin),aE=adj(endMin);
+    let ratings=null,rS,rE;
+    if(aS<510&&aE>330){ratings=mornR;rS=Math.max(aS,330);rE=Math.min(aE,510);}
+    else if(aS<1170&&aE>960){ratings=eveR;rS=Math.max(aS,960);rE=Math.min(aE,1170);}
+    if(!ratings)return null;
+    const ov=ratings.filter(d=>d.minute>=rS&&d.minute<rE);
+    if(!ov.length)return null;
+    return ov.reduce((s,d)=>s+(d[stId]||0),0)/ov.length;
+  };
+
+  // 局ごとに番組を整理
+  const byStation=useMemo(()=>{
+    const r={};GUIDE_ST_ORDER.forEach(sid=>r[sid]=[]);
+    (programs||[]).forEach(p=>{if(r[p.stId])r[p.stId].push(p);});
+    return r;
+  },[programs]);
+
+  // 番組クリック→新タブでグラフを開く
+  const openProgram=(p,stId)=>{
+    const adj=m=>m>1440?m-1440:m;
+    const aS=adj(p.startMin),aE=adj(p.endMin);
+    const mid=(aS+aE)/2;
+    const slot=mid>=960&&mid<1170?'evening':'morning';
+    const params=new URLSearchParams({
+      mode:'program',station:stId,date:guideDate,
+      start:aS,end:aE,name:encodeURIComponent(p.title),slot
+    });
+    window.open(`${window.location.origin}${window.location.pathname}?${params}`,'_blank');
+  };
+
+  const G_START=300,G_END=1740,PPM=2; // 5:00〜翌5:00, 2px/分
+  const totalH=(G_END-G_START)*PPM;
+  const timeMarks=[];for(let m=G_START;m<=G_END;m+=60)timeMarks.push(m);
+
+  return <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 88px)",fontFamily:"system-ui,-apple-system,sans-serif"}}>
+    {/* 番組表ヘッダー */}
+    <div style={{padding:"10px 18px",borderBottom:"1px solid #E5E7EB",background:"#fff",display:"flex",alignItems:"center",gap:12,flexShrink:0,flexWrap:"wrap"}}>
+      <span style={{fontSize:13,fontWeight:700,color:"#111827"}}>📺 番組表</span>
+      <input type="date" value={guideDate} onChange={e=>setGuideDate(e.target.value)}
+        style={{border:"1px solid #E5E7EB",borderRadius:5,padding:"4px 8px",fontSize:12,fontFamily:"monospace",outline:"none",cursor:"pointer"}}/>
+      {loading&&<span style={{fontSize:11,color:"#9CA3AF"}}>⏳ 読み込み中...</span>}
+      {error&&<span style={{fontSize:11,color:"#DC2626"}}>⚠ {error} (S3 CORSの設定をご確認ください)</span>}
+      {!loading&&!error&&programs&&<span style={{fontSize:11,color:"#6B7280"}}>{programs.length}番組 — 視聴率は朝(5:30–8:30)・夕方(16:00–19:30)帯のみ表示</span>}
+      {!loading&&!error&&!programs&&<span style={{fontSize:11,color:"#9CA3AF"}}>日付を選択すると番組表を読み込みます</span>}
+    </div>
+    {!programs&&!loading&&!error&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>日付を選択してください</div>}
+    {loading&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>読み込み中...</div>}
+    {programs&&<div style={{flex:1,overflowY:"auto",overflowX:"auto"}}>
+      <div style={{display:"flex",minWidth:52+GUIDE_ST_ORDER.length*162}}>
+        {/* 時刻列 */}
+        <div style={{width:52,flexShrink:0,position:"sticky",left:0,background:"#F9FAFB",borderRight:"1px solid #E5E7EB",zIndex:4}}>
+          <div style={{height:44,position:"sticky",top:0,background:"#F3F4F6",borderBottom:"1px solid #E5E7EB",zIndex:5,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9.5,color:"#6B7280",fontWeight:700,fontFamily:"monospace"}}>TIME</div>
+          <div style={{position:"relative",height:totalH}}>
+            {timeMarks.map(m=>{
+              const disp=m>1439?m-1440:m;
+              return <div key={m} style={{position:"absolute",top:(m-G_START)*PPM,left:0,right:0,borderTop:`1px solid ${m%360===300?"#D1D5DB":"#E5E7EB"}`,paddingLeft:5,paddingTop:2,fontSize:10,color:m%360===300?"#374151":"#9CA3AF",fontFamily:"monospace",fontWeight:m%360===300?700:400}}>
+                {m2t(disp)}
+              </div>;
+            })}
+          </div>
+        </div>
+        {/* 各局列 */}
+        {GUIDE_ST_ORDER.map(sid=>{
+          const st=ST.find(s=>s.id===sid);
+          const progs=byStation[sid]||[];
+          return <div key={sid} style={{width:162,flexShrink:0,borderRight:"1px solid #E5E7EB",position:"relative"}}>
+            <div style={{height:44,position:"sticky",top:0,background:"#F3F4F6",borderBottom:"1px solid #E5E7EB",zIndex:3,display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
+              <span style={{background:st.c,color:"#fff",fontSize:9,fontWeight:800,padding:"2px 5px",borderRadius:3,fontFamily:"monospace"}}>{sid}</span>
+              <span style={{fontSize:10.5,color:"#374151",fontWeight:600}}>{st.nm}</span>
+            </div>
+            <div style={{position:"relative",height:totalH}}>
+              {timeMarks.map(m=><div key={m} style={{position:"absolute",top:(m-G_START)*PPM,left:0,right:0,borderTop:"1px dashed #F3F4F6"}}/>)}
+              {progs.map((p,i)=>{
+                const top=Math.max(0,(p.startMin-G_START)*PPM);
+                const bot=Math.min(totalH,(p.endMin-G_START)*PPM);
+                const h=Math.max(22,bot-top-1);
+                const avg=calcAvg(sid,p.startMin,p.endMin);
+                const compact=h<46;
+                return <div key={i} onClick={()=>openProgram(p,sid)}
+                  style={{position:"absolute",top,left:2,right:2,height:h,background:"#fff",border:"1px solid #E5E7EB",borderLeft:`3px solid ${st.c}`,borderRadius:3,padding:"3px 5px",overflow:"hidden",cursor:"pointer",fontSize:10,display:"flex",flexDirection:"column",gap:1,transition:"background 0.1s"}}
+                  onMouseEnter={e=>{e.currentTarget.style.background="#EFF6FF";e.currentTarget.style.borderColor="#BFDBFE";}}
+                  onMouseLeave={e=>{e.currentTarget.style.background="#fff";e.currentTarget.style.borderColor="#E5E7EB";}}>
+                  <div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",flexShrink:0}}>{p.start_time}</div>
+                  <div style={{fontSize:compact?9.5:11,fontWeight:600,color:"#111827",lineHeight:1.25,overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:compact?1:2,WebkitBoxOrient:"vertical",flex:1}}>{p.title}</div>
+                  {avg!==null&&h>44&&<div style={{fontSize:compact?12:16,fontWeight:700,color:st.c,fontFamily:"monospace",flexShrink:0}}>{avg.toFixed(2)}%</div>}
+                </div>;
+              })}
+            </div>
+          </div>;
+        })}
+      </div>
+    </div>}
+  </div>;
+}
+
 export default function App(){
-  const[date,setDate]=useState("2026-04-01");
-  const[slot,setSlot]=useState("morning");
-  const[sel,setSel]=useState(ST.map(s=>s.id));
+  const[date,setDate]=useState(PROGRAM_MODE?PM_DATE:"2026-04-01");
+  const[slot,setSlot]=useState(PROGRAM_MODE?PM_SLOT:"morning");
+  const[sel,setSel]=useState(PROGRAM_MODE?[PM_STATION]:ST.map(s=>s.id));
   const[selMin,setSelMin]=useState(null);
   const[selData,setSelData]=useState(null);
   const[hl,setHL]=useState(null);
   const videoRef=useRef(null);
-  const[page,setPage]=useState("dashboard");
+  const[page,setPage]=useState(PROGRAM_MODE?"dashboard":"guide");
+  const[programContext]=useState(PROGRAM_MODE?{name:PM_NAME,stId:PM_STATION,date:PM_DATE,start:PM_START,end:PM_END,center:Math.floor((PM_START+PM_END)/2),slot:PM_SLOT}:null);
+  const[zoomLevel,setZoomLevel]=useState(4);
   const[metric,setMetric]=useState("rating");
   const[dashMode,setDashMode]=useState("chart");
   const[timetableModal,setTimetableModal]=useState(null);
@@ -2049,6 +2214,15 @@ export default function App(){
   const rData=useMemo(()=>genRatings(date,slot),[date,slot]);
   const sData=useMemo(()=>rData.map(e=>{const t=ST.reduce((s,st)=>s+(e[st.id]||0),0);const o={time:e.time,minute:e.minute};ST.forEach(s=>{o[s.id]=t>0?(e[s.id]/t)*100:0;});return o;}),[rData]);
   const dData=metric==="share"?sData:rData;
+  const zoomHalf=ZOOM_HALF[zoomLevel];
+  const progCenter=programContext?.center??null;
+  const slotStart=slot==='morning'?330:960,slotEnd=slot==='morning'?510:1170;
+  const winStart=progCenter!==null?Math.max(slotStart,progCenter-zoomHalf):slotStart;
+  const winEnd=progCenter!==null?Math.min(slotEnd,progCenter+zoomHalf):slotEnd;
+  const chartData=useMemo(()=>{
+    if(!programContext)return dData;
+    return dData.filter(d=>d.minute>=winStart&&d.minute<=winEnd);
+  },[dData,programContext,winStart,winEnd]);
   const tog=id=>setSel(p=>p.includes(id)?p.filter(s=>s!==id):[...p,id]);
   const click=m=>{setSelMin(m);const r=rData.find(d=>d.minute===m),s=sData.find(d=>d.minute===m);setSelData({rating:r,share:s});setHL(null);};
   useEffect(()=>{
@@ -2075,7 +2249,7 @@ export default function App(){
           {[{id:"rating",l:"視聴率"},{id:"share",l:"占拠率"}].map(m=><button key={m.id} onClick={()=>setMetric(m.id)} style={{padding:"4px 13px",border:"none",background:metric===m.id?"#EFF6FF":"#fff",color:metric===m.id?"#2563EB":"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600}}>{m.l}</button>)}
         </div>
         <div style={{display:"flex",gap:3}}>
-          {[{id:"dashboard",i:"📊",l:"Dashboard"},{id:"search",i:"🔍",l:"Search"},{id:"analysis",i:"✨",l:"Analysis"}].map(p=><button key={p.id} onClick={()=>setPage(p.id)} style={{padding:"5px 14px",borderRadius:6,border:"none",background:page===p.id?"#FFF7ED":"transparent",color:page===p.id?"#D94F00":"#9CA3AF",cursor:"pointer",fontSize:11.5,fontWeight:600,fontFamily:"monospace"}}>{p.i} {p.l}</button>)}
+          {[{id:"guide",i:"📺",l:"番組表"},{id:"dashboard",i:"📊",l:"Dashboard"},{id:"search",i:"🔍",l:"Search"},{id:"analysis",i:"✨",l:"Analysis"}].map(p=><button key={p.id} onClick={()=>setPage(p.id)} style={{padding:"5px 14px",borderRadius:6,border:"none",background:page===p.id?"#FFF7ED":"transparent",color:page===p.id?"#D94F00":"#9CA3AF",cursor:"pointer",fontSize:11.5,fontWeight:600,fontFamily:"monospace"}}>{p.i} {p.l}</button>)}
         </div>
       </div>
     </div>
@@ -2087,6 +2261,13 @@ export default function App(){
 
   const ratingsCache=useMemo(()=>{const c={};for(const date of ALL_DATES)for(const slot of ALL_SLOTS)c[`${date}|${slot}`]=genRatings(date,slot);return c;},[]);
 
+  if(page==="guide"){
+    return <div style={{width:"100%",minHeight:"100vh",background:"#F8F9FB",fontFamily:"system-ui,-apple-system,sans-serif",color:"#111827"}}>
+      <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}`}</style>
+      <NavBar/>
+      <ProgramGuidePage/>
+    </div>;
+  }
   if(page==="search"){
     return <div style={{width:"100%",minHeight:"100vh",background:"#F8F9FB",fontFamily:"system-ui,-apple-system,sans-serif",color:"#111827"}}>
       <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
@@ -2141,13 +2322,22 @@ export default function App(){
         <span style={{fontSize:9,color:"#DC2626"}}>⏱</span>
         <span style={{fontSize:11.5,color:"#DC2626",fontFamily:"monospace",fontWeight:600}}>{m2t(selMin)}</span>
       </div>}
+      {programContext&&<div style={{display:"flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:5,background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
+        <span style={{fontSize:9,color:"#16A34A"}}>📺</span>
+        <span style={{fontSize:11,color:"#166534",fontWeight:700}}>{programContext.name}</span>
+        <span style={{fontSize:10,color:"#16A34A",fontFamily:"monospace"}}>{m2t(programContext.start)}–{m2t(programContext.end)}</span>
+      </div>}
     </div>
-    {dashMode==="chart"?<div style={{display:"flex",height:"calc(100vh - 100px)"}}>
+    {programContext&&dashMode==="chart"&&<div style={{display:"flex",alignItems:"center",gap:5,padding:"5px 18px",background:"#FAFAFA",borderBottom:"1px solid #F3F4F6",flexWrap:"wrap"}}>
+      <span style={{fontSize:10.5,color:"#6B7280",fontWeight:600,marginRight:4}}>🔍 ズーム</span>
+      {ZOOM_HALF.map((h,i)=><button key={i} onClick={()=>setZoomLevel(i)} style={{padding:"3px 9px",borderRadius:5,border:"1px solid",borderColor:zoomLevel===i?"#2563EB":"#E5E7EB",background:zoomLevel===i?"#EFF6FF":"#fff",color:zoomLevel===i?"#2563EB":"#6B7280",fontSize:10.5,cursor:"pointer",fontFamily:"monospace",fontWeight:zoomLevel===i?700:400}}>±{h}分</button>)}
+    </div>}
+    {dashMode==="chart"?<div style={{display:"flex",height:programContext?"calc(100vh - 140px)":"calc(100vh - 100px)"}}>
       <div style={{flex:"1 1 0",display:"flex",flexDirection:"column",minWidth:0,overflowY:"auto"}}>
         <div style={{padding:"8px 18px"}}><Toggle sel={sel} onT={tog}/></div>
-        <div style={{padding:"0 18px",height:360,flexShrink:0}}><Chart data={dData} sel={sel} onClick={click} selMin={selMin} hl={hl} metric={metric}/></div>
+        <div style={{padding:"0 18px",height:360,flexShrink:0}}><Chart data={chartData} sel={sel} onClick={click} selMin={selMin} hl={hl} metric={metric}/></div>
         <div style={{padding:"0 18px"}}>
-          <SegmentBands slot={slot} sel={sel} selMin={selMin} onClickMinute={click} date={date}/>
+          <SegmentBands slot={slot} sel={sel} selMin={selMin} onClickMinute={click} date={date} customStart={programContext?winStart:undefined} customEnd={programContext?winEnd:undefined}/>
         </div>
         <div style={{padding:"0 18px 16px"}}><SegmentLegend/></div>
         {date==="2026-04-17"&&slot==="morning"&&<div style={{padding:"0 18px 20px"}}>
