@@ -2072,7 +2072,6 @@ function ProgramGuidePage(){
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState(null);
 
-  // 朝・夕方の視聴率データを事前計算
   const mornR=useMemo(()=>genRatings(guideDate,'morning'),[guideDate]);
   const eveR=useMemo(()=>genRatings(guideDate,'evening'),[guideDate]);
 
@@ -2175,7 +2174,7 @@ function ProgramGuidePage(){
                   onMouseLeave={e=>{e.currentTarget.style.background="#fff";e.currentTarget.style.borderColor="#E5E7EB";}}>
                   <div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",flexShrink:0}}>{p.start_time}</div>
                   <div style={{fontSize:compact?9.5:11,fontWeight:600,color:"#111827",lineHeight:1.25,overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:compact?1:2,WebkitBoxOrient:"vertical",flex:1}}>{p.title}</div>
-                  {avg!==null&&h>44&&<div style={{fontSize:compact?12:16,fontWeight:700,color:st.c,fontFamily:"monospace",flexShrink:0}}>{avg.toFixed(2)}%</div>}
+                  {avg!==null&&<div style={{fontSize:h<46?10:15,fontWeight:700,color:st.c,fontFamily:"monospace",flexShrink:0,marginTop:"auto"}}>{avg.toFixed(2)}%</div>}
                 </div>;
               })}
             </div>
