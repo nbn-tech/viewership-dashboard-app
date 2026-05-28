@@ -2053,8 +2053,7 @@ const PM_SLOT=_UP.get('slot')||(PM_START>=960?'evening':'morning');
 // 番組表ページ (ランディング)
 // ============================================================
 function ProgramGuidePage(){
-  const today=new Date().toISOString().slice(0,10);
-  const[guideDate,setGuideDate]=useState(today);
+  const[guideDate,setGuideDate]=useState("2026-04-17");
   const[programs,setPrograms]=useState(null);
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState(null);
