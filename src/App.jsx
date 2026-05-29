@@ -2066,11 +2066,13 @@ const PM_SLOT=_UP.get('slot')||(PM_START>=960?'evening':'morning');
 // ============================================================
 // 番組表ページ (ランディング)
 // ============================================================
+const GUIDE_PPM_STEPS=[2,3,4,6,8,12,16];
 function ProgramGuidePage(){
   const[guideDate,setGuideDate]=useState("2026-04-17");
   const[programs,setPrograms]=useState(null);
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState(null);
+  const[ppmIdx,setPpmIdx]=useState(3); // index3=6px/分(約2時間)
 
   const mornR=useMemo(()=>genRatings(guideDate,'morning'),[guideDate]);
   const eveR=useMemo(()=>genRatings(guideDate,'evening'),[guideDate]);
@@ -2122,7 +2124,8 @@ function ProgramGuidePage(){
     window.open(`${window.location.origin}${window.location.pathname}?${params}`,'_blank');
   };
 
-  const G_START=300,G_END=1740,PPM=6; // 5:00〜翌5:00, 6px/分
+  const G_START=300,G_END=1740;
+  const PPM=GUIDE_PPM_STEPS[ppmIdx];
   const totalH=(G_END-G_START)*PPM;
   const timeMarks=[];for(let m=G_START;m<=G_END;m+=60)timeMarks.push(m);
 
@@ -2136,11 +2139,17 @@ function ProgramGuidePage(){
       {error&&<span style={{fontSize:11,color:"#DC2626"}}>⚠ {error} (S3 CORSの設定をご確認ください)</span>}
       {!loading&&!error&&programs&&<span style={{fontSize:11,color:"#6B7280"}}>{programs.length}番組 — 視聴率は朝(5:30–8:30)・夕方(16:00–19:30)帯のみ表示</span>}
       {!loading&&!error&&!programs&&<span style={{fontSize:11,color:"#9CA3AF"}}>日付を選択すると番組表を読み込みます</span>}
+      <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:4,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"2px 4px"}}>
+        <span style={{fontSize:10,color:"#6B7280",fontWeight:600,paddingLeft:4}}>縦ズーム</span>
+        <button onClick={()=>setPpmIdx(i=>Math.max(0,i-1))} disabled={ppmIdx===0} style={{width:24,height:24,border:"none",background:"transparent",cursor:ppmIdx===0?"default":"pointer",fontSize:16,color:ppmIdx===0?"#D1D5DB":"#374151",borderRadius:4,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+        <span style={{fontSize:10,fontFamily:"monospace",color:"#374151",minWidth:36,textAlign:"center"}}>×{(PPM/2).toFixed(1)}</span>
+        <button onClick={()=>setPpmIdx(i=>Math.min(GUIDE_PPM_STEPS.length-1,i+1))} disabled={ppmIdx===GUIDE_PPM_STEPS.length-1} style={{width:24,height:24,border:"none",background:"transparent",cursor:ppmIdx===GUIDE_PPM_STEPS.length-1?"default":"pointer",fontSize:16,color:ppmIdx===GUIDE_PPM_STEPS.length-1?"#D1D5DB":"#374151",borderRadius:4,display:"flex",alignItems:"center",justifyContent:"center"}}>＋</button>
+      </div>
     </div>
     {!programs&&!loading&&!error&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>日付を選択してください</div>}
     {loading&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>読み込み中...</div>}
-    {programs&&<div style={{flex:1,overflowY:"auto",overflowX:"auto"}}>
-      <div style={{display:"flex",minWidth:52+GUIDE_ST_ORDER.length*162}}>
+    {programs&&<div style={{flex:1,overflowY:"auto"}}>
+      <div style={{display:"flex",width:"100%"}}>
         {/* 時刻列 */}
         <div style={{width:52,flexShrink:0,position:"sticky",left:0,background:"#F9FAFB",borderRight:"1px solid #E5E7EB",zIndex:4}}>
           <div style={{height:44,position:"sticky",top:0,background:"#F3F4F6",borderBottom:"1px solid #E5E7EB",zIndex:5,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9.5,color:"#6B7280",fontWeight:700,fontFamily:"monospace"}}>TIME</div>
@@ -2157,7 +2166,7 @@ function ProgramGuidePage(){
         {GUIDE_ST_ORDER.map(sid=>{
           const st=ST.find(s=>s.id===sid);
           const progs=(byStation[sid]||[]).slice().sort((a,b)=>a.startMin-b.startMin);
-          return <div key={sid} style={{width:162,flexShrink:0,borderRight:"1px solid #E5E7EB",position:"relative"}}>
+          return <div key={sid} style={{flex:1,minWidth:0,borderRight:"1px solid #E5E7EB",position:"relative"}}>
             <div style={{height:44,position:"sticky",top:0,background:"#F3F4F6",borderBottom:"1px solid #E5E7EB",zIndex:3,display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
               <span style={{background:st.c,color:"#fff",fontSize:9,fontWeight:800,padding:"2px 5px",borderRadius:3,fontFamily:"monospace"}}>{sid}</span>
               <span style={{fontSize:10.5,color:"#374151",fontWeight:600}}>{st.nm}</span>
