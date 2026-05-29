@@ -2156,7 +2156,7 @@ function ProgramGuidePage(){
         {/* 各局列 */}
         {GUIDE_ST_ORDER.map(sid=>{
           const st=ST.find(s=>s.id===sid);
-          const progs=byStation[sid]||[];
+          const progs=(byStation[sid]||[]).slice().sort((a,b)=>a.startMin-b.startMin);
           return <div key={sid} style={{width:162,flexShrink:0,borderRight:"1px solid #E5E7EB",position:"relative"}}>
             <div style={{height:44,position:"sticky",top:0,background:"#F3F4F6",borderBottom:"1px solid #E5E7EB",zIndex:3,display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
               <span style={{background:st.c,color:"#fff",fontSize:9,fontWeight:800,padding:"2px 5px",borderRadius:3,fontFamily:"monospace"}}>{sid}</span>
@@ -2165,8 +2165,10 @@ function ProgramGuidePage(){
             <div style={{position:"relative",height:totalH}}>
               {timeMarks.map(m=><div key={m} style={{position:"absolute",top:(m-G_START)*PPM,left:0,right:0,borderTop:"1px dashed #F3F4F6"}}/>)}
               {progs.map((p,i)=>{
+                const nextStart=i<progs.length-1?progs[i+1].startMin:null;
+                const visEnd=nextStart!==null&&nextStart<p.endMin?nextStart:p.endMin;
                 const top=Math.max(0,(p.startMin-G_START)*PPM);
-                const bot=Math.min(totalH,(p.endMin-G_START)*PPM);
+                const bot=Math.min(totalH,(visEnd-G_START)*PPM);
                 const h=Math.max(22,bot-top-1);
                 const avg=calcAvg(sid,p.startMin,p.endMin);
                 const compact=h<46;
