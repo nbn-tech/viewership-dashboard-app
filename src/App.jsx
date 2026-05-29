@@ -2072,7 +2072,7 @@ function ProgramGuidePage(){
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState(null);
 
-  const mornR=useMemo(()=>genRatings(guideDate,'morning'),[guideDate]);
+  const mornR=useMemo(()=>{const d=genRatings(guideDate,'morning');console.log(`[mornR] ${guideDate} len=${d.length} entry0=`,d[0],'entry30=',d[30]);return d;},[guideDate]);
   const eveR=useMemo(()=>genRatings(guideDate,'evening'),[guideDate]);
 
   // S3 から CSV を取得
@@ -2091,13 +2091,17 @@ function ProgramGuidePage(){
   const calcAvg=(stId,startMin,endMin)=>{
     const adj=m=>m>1440?m-1440:m;
     const aS=adj(startMin),aE=adj(endMin);
-    let ratings=null,rS,rE;
-    if(aS<510&&aE>330){ratings=mornR;rS=Math.max(aS,330);rE=Math.min(aE,510);}
-    else if(aS<1170&&aE>960){ratings=eveR;rS=Math.max(aS,960);rE=Math.min(aE,1170);}
-    if(!ratings)return null;
-    const ov=ratings.filter(d=>d.minute>=rS&&d.minute<rE);
-    if(!ov.length)return null;
-    return ov.reduce((s,d)=>s+(d[stId]||0),0)/ov.length;
+    let raw=null,winS,winE;
+    if(aS<510&&aE>330){raw=mornR;winS=330;winE=510;}
+    else if(aS<1170&&aE>960){raw=eveR;winS=960;winE=1170;}
+    if(!raw||!raw.length){console.log(`[calcAvg] ${stId} ${startMin}-${endMin} → aS=${aS} aE=${aE} NO_WINDOW`);return null;}
+    const iS=Math.max(aS,winS)-winS, iE=Math.min(aE,winE)-winS;
+    if(iS>=iE){console.log(`[calcAvg] ${stId} ${startMin}-${endMin} → aS=${aS} aE=${aE} winS=${winS} iS=${iS} iE=${iE} EMPTY_SLICE`);return null;}
+    const slice=raw.slice(iS,iE);
+    if(!slice.length){console.log(`[calcAvg] ${stId} ${startMin}-${endMin} → iS=${iS} iE=${iE} EMPTY`);return null;}
+    const avg=slice.reduce((s,d)=>s+(d[stId]||0),0)/slice.length;
+    console.log(`[calcAvg] ${stId} ${startMin}-${endMin} → aS=${aS} aE=${aE} iS=${iS} iE=${iE} n=${slice.length} avg=${avg.toFixed(3)}`);
+    return avg;
   };
 
   // 局ごとに番組を整理
@@ -2167,6 +2171,7 @@ function ProgramGuidePage(){
                 const bot=Math.min(totalH,(p.endMin-G_START)*PPM);
                 const h=Math.max(22,bot-top-1);
                 const avg=calcAvg(sid,p.startMin,p.endMin);
+                if(avg===null&&p.startMin>=330&&p.startMin<1170)console.warn(`[NO_RATING] ${sid} "${p.title}" start=${p.startMin} end=${p.endMin}`);
                 const compact=h<46;
                 return <div key={i} onClick={()=>openProgram(p,sid)}
                   style={{position:"absolute",top,left:2,right:2,height:h,background:"#fff",border:"1px solid #E5E7EB",borderLeft:`3px solid ${st.c}`,borderRadius:3,padding:"3px 5px",overflow:"hidden",cursor:"pointer",fontSize:10,display:"flex",flexDirection:"column",gap:1,transition:"background 0.1s"}}
