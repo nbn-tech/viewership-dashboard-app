@@ -798,7 +798,7 @@ function TimetableView({slot,sel,allR,allS,metric,date,onCornerClick}){
   const fmt=v=>v!=null?(metric==="share"?v.toFixed(1):v.toFixed(2))+"%":"—";
   const getVal=(src,sid,min)=>{const e=src?.find(d=>d.minute===min);return e?e[sid]:null;};
   const colWidth=220;
-  const pxPerMin=8;
+  const pxPerMin=22;
   const totalMin=endMin-startMin;
   const totalH=totalMin*pxPerMin;
   const timeMarks=[];for(let m=startMin;m<=endMin;m+=10)timeMarks.push(m);
@@ -2122,7 +2122,7 @@ function ProgramGuidePage(){
     window.open(`${window.location.origin}${window.location.pathname}?${params}`,'_blank');
   };
 
-  const G_START=300,G_END=1740,PPM=2; // 5:00〜翌5:00, 2px/分
+  const G_START=300,G_END=1740,PPM=6; // 5:00〜翌5:00, 6px/分
   const totalH=(G_END-G_START)*PPM;
   const timeMarks=[];for(let m=G_START;m<=G_END;m+=60)timeMarks.push(m);
 
