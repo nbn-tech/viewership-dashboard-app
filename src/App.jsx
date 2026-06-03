@@ -703,12 +703,16 @@ function SegmentBand({slot,stId,startMin,endMin,height=14,onHover,date}){
   </div>;
 }
 
-function Chart({data,sel,onClick,selMin,hl,metric}){
+function Chart({data,sel,onClick,selMin,hl,metric,onPan}){
   const ref=useRef(null),cRef=useRef(null);
   const[hv,setHv]=useState(null);
   const[d,setD]=useState({w:900,h:340});
+  const[dragging,setDragging]=useState(false);
+  const dragX=useRef(0);
+  const hasDragged=useRef(false);
   useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setD({w:e.contentRect.width,h:Math.min(400,Math.max(280,e.contentRect.height))});});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
   const p={t:28,r:16,b:38,l:34},cW=d.w-p.l-p.r,cH=d.h-p.t-p.b;
+  const mpp=data.length>1?(data.length-1)/cW:1;
   const mx=useMemo(()=>{if(metric==="share")return 60;let x=0;data.forEach(dt=>sel.forEach(s=>{if(dt[s]>x)x=dt[s];}));return Math.ceil(x+1);},[data,sel,metric]);
   const xS=useCallback(i=>p.l+(i/(data.length-1))*cW,[data.length,cW]);
   const yS=useCallback(v=>p.t+cH-(v/mx)*cH,[cH,mx]);
@@ -719,9 +723,12 @@ function Chart({data,sel,onClick,selMin,hl,metric}){
   let hs=-1,he=-1;if(hl){hs=data.findIndex(dt=>dt.minute===hl.start);he=data.findIndex(dt=>dt.minute===hl.end);}
   const hc=(ST.find(s=>s.id===hl?.stationId)||{c:"#888"}).c;
   return <div ref={cRef} style={{width:"100%",height:"100%",minHeight:280}}>
-    <svg ref={ref} width={d.w} height={d.h} style={{cursor:"crosshair",display:"block"}}
-      onClick={e=>{const i=gi(e.clientX);if(i>=0&&data[i])onClick(data[i].minute);}}
-      onMouseMove={e=>{const i=gi(e.clientX);if(i>=0)setHv(i);}} onMouseLeave={()=>setHv(null)}>
+    <svg ref={ref} width={d.w} height={d.h} style={{cursor:onPan?(dragging?"grabbing":"grab"):"crosshair",display:"block",userSelect:"none"}}
+      onClick={e=>{if(hasDragged.current){hasDragged.current=false;return;}const i=gi(e.clientX);if(i>=0&&data[i])onClick(data[i].minute);}}
+      onMouseDown={e=>{if(!onPan||e.button!==0)return;setDragging(true);dragX.current=e.clientX;hasDragged.current=false;e.preventDefault();}}
+      onMouseMove={e=>{if(dragging&&onPan){const dx=e.clientX-dragX.current;if(Math.abs(dx)>3)hasDragged.current=true;dragX.current=e.clientX;onPan(-dx*mpp);}const i=gi(e.clientX);if(i>=0)setHv(i);}}
+      onMouseUp={()=>setDragging(false)}
+      onMouseLeave={()=>{setDragging(false);setHv(null);}}>
       <rect x={0} y={0} width={d.w} height={d.h} fill="#FAFBFC" rx={8}/>
       {yT.map(v=><g key={v}><line x1={p.l} x2={d.w-p.r} y1={yS(v)} y2={yS(v)} stroke="#E5E7EB" strokeDasharray="2,4"/><text x={p.l-6} y={yS(v)+4} fill="#9CA3AF" fontSize="10" textAnchor="end" fontFamily="monospace">{v}%</text></g>)}
       {tL.map(({i,lb})=><text key={i} x={xS(i)} y={d.h-8} fill="#9CA3AF" fontSize="9.5" textAnchor="middle" fontFamily="monospace">{lb}</text>)}
@@ -2148,8 +2155,8 @@ function ProgramGuidePage(){
     </div>
     {!programs&&!loading&&!error&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>日付を選択してください</div>}
     {loading&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>読み込み中...</div>}
-    {programs&&<div style={{flex:1,overflowY:"auto"}}>
-      <div style={{display:"flex",width:"100%"}}>
+    {programs&&<div style={{flex:1,overflow:"auto"}}>
+      <div style={{display:"flex",minWidth:52+GUIDE_ST_ORDER.length*220}}>
         {/* 時刻列 */}
         <div style={{width:52,flexShrink:0,position:"sticky",left:0,background:"#F9FAFB",borderRight:"1px solid #E5E7EB",zIndex:4}}>
           <div style={{height:44,position:"sticky",top:0,background:"#F3F4F6",borderBottom:"1px solid #E5E7EB",zIndex:5,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9.5,color:"#6B7280",fontWeight:700,fontFamily:"monospace"}}>TIME</div>
@@ -2166,7 +2173,7 @@ function ProgramGuidePage(){
         {GUIDE_ST_ORDER.map(sid=>{
           const st=ST.find(s=>s.id===sid);
           const progs=(byStation[sid]||[]).slice().sort((a,b)=>a.startMin-b.startMin);
-          return <div key={sid} style={{flex:1,minWidth:0,borderRight:"1px solid #E5E7EB",position:"relative"}}>
+          return <div key={sid} style={{width:220,flexShrink:0,borderRight:"1px solid #E5E7EB",position:"relative"}}>
             <div style={{height:44,position:"sticky",top:0,background:"#F3F4F6",borderBottom:"1px solid #E5E7EB",zIndex:3,display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
               <span style={{background:st.c,color:"#fff",fontSize:9,fontWeight:800,padding:"2px 5px",borderRadius:3,fontFamily:"monospace"}}>{sid}</span>
               <span style={{fontSize:10.5,color:"#374151",fontWeight:600}}>{st.nm}</span>
@@ -2209,6 +2216,7 @@ export default function App(){
   const[page,setPage]=useState(PROGRAM_MODE?"dashboard":"guide");
   const[programContext]=useState(PROGRAM_MODE?{name:PM_NAME,stId:PM_STATION,date:PM_DATE,start:PM_START,end:PM_END,center:Math.floor((PM_START+PM_END)/2),slot:PM_SLOT}:null);
   const[zoomLevel,setZoomLevel]=useState(4);
+  const[panCenter,setPanCenter]=useState(null);
   const[metric,setMetric]=useState("rating");
   const[dashMode,setDashMode]=useState("chart");
   const[timetableModal,setTimetableModal]=useState(null);
@@ -2242,12 +2250,20 @@ export default function App(){
   const zoomHalf=ZOOM_HALF[zoomLevel];
   const progCenter=programContext?.center??null;
   const slotStart=slot==='morning'?330:960,slotEnd=slot==='morning'?510:1170;
-  const winStart=progCenter!==null?Math.max(slotStart,progCenter-zoomHalf):slotStart;
-  const winEnd=progCenter!==null?Math.min(slotEnd,progCenter+zoomHalf):slotEnd;
+  const effectiveCenter=panCenter??progCenter;
+  const winStart=effectiveCenter!==null?Math.max(slotStart,effectiveCenter-zoomHalf):slotStart;
+  const winEnd=effectiveCenter!==null?Math.min(slotEnd,effectiveCenter+zoomHalf):slotEnd;
   const chartData=useMemo(()=>{
-    if(!programContext)return dData;
+    if(effectiveCenter===null)return dData;
     return dData.filter(d=>d.minute>=winStart&&d.minute<=winEnd);
-  },[dData,programContext,winStart,winEnd]);
+  },[dData,effectiveCenter,winStart,winEnd]);
+  const handlePan=useCallback((deltaMin)=>{
+    setPanCenter(c=>{
+      const base=c??progCenter??Math.floor((slotStart+slotEnd)/2);
+      return Math.max(slotStart+zoomHalf,Math.min(slotEnd-zoomHalf,base+deltaMin));
+    });
+  },[progCenter,slotStart,slotEnd,zoomHalf]);
+  useEffect(()=>{setPanCenter(null);},[slot,date]);
   const tog=id=>setSel(p=>p.includes(id)?p.filter(s=>s!==id):[...p,id]);
   const click=m=>{setSelMin(m);const r=rData.find(d=>d.minute===m),s=sData.find(d=>d.minute===m);setSelData({rating:r,share:s});setHL(null);};
   useEffect(()=>{
@@ -2274,7 +2290,7 @@ export default function App(){
           {[{id:"rating",l:"視聴率"},{id:"share",l:"占拠率"}].map(m=><button key={m.id} onClick={()=>setMetric(m.id)} style={{padding:"4px 13px",border:"none",background:metric===m.id?"#EFF6FF":"#fff",color:metric===m.id?"#2563EB":"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600}}>{m.l}</button>)}
         </div>
         <div style={{display:"flex",gap:3}}>
-          {[{id:"guide",i:"📺",l:"番組表"},{id:"dashboard",i:"📊",l:"Dashboard"},{id:"search",i:"🔍",l:"Search"},{id:"analysis",i:"✨",l:"Analysis"}].map(p=><button key={p.id} onClick={()=>setPage(p.id)} style={{padding:"5px 14px",borderRadius:6,border:"none",background:page===p.id?"#FFF7ED":"transparent",color:page===p.id?"#D94F00":"#9CA3AF",cursor:"pointer",fontSize:11.5,fontWeight:600,fontFamily:"monospace"}}>{p.i} {p.l}</button>)}
+          {[{id:"guide",i:"📺",l:"番組表〜番組別〜"},{id:"dashboard",i:"📊",l:"Dashboard"},{id:"search",i:"🔍",l:"Search"},{id:"analysis",i:"✨",l:"Analysis"}].map(p=><button key={p.id} onClick={()=>setPage(p.id)} style={{padding:"5px 14px",borderRadius:6,border:"none",background:page===p.id?"#FFF7ED":"transparent",color:page===p.id?"#D94F00":"#9CA3AF",cursor:"pointer",fontSize:11.5,fontWeight:600,fontFamily:"monospace"}}>{p.i} {p.l}</button>)}
         </div>
       </div>
     </div>
@@ -2341,7 +2357,7 @@ export default function App(){
         {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 16:00–19:30"}].map(s=><button key={s.id} onClick={()=>{setSlot(s.id);setSelMin(null);setHL(null);}} style={{padding:"4px 13px",border:"none",background:slot===s.id?"#FFF7ED":"#fff",color:slot===s.id?"#D94F00":"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600}}>{s.l}</button>)}
       </div>
       <div style={{display:"flex",borderRadius:7,overflow:"hidden",border:"1px solid #E5E7EB"}}>
-        {[{id:"chart",l:"📈 グラフ表示"},{id:"timetable",l:"📋 番組表"}].map(m=><button key={m.id} onClick={()=>{setDashMode(m.id);setSelMin(null);setHL(null);}} style={{padding:"4px 13px",border:"none",background:dashMode===m.id?"#F0FDF4":"#fff",color:dashMode===m.id?"#16A34A":"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600}}>{m.l}</button>)}
+        {[{id:"chart",l:"📈 グラフ表示"},{id:"timetable",l:"📋 番組表〜コーナー別〜"}].map(m=><button key={m.id} onClick={()=>{setDashMode(m.id);setSelMin(null);setHL(null);}} style={{padding:"4px 13px",border:"none",background:dashMode===m.id?"#F0FDF4":"#fff",color:dashMode===m.id?"#16A34A":"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600}}>{m.l}</button>)}
       </div>
       {selMin!==null&&<div style={{display:"flex",alignItems:"center",gap:5,padding:"3px 9px",borderRadius:5,background:"#FEF2F2",border:"1px solid #FEE2E2"}}>
         <span style={{fontSize:9,color:"#DC2626"}}>⏱</span>
@@ -2360,18 +2376,18 @@ export default function App(){
     {dashMode==="chart"?<div style={{display:"flex",height:programContext?"calc(100vh - 140px)":"calc(100vh - 100px)"}}>
       <div style={{flex:"1 1 0",display:"flex",flexDirection:"column",minWidth:0,overflowY:"auto"}}>
         <div style={{padding:"8px 18px"}}><Toggle sel={sel} onT={tog}/></div>
-        <div style={{padding:"0 18px",height:360,flexShrink:0}}><Chart data={chartData} sel={sel} onClick={click} selMin={selMin} hl={hl} metric={metric}/></div>
-        <div style={{padding:"0 18px"}}>
-          <SegmentBands slot={slot} sel={sel} selMin={selMin} onClickMinute={click} date={date} customStart={programContext?winStart:undefined} customEnd={programContext?winEnd:undefined}/>
-        </div>
-        <div style={{padding:"0 18px 16px"}}><SegmentLegend/></div>
-        {date==="2026-04-17"&&slot==="morning"&&<div style={{padding:"0 18px 20px"}}>
+        <div style={{padding:"0 18px",height:360,flexShrink:0}}><Chart data={chartData} sel={sel} onClick={click} selMin={selMin} hl={hl} metric={metric} onPan={programContext?handlePan:undefined}/></div>
+        {date==="2026-04-17"&&slot==="morning"&&<div style={{padding:"0 18px 12px"}}>
           <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
             <span style={{fontSize:11,fontWeight:700,color:"#374151"}}>📹 4/17 ドデスカ! 放送動画</span>
             {selMin!==null&&<span style={{fontSize:10,color:"#6B7280",fontFamily:"monospace"}}>→ {m2t(selMin)} にシーク済み</span>}
           </div>
           <video ref={videoRef} src="https://dodesca-video.s3.ap-northeast-1.amazonaws.com/0417.mp4" controls style={{width:"100%",borderRadius:8,background:"#000",maxHeight:400}}/>
         </div>}
+        <div style={{padding:"0 18px"}}>
+          <SegmentBands slot={slot} sel={sel} selMin={selMin} onClickMinute={click} date={date} customStart={programContext?winStart:undefined} customEnd={programContext?winEnd:undefined}/>
+        </div>
+        <div style={{padding:"0 18px 16px"}}><SegmentLegend/></div>
       </div>
       <div style={{width:340,minWidth:290,flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column"}}>
         <Panel selMin={selMin} rData={selData} allR={rData} allS={sData} sel={sel} onHL={setHL} metric={metric} date={date}/>
