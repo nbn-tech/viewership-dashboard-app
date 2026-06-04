@@ -595,6 +595,19 @@ function getDailyEve(date){ return buildDaily(EVE_TPL, date); }
 
 function sRand(s){let x=s;return()=>{x=(x*16807)%2147483647;return(x-1)/2147483646;};}
 
+
+function WeatherBadge({ weather }) {
+  if (!weather) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 6, background: "#F0F9FF", border: "1px solid #BAE6FD" }}>
+      <span style={{ fontSize: 16 }}>{weather.icon}</span>
+      <span style={{ fontSize: 11, color: "#0369A1", fontFamily: "monospace", fontWeight: 600, whiteSpace: "nowrap" }}>
+        {weather.max.toFixed(1)}℃ | {weather.min.toFixed(1)}℃
+      </span>
+    </div>
+  );
+}
+
 // ============================================================
 // 実データ (名古屋地区世帯視聴率, 1分刻み)
 // 列順: [NBN, THK, CTV, CBC, NHK, NHKE, TVA]
@@ -1579,7 +1592,7 @@ function computeTopicSummary(query,ratingsCache){
   return{byStation,totalCount:matched.length};
 }
 
-function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,
+function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
   mode,setMode,selDate,setSelDate,selWeek,setSelWeek,slot,setSlot,
   tab,setTab,overviewText,setOverviewText,highlightText,setHighlightText,
   conclusionText,setConclusionText,
@@ -1756,9 +1769,9 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,
         {[{id:"daily",l:"Daily"},{id:"weekly",l:"Weekly"}].map(m=><button key={m.id} onClick={()=>setMode(m.id)} style={{padding:"4px 14px",border:"none",background:mode===m.id?"#FFF7ED":"#fff",color:mode===m.id?"#D94F00":"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600}}>{m.l}</button>)}
       </div>
       {mode==="daily"
-        ?<select value={selDate} onChange={e=>setSelDate(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"4px 8px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none"}}>
+        ?<><select value={selDate} onChange={e=>setSelDate(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"4px 8px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none"}}>
           {ALL_DATES.map(d=><option key={d} value={d}>{d} ({dow(d)})</option>)}
-        </select>
+        </select><WeatherBadge weather={weatherData?.[selDate]}/></>
         :<select value={selWeek} onChange={e=>setSelWeek(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"4px 8px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none"}}>
           {WEEK_RANGES.map(w=><option key={w.id} value={w.id}>{w.label}</option>)}
         </select>}
@@ -2208,7 +2221,7 @@ function ProgramGuidePage(){
 export default function App(){
   const[date,setDate]=useState(PROGRAM_MODE?PM_DATE:"2026-04-01");
   const[slot,setSlot]=useState(PROGRAM_MODE?PM_SLOT:"morning");
-  const[sel,setSel]=useState(PROGRAM_MODE?[PM_STATION]:ST.map(s=>s.id));
+  const[sel,setSel]=useState(PROGRAM_MODE?[...new Set([PM_STATION,"THK","CTV","CBC","NHK"])]:ST.map(s=>s.id));
   const[selMin,setSelMin]=useState(null);
   const[selData,setSelData]=useState(null);
   const[hl,setHL]=useState(null);
@@ -2244,6 +2257,20 @@ export default function App(){
   const[aTopicSelected,setATopicSelected]=useState(new Set()); // 選択中のコーナーid
   const[aTopicStep,setATopicStep]=useState(1); // 1=入力 2=選択 3=結果
   const[aLabel,setALabel]=useState("");
+  // Open-Meteo 過去気象データ (名古屋)
+  const[weatherData,setWeatherData]=useState({});
+  useEffect(()=>{
+    fetch("https://qajccvs8yd.execute-api.ap-northeast-1.amazonaws.com/weather")
+      .then(r=>r.json())
+      .then(items=>{
+        const result={};
+        items.forEach(item=>{
+          result[item.date]={icon:item.weather_icon,max:item.max_temp,min:item.min_temp};
+        });
+        setWeatherData(result);
+      })
+      .catch(()=>{});
+  },[]);
   const rData=useMemo(()=>genRatings(date,slot),[date,slot]);
   const sData=useMemo(()=>rData.map(e=>{const t=ST.reduce((s,st)=>s+(e[st.id]||0),0);const o={time:e.time,minute:e.minute};ST.forEach(s=>{o[s.id]=t>0?(e[s.id]/t)*100:0;});return o;}),[rData]);
   const dData=metric==="share"?sData:rData;
@@ -2328,7 +2355,7 @@ export default function App(){
     return <div style={{width:"100%",minHeight:"100vh",background:"#F8F9FB",fontFamily:"system-ui,-apple-system,sans-serif",color:"#111827"}}>
       <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       <NavBar/>
-      <AnalysisPage page={page} setPage={setPage} metric={metric} setMetric={setMetric} ratingsCache={ratingsCache}
+      <AnalysisPage page={page} setPage={setPage} metric={metric} setMetric={setMetric} ratingsCache={ratingsCache} weatherData={weatherData}
         mode={aMode} setMode={setAMode} selDate={aDate} setSelDate={setADate}
         selWeek={aWeek} setSelWeek={setAWeek} slot={aSlot} setSlot={setASlot}
         tab={aTab} setTab={setATab} overviewText={aOverview} setOverviewText={setAOverview}
@@ -2353,6 +2380,7 @@ export default function App(){
           {dates.map(d=><option key={d} value={d}>{d} ({dow(d)})</option>)}
         </select>
       </div>
+      <WeatherBadge weather={weatherData[date]}/>
       <div style={{display:"flex",borderRadius:7,overflow:"hidden",border:"1px solid #E5E7EB"}}>
         {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 16:00–19:30"}].map(s=><button key={s.id} onClick={()=>{setSlot(s.id);setSelMin(null);setHL(null);}} style={{padding:"4px 13px",border:"none",background:slot===s.id?"#FFF7ED":"#fff",color:slot===s.id?"#D94F00":"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600}}>{s.l}</button>)}
       </div>
