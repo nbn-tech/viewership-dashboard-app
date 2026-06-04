@@ -1125,19 +1125,22 @@ function ModalChart({rData,sData,mainStId,mainStColor,sM,eM,activeRivals,rivals}
   </svg>;
 }
 
-function CornerModal({corner,cache,onClose,onNavigate}){
+function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,weatherData}){
   const[activeRivals,setActiveRivals]=useState(new Set());
   const st=ST.find(s=>s.id===corner.stId);
-  const navCorners=useMemo(()=>{
+  // navList が渡されていれば検索結果順ナビ、なければ同局同日の時間順ナビ
+  const{prevCorner,nextCorner}=useMemo(()=>{
+    if(navList&&navListIdx!=null){
+      return{prevCorner:navListIdx>0?navList[navListIdx-1]:null,nextCorner:navListIdx<navList.length-1?navList[navListIdx+1]:null};
+    }
     const tpl=corner.slot==="morning"?getDailyMorn(corner.date):getDailyEve(corner.date);
     const progs=tpl[corner.stId]||[];
     const list=[];
     for(const[n,,,cs] of progs)for(const c of cs)list.push({progName:n,title:c[0],startMin:c[1],endMin:c[2],segment:c[3],tags:c[4],summary:c[5],stId:corner.stId,date:corner.date,slot:corner.slot});
-    return list.sort((a,b)=>t2m(a.startMin)-t2m(b.startMin));
-  },[corner.stId,corner.date,corner.slot]);
-  const navIdx=navCorners.findIndex(c=>c.startMin===corner.startMin&&c.title===corner.title);
-  const prevCorner=navIdx>0?navCorners[navIdx-1]:null;
-  const nextCorner=navIdx<navCorners.length-1?navCorners[navIdx+1]:null;
+    list.sort((a,b)=>t2m(a.startMin)-t2m(b.startMin));
+    const idx=list.findIndex(c=>c.startMin===corner.startMin&&c.title===corner.title);
+    return{prevCorner:idx>0?list[idx-1]:null,nextCorner:idx<list.length-1?list[idx+1]:null};
+  },[corner,navList,navListIdx]);
   const navBtn=(c,label)=><button onClick={()=>c&&onNavigate&&onNavigate(c)} disabled={!c} style={{background:c?"#F3F4F6":"#FAFAFA",border:"1px solid #E5E7EB",borderRadius:6,width:28,height:28,cursor:c?"pointer":"default",fontSize:13,color:c?"#374151":"#D1D5DB",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{label}</button>;
   const sg=SEG[corner.segment]||SEG.other;
   const sM=t2m(corner.startMin),eM=t2m(corner.endMin);
@@ -1200,6 +1203,7 @@ function CornerModal({corner,cache,onClose,onNavigate}){
             <span style={{background:st.c,color:"#fff",fontSize:10,fontWeight:800,padding:"2px 7px",borderRadius:4,fontFamily:"monospace"}}>{corner.stId}</span>
             <span style={{background:sg.c,color:"#fff",fontSize:9,fontWeight:700,padding:"1.5px 6px",borderRadius:3}}>{sg.lb}</span>
             <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace"}}>{corner.date} ({dow}) {corner.startMin}–{corner.endMin} {corner.slot==="morning"?"朝":"夕方"}</span>
+            {weatherData?.[corner.date]&&<span style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:10,color:"#0369A1",fontFamily:"monospace",background:"#F0F9FF",border:"1px solid #BAE6FD",borderRadius:4,padding:"0px 6px"}}><span style={{fontSize:12}}>{weatherData[corner.date].icon}</span>{weatherData[corner.date].max.toFixed(1)}℃ | {weatherData[corner.date].min.toFixed(1)}℃</span>}
           </div>
           <div style={{fontSize:9,color:"#9CA3AF",marginBottom:1}}>📺 {corner.progName}</div>
           <div style={{fontSize:15,fontWeight:700,color:"#111827",lineHeight:1.3,marginBottom:4}}>{corner.title}</div>
@@ -1304,8 +1308,9 @@ function CornerModal({corner,cache,onClose,onNavigate}){
 function SearchPage({page,setPage,metric,setMetric,
   query,setQuery,searchMode,setSearchMode,matchedIdxs,setMatchedIdxs,
   selStations,setSelStations,selSlots,setSelSlots,dateFrom,setDateFrom,dateTo,setDateTo,sortBy,setSortBy,
-  setATopicQuery,setATab}){
+  setATopicQuery,setATab,weatherData}){
   const[modalCorner,setModalCorner]=useState(null);
+  const[modalCornerIdx,setModalCornerIdx]=useState(null);
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState(null);
   const index=useMemo(()=>buildCornerIndex(),[]);
@@ -1420,11 +1425,12 @@ function SearchPage({page,setPage,metric,setMetric,
             const st=ST.find(s=>s.id===c.stId);
             const sg=SEG[c.segment]||SEG.other;
             const{iV,oV,avg,df}=c.stats;
-            return <div key={c.id+i} onClick={()=>setModalCorner(c)} style={{display:"grid",gridTemplateColumns:"90px 60px 1fr 80px 80px 80px 80px",gap:8,padding:"10px 12px",borderBottom:i<displayResults.length-1?"1px solid #F3F4F6":"none",alignItems:"start",fontSize:11.5,background:c.segment==="cm"?"#FAFAFA":"#fff",animation:`fi 0.25s ease ${Math.min(i*0.015,0.4)}s both`,cursor:"pointer",transition:"background 0.1s"}} onMouseEnter={e=>e.currentTarget.style.background="#F0F9FF"} onMouseLeave={e=>e.currentTarget.style.background=c.segment==="cm"?"#FAFAFA":"#fff"}>
+            return <div key={c.id+i} onClick={()=>{setModalCorner(c);setModalCornerIdx(i);}} style={{display:"grid",gridTemplateColumns:"90px 60px 1fr 80px 80px 80px 80px",gap:8,padding:"10px 12px",borderBottom:i<displayResults.length-1?"1px solid #F3F4F6":"none",alignItems:"start",fontSize:11.5,background:c.segment==="cm"?"#FAFAFA":"#fff",animation:`fi 0.25s ease ${Math.min(i*0.015,0.4)}s both`,cursor:"pointer",transition:"background 0.1s"}} onMouseEnter={e=>e.currentTarget.style.background="#F0F9FF"} onMouseLeave={e=>e.currentTarget.style.background=c.segment==="cm"?"#FAFAFA":"#fff"}>
               <div style={{fontFamily:"monospace",fontSize:10.5,color:"#6B7280",lineHeight:1.4}}>
                 <div style={{color:"#111827",fontWeight:600}}>{c.date.slice(5)}({dow(c.date)})</div>
                 <div style={{fontSize:9.5,color:"#9CA3AF"}}>{c.startMin}–{c.endMin}</div>
                 <div style={{fontSize:9,color:"#9CA3AF",marginTop:1}}>{c.slot==="morning"?"朝":"夕方"}</div>
+                {weatherData?.[c.date]&&<div style={{fontSize:9,color:"#0369A1",marginTop:2}}>{weatherData[c.date].icon} {weatherData[c.date].max.toFixed(0)}℃/{weatherData[c.date].min.toFixed(0)}℃</div>}
               </div>
               <div><span style={{background:st.c,color:"#fff",fontSize:9,fontWeight:800,padding:"2px 5px",borderRadius:3,fontFamily:"monospace"}}>{c.stId}</span></div>
               <div style={{minWidth:0}}>
@@ -1445,7 +1451,7 @@ function SearchPage({page,setPage,metric,setMetric,
         </div>
       </>}
     </div>
-    {modalCorner&&<CornerModal corner={modalCorner} cache={ratingsCache} onClose={()=>setModalCorner(null)}/>}
+    {modalCorner&&<CornerModal corner={modalCorner} cache={ratingsCache} onClose={()=>{setModalCorner(null);setModalCornerIdx(null);}} navList={displayResults} navIdx={modalCornerIdx} onNavigate={(c)=>{setModalCorner(c);setModalCornerIdx(displayResults.indexOf(c));}} weatherData={weatherData}/>}
   </>;
 }
 
@@ -2087,12 +2093,22 @@ const PM_SLOT=_UP.get('slot')||(PM_START>=960?'evening':'morning');
 // 番組表ページ (ランディング)
 // ============================================================
 const GUIDE_PPM_STEPS=[2,3,4,6,8,12,16];
+const GUIDE_DATE_MIN="2025-06-25";
+const GUIDE_DATE_MAX=(()=>{
+  const t=new Date();
+  const d=t.getDay();
+  const back=d===0?6:d-1; // 直近月曜まで遡る日数
+  t.setDate(t.getDate()-back);
+  return t.toISOString().slice(0,10);
+})();
+
 function ProgramGuidePage(){
-  const[guideDate,setGuideDate]=useState("2026-04-17");
+  const[guideDate,setGuideDate]=useState(GUIDE_DATE_MAX);
   const[programs,setPrograms]=useState(null);
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState(null);
   const[ppmIdx,setPpmIdx]=useState(3); // index3=6px/分(約2時間)
+  const[tooltip,setTooltip]=useState(null); // {title,avg,stId,x,y}
 
   const mornR=useMemo(()=>genRatings(guideDate,'morning'),[guideDate]);
   const eveR=useMemo(()=>genRatings(guideDate,'evening'),[guideDate]);
@@ -2154,6 +2170,7 @@ function ProgramGuidePage(){
     <div style={{padding:"10px 18px",borderBottom:"1px solid #E5E7EB",background:"#fff",display:"flex",alignItems:"center",gap:12,flexShrink:0,flexWrap:"wrap"}}>
       <span style={{fontSize:13,fontWeight:700,color:"#111827"}}>📺 番組表</span>
       <input type="date" value={guideDate} onChange={e=>setGuideDate(e.target.value)}
+        min={GUIDE_DATE_MIN} max={GUIDE_DATE_MAX}
         style={{border:"1px solid #E5E7EB",borderRadius:5,padding:"4px 8px",fontSize:12,fontFamily:"monospace",outline:"none",cursor:"pointer"}}/>
       {loading&&<span style={{fontSize:11,color:"#9CA3AF"}}>⏳ 読み込み中...</span>}
       {error&&<span style={{fontSize:11,color:"#DC2626"}}>⚠ {error} (S3 CORSの設定をご確認ください)</span>}
@@ -2166,6 +2183,10 @@ function ProgramGuidePage(){
         <button onClick={()=>setPpmIdx(i=>Math.min(GUIDE_PPM_STEPS.length-1,i+1))} disabled={ppmIdx===GUIDE_PPM_STEPS.length-1} style={{width:24,height:24,border:"none",background:"transparent",cursor:ppmIdx===GUIDE_PPM_STEPS.length-1?"default":"pointer",fontSize:16,color:ppmIdx===GUIDE_PPM_STEPS.length-1?"#D1D5DB":"#374151",borderRadius:4,display:"flex",alignItems:"center",justifyContent:"center"}}>＋</button>
       </div>
     </div>
+    {tooltip&&<div style={{position:"fixed",left:tooltip.x+14,top:tooltip.y-10,background:"#1F2937",color:"#fff",padding:"7px 11px",borderRadius:7,fontSize:11.5,pointerEvents:"none",zIndex:9999,maxWidth:220,boxShadow:"0 4px 16px rgba(0,0,0,0.25)",lineHeight:1.5}}>
+      <div style={{fontWeight:700,marginBottom:tooltip.avg!==null?3:0,wordBreak:"break-all"}}>{tooltip.title}</div>
+      {tooltip.avg!==null&&<div style={{fontFamily:"monospace",color:(ST.find(s=>s.id===tooltip.stId)||{c:"#60A5FA"}).c,fontWeight:700}}>平均 {tooltip.avg.toFixed(2)}%</div>}
+    </div>}
     {!programs&&!loading&&!error&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>日付を選択してください</div>}
     {loading&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>読み込み中...</div>}
     {programs&&<div style={{flex:1,overflow:"auto"}}>
@@ -2203,8 +2224,8 @@ function ProgramGuidePage(){
                 const compact=h<46;
                 return <div key={i} onClick={()=>openProgram(p,sid)}
                   style={{position:"absolute",top,left:2,right:2,height:h,background:"#fff",border:"1px solid #E5E7EB",borderLeft:`3px solid ${st.c}`,borderRadius:3,padding:"3px 5px",overflow:"hidden",cursor:"pointer",fontSize:10,display:"flex",flexDirection:"column",gap:1,transition:"background 0.1s"}}
-                  onMouseEnter={e=>{e.currentTarget.style.background="#EFF6FF";e.currentTarget.style.borderColor="#BFDBFE";}}
-                  onMouseLeave={e=>{e.currentTarget.style.background="#fff";e.currentTarget.style.borderColor="#E5E7EB";}}>
+                  onMouseMove={e=>{e.currentTarget.style.background="#EFF6FF";e.currentTarget.style.borderColor="#BFDBFE";setTooltip({title:p.title,avg,stId:sid,x:e.clientX,y:e.clientY});}}
+                  onMouseLeave={e=>{e.currentTarget.style.background="#fff";e.currentTarget.style.borderColor="#E5E7EB";setTooltip(null);}}>
                   <div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",flexShrink:0}}>{p.start_time}</div>
                   <div style={{fontSize:compact?9.5:11,fontWeight:600,color:"#111827",lineHeight:1.25,overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:compact?1:2,WebkitBoxOrient:"vertical",flex:1}}>{p.title}</div>
                   {avg!==null&&<div style={{fontSize:h<46?10:15,fontWeight:700,color:st.c,fontFamily:"monospace",flexShrink:0,marginTop:"auto"}}>{avg.toFixed(2)}%</div>}
@@ -2349,7 +2370,7 @@ export default function App(){
         dateFrom={sDateFrom} setDateFrom={setSDateFrom}
         dateTo={sDateTo} setDateTo={setSDateTo}
         sortBy={sSortBy} setSortBy={setSSortBy}
-        setATopicQuery={setATopicQuery} setATab={setATab}/>
+        setATopicQuery={setATopicQuery} setATab={setATab} weatherData={weatherData}/>
     </div>;
   }
   if(page==="analysis"){
