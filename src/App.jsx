@@ -751,7 +751,7 @@ function Chart({data,sel,onClick,selMin,hl,metric,onPan}){
       {sel.map(sid=>{const st=ST.find(s=>s.id===sid);const iH=hl?.stationId===sid;const hH=!!hl;return <path key={sid} d={data.map((dt,i)=>`${i===0?"M":"L"}${xS(i)},${yS(dt[sid])}`).join(" ")} fill="none" stroke={st.c} strokeWidth={hH?(iH?1:0.8):1.5} opacity={hH?(iH?0.3:0.15):0.85}/>;})}
       {hl&&hs>=0&&he>=0&&sel.includes(hl.stationId)&&(()=>{const sid=hl.stationId;const st=ST.find(s=>s.id===sid);const s0=Math.max(hs,0),s1=Math.min(he,data.length-1);const sg=data.slice(s0,s1+1).map((dt,i)=>`${i===0?"M":"L"}${xS(s0+i)},${yS(dt[sid])}`).join(" ");return <><path d={sg} fill="none" stroke={st.c} strokeWidth={3.5} opacity={1} strokeLinecap="round"/><circle cx={xS(s0)} cy={yS(data[s0][sid])} r={4} fill={st.c} stroke="#fff" strokeWidth={2}/><circle cx={xS(s1)} cy={yS(data[s1][sid])} r={4} fill={st.c} stroke="#fff" strokeWidth={2}/></>;})()}
       {si>=0&&<line x1={xS(si)} x2={xS(si)} y1={p.t} y2={p.t+cH} stroke="#6B7280" strokeWidth={1} strokeDasharray="4,4"/>}
-      {hv!==null&&<>
+      {hv!==null&&data[hv]&&<>
         <line x1={xS(hv)} x2={xS(hv)} y1={p.t} y2={p.t+cH} stroke="#D1D5DB" strokeWidth={1}/>
         {sel.map(sid=>{const st=ST.find(s=>s.id===sid);return <circle key={sid} cx={xS(hv)} cy={yS(data[hv][sid])} r={3} fill={st.c} stroke="#fff" strokeWidth={1.5}/>;})}
         <g>
@@ -2221,7 +2221,7 @@ function ProgramGuidePage(){
 export default function App(){
   const[date,setDate]=useState(PROGRAM_MODE?PM_DATE:"2026-04-01");
   const[slot,setSlot]=useState(PROGRAM_MODE?PM_SLOT:"morning");
-  const[sel,setSel]=useState(PROGRAM_MODE?[...new Set([PM_STATION,"THK","CTV","CBC","NHK"])]:ST.map(s=>s.id));
+  const[sel,setSel]=useState(PROGRAM_MODE?[...new Set([PM_STATION,"NBN","THK","CTV","CBC","NHK"])]:ST.map(s=>s.id));
   const[selMin,setSelMin]=useState(null);
   const[selData,setSelData]=useState(null);
   const[hl,setHL]=useState(null);
@@ -2282,7 +2282,8 @@ export default function App(){
   const winEnd=effectiveCenter!==null?Math.min(slotEnd,effectiveCenter+zoomHalf):slotEnd;
   const chartData=useMemo(()=>{
     if(effectiveCenter===null)return dData;
-    return dData.filter(d=>d.minute>=winStart&&d.minute<=winEnd);
+    const filtered=dData.filter(d=>d.minute>=winStart&&d.minute<=winEnd);
+    return filtered.length>0?filtered:dData;
   },[dData,effectiveCenter,winStart,winEnd]);
   const handlePan=useCallback((deltaMin)=>{
     setPanCenter(c=>{
