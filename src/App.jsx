@@ -884,6 +884,16 @@ function TimetableView({slot,sel,allR,allS,metric,date,onCornerClick}){
 const ALL_DATES=(()=>{const d=[];for(let i=1;i<=14;i++){d.push(`2026-04-${String(i).padStart(2,"0")}`);}d.push("2026-04-17");return d;})();
 const ALL_SLOTS=["morning","evening"];
 
+// 番組表・Dashboard 共通の日付範囲定数
+const GUIDE_DATE_MIN="2025-06-25";
+const GUIDE_DATE_MAX=(()=>{
+  const t=new Date();
+  const d=t.getDay();
+  const back=d===0?6:d-1;
+  t.setDate(t.getDate()-back);
+  return t.toISOString().slice(0,10);
+})();
+
 // Dashboard 日付セレクタ用: 番組表と同じ範囲（GUIDE_DATE_MIN〜GUIDE_DATE_MAX）
 const DASHBOARD_DATES=(()=>{
   const d=[];
@@ -2116,14 +2126,6 @@ const PM_SLOT=_UP.get('slot')||(PM_START>=960?'evening':'morning');
 // 番組表ページ (ランディング)
 // ============================================================
 const GUIDE_PPM_STEPS=[2,3,4,6,8,12,16];
-const GUIDE_DATE_MIN="2025-06-25";
-const GUIDE_DATE_MAX=(()=>{
-  const t=new Date();
-  const d=t.getDay();
-  const back=d===0?6:d-1; // 直近月曜まで遡る日数
-  t.setDate(t.getDate()-back);
-  return t.toISOString().slice(0,10);
-})();
 
 function ProgramGuidePage(){
   const[guideDate,setGuideDate]=useState(GUIDE_DATE_MAX);
