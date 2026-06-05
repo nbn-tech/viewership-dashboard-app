@@ -2127,7 +2127,7 @@ const PM_SLOT=_UP.get('slot')||(PM_START>=960?'evening':'morning');
 // ============================================================
 const GUIDE_PPM_STEPS=[2,3,4,6,8,12,16];
 
-function ProgramGuidePage(){
+function ProgramGuidePage({metric="rating"}){
   const[guideDate,setGuideDate]=useState(GUIDE_DATE_MAX);
   const[programs,setPrograms]=useState(null);
   const[loading,setLoading]=useState(false);
@@ -2151,7 +2151,7 @@ function ProgramGuidePage(){
       .finally(()=>setLoading(false));
   },[guideDate]);
 
-  // 番組の平均視聴率を計算 (朝・夕方帯のみ)
+  // 番組の平均視聴率 or 占拠率を計算 (朝・夕方帯のみ)
   const calcAvg=(stId,startMin,endMin)=>{
     const adj=m=>m>1440?m-1440:m;
     const aS=adj(startMin),aE=adj(endMin);
@@ -2163,6 +2163,12 @@ function ProgramGuidePage(){
     if(iS>=iE)return null;
     const slice=raw.slice(iS,iE);
     if(!slice.length)return null;
+    if(metric==="share"){
+      return slice.reduce((s,d)=>{
+        const total=ST.reduce((t,st)=>t+(d[st.id]||0),0);
+        return s+(total>0?(d[stId]||0)/total*100:0);
+      },0)/slice.length;
+    }
     return slice.reduce((s,d)=>s+(d[stId]||0),0)/slice.length;
   };
 
@@ -2215,7 +2221,7 @@ function ProgramGuidePage(){
     </div>
     {tooltip&&<div style={{position:"fixed",left:tooltip.x+14,top:tooltip.y-10,background:"#1F2937",color:"#fff",padding:"7px 11px",borderRadius:7,fontSize:11.5,pointerEvents:"none",zIndex:9999,maxWidth:220,boxShadow:"0 4px 16px rgba(0,0,0,0.25)",lineHeight:1.5}}>
       <div style={{fontWeight:700,marginBottom:tooltip.avg!==null?3:0,wordBreak:"break-all"}}>{tooltip.title}</div>
-      {tooltip.avg!==null&&<div style={{fontFamily:"monospace",color:(ST.find(s=>s.id===tooltip.stId)||{c:"#60A5FA"}).c,fontWeight:700}}>平均 {tooltip.avg.toFixed(2)}%</div>}
+      {tooltip.avg!==null&&<div style={{fontFamily:"monospace",color:(ST.find(s=>s.id===tooltip.stId)||{c:"#60A5FA"}).c,fontWeight:700}}>平均 {tooltip.avg.toFixed(1)}%</div>}
     </div>}
     {guideModal&&<CornerModal corner={guideModal.corner} cache={rCache} onClose={()=>setGuideModal(null)} navList={guideModal.navList} navIdx={guideModal.idx} onNavigate={c=>{const idx=guideModal.navList.findIndex(item=>item.title===c.title&&item.startMin===c.startMin);setGuideModal({...guideModal,corner:c,idx});}} dashboardUrl={guideModal.corner._dashUrl}/>}
     {!programs&&!loading&&!error&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>日付を選択してください</div>}
@@ -2259,7 +2265,7 @@ function ProgramGuidePage(){
                   onMouseLeave={e=>{e.currentTarget.style.background="#fff";e.currentTarget.style.borderColor="#E5E7EB";setTooltip(null);}}>
                   <div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",flexShrink:0}}>{p.start_time}</div>
                   <div style={{fontSize:compact?9.5:11,fontWeight:600,color:"#111827",lineHeight:1.25,overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:compact?1:2,WebkitBoxOrient:"vertical",flex:1}}>{p.title}</div>
-                  {avg!==null&&<div style={{fontSize:h<46?10:15,fontWeight:700,color:st.c,fontFamily:"monospace",flexShrink:0,marginTop:"auto"}}>{avg.toFixed(2)}%</div>}
+                  {avg!==null&&<div style={{fontSize:h<46?10:15,fontWeight:700,color:st.c,fontFamily:"monospace",flexShrink:0,marginTop:"auto"}}>{avg.toFixed(1)}%<span style={{fontSize:8,opacity:0.7,marginLeft:1}}>{metric==="share"?"占拠":"視聴"}</span></div>}
                 </div>;
               })}
             </div>
@@ -2386,7 +2392,7 @@ export default function App(){
     return <div style={{width:"100%",minHeight:"100vh",background:"#F8F9FB",fontFamily:"system-ui,-apple-system,sans-serif",color:"#111827"}}>
       <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}`}</style>
       <NavBar/>
-      <ProgramGuidePage/>
+      <ProgramGuidePage metric={metric}/>
     </div>;
   }
   if(page==="search"){
