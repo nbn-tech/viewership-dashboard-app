@@ -2132,6 +2132,7 @@ function ProgramGuidePage(){
   const[error,setError]=useState(null);
   const[ppmIdx,setPpmIdx]=useState(3); // index3=6px/分(約2時間)
   const[tooltip,setTooltip]=useState(null); // {title,avg,stId,x,y}
+  const[guideModal,setGuideModal]=useState(null); // {corner, navList, idx}
 
   const mornR=useMemo(()=>getRatings(guideDate,'morning'),[guideDate]);
   const eveR=useMemo(()=>getRatings(guideDate,'evening'),[guideDate]);
@@ -2140,7 +2141,7 @@ function ProgramGuidePage(){
   useEffect(()=>{
     const yyyymmdd=guideDate.replace(/-/g,'');
     const url=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/epg-all/bangumi_${yyyymmdd}.csv`;
-    setLoading(true);setError(null);setPrograms(null);
+    setLoading(true);setError(null);setPrograms(null);setGuideModal(null);
     fetch(url)
       .then(r=>{if(!r.ok)throw new Error(`データ取得エラー (HTTP ${r.status})`);return r.text();})
       .then(text=>{const p=parseGuideCSV(text);setPrograms(p);})
@@ -2170,23 +2171,22 @@ function ProgramGuidePage(){
     return r;
   },[programs]);
 
-  const[guideModal,setGuideModal]=useState(null);
-
-  // 番組→コーナー風オブジェクトに変換
-  const makeGuideCorner=(p,stId)=>{
+  // 番組→コーナー風オブジェクトに変換（クリック時に呼ぶ）
+  const makeGuideCorner=(p,stId,date)=>{
     const adj=m=>m>1440?m-1440:m;
     const aS=adj(p.startMin),aE=adj(p.endMin);
     const mid=(aS+aE)/2;
     const slot=mid>=960&&mid<1170?'evening':'morning';
-    const params=new URLSearchParams({mode:'program',station:stId,date:guideDate,start:aS,end:aE,name:encodeURIComponent(p.title),slot});
-    return{stId,date:guideDate,slot,startMin:m2t(aS),endMin:m2t(Math.min(aE,slot==='morning'?509:1169)),title:p.title,progName:p.title,segment:"other",tags:[],summary:"",_dashUrl:`${window.location.origin}${window.location.pathname}?${params}`};
+    const params=new URLSearchParams({mode:'program',station:stId,date,start:aS,end:aE,name:encodeURIComponent(p.title),slot});
+    return{stId,date,slot,startMin:m2t(aS),endMin:m2t(Math.min(aE,slot==='morning'?509:1169)),title:p.title,progName:p.title,segment:"other",tags:[],summary:"",_dashUrl:`${window.location.origin}${window.location.pathname}?${params}`};
   };
 
-  // 同局の番組リスト（◀▶ナビ用）
-  const guideNavList=useMemo(()=>{
-    if(!programs)return[];
-    return programs.filter(p=>p.stId===guideModal?.corner?.stId).map(p=>makeGuideCorner(p,p.stId)).sort((a,b)=>t2m(a.startMin)-t2m(b.startMin));
-  },[programs,guideDate,guideModal?.corner?.stId]);
+  const openGuideModal=(p,stId)=>{
+    const c=makeGuideCorner(p,stId,guideDate);
+    const navList=(programs||[]).filter(pr=>pr.stId===stId).map(pr=>makeGuideCorner(pr,stId,guideDate)).sort((a,b)=>t2m(a.startMin)-t2m(b.startMin));
+    const idx=navList.findIndex(item=>item.title===c.title&&item.startMin===c.startMin);
+    setGuideModal({corner:c,navList,idx});
+  };
 
   const G_START=300,G_END=1740;
   const PPM=GUIDE_PPM_STEPS[ppmIdx];
@@ -2215,7 +2215,7 @@ function ProgramGuidePage(){
       <div style={{fontWeight:700,marginBottom:tooltip.avg!==null?3:0,wordBreak:"break-all"}}>{tooltip.title}</div>
       {tooltip.avg!==null&&<div style={{fontFamily:"monospace",color:(ST.find(s=>s.id===tooltip.stId)||{c:"#60A5FA"}).c,fontWeight:700}}>平均 {tooltip.avg.toFixed(2)}%</div>}
     </div>}
-    {guideModal&&<CornerModal corner={guideModal.corner} cache={rCache} onClose={()=>setGuideModal(null)} navList={guideNavList} navIdx={guideModal.idx} onNavigate={c=>{const idx=guideNavList.findIndex(item=>item.title===c.title&&item.startMin===c.startMin);setGuideModal({corner:c,idx});}} dashboardUrl={guideModal.corner._dashUrl}/>}
+    {guideModal&&<CornerModal corner={guideModal.corner} cache={rCache} onClose={()=>setGuideModal(null)} navList={guideModal.navList} navIdx={guideModal.idx} onNavigate={c=>{const idx=guideModal.navList.findIndex(item=>item.title===c.title&&item.startMin===c.startMin);setGuideModal({...guideModal,corner:c,idx});}} dashboardUrl={guideModal.corner._dashUrl}/>}
     {!programs&&!loading&&!error&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>日付を選択してください</div>}
     {loading&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>読み込み中...</div>}
     {programs&&<div style={{flex:1,overflow:"auto"}}>
@@ -2251,7 +2251,7 @@ function ProgramGuidePage(){
                 const h=Math.max(22,bot-top-1);
                 const avg=calcAvg(sid,p.startMin,p.endMin);
                 const compact=h<46;
-                return <div key={i} onClick={()=>{const c=makeGuideCorner(p,sid);const idx=programs.filter(pr=>pr.stId===sid).map(pr=>makeGuideCorner(pr,sid)).sort((a,b)=>t2m(a.startMin)-t2m(b.startMin)).findIndex(item=>item.title===c.title&&item.startMin===c.startMin);setGuideModal({corner:c,idx});}}
+                return <div key={i} onClick={()=>openGuideModal(p,sid)}
                   style={{position:"absolute",top,left:2,right:2,height:h,background:"#fff",border:"1px solid #E5E7EB",borderLeft:`3px solid ${st.c}`,borderRadius:3,padding:"3px 5px",overflow:"hidden",cursor:"pointer",fontSize:10,display:"flex",flexDirection:"column",gap:1,transition:"background 0.1s"}}
                   onMouseMove={e=>{e.currentTarget.style.background="#EFF6FF";e.currentTarget.style.borderColor="#BFDBFE";setTooltip({title:p.title,avg,stId:sid,x:e.clientX,y:e.clientY});}}
                   onMouseLeave={e=>{e.currentTarget.style.background="#fff";e.currentTarget.style.borderColor="#E5E7EB";setTooltip(null);}}>
