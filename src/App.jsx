@@ -880,8 +880,29 @@ function TimetableView({slot,sel,allR,allS,metric,date,onCornerClick}){
 }
 
 // ============= Search Page =============
+// Search / Analysis で使う実データ対象日（視聴率の実データがある日）
 const ALL_DATES=(()=>{const d=[];for(let i=1;i<=14;i++){d.push(`2026-04-${String(i).padStart(2,"0")}`);}d.push("2026-04-17");return d;})();
 const ALL_SLOTS=["morning","evening"];
+
+// Dashboard 日付セレクタ用: 番組表と同じ範囲（GUIDE_DATE_MIN〜GUIDE_DATE_MAX）
+const DASHBOARD_DATES=(()=>{
+  const d=[];
+  const cur=new Date(GUIDE_DATE_MIN);
+  const end=new Date(GUIDE_DATE_MAX);
+  while(cur<=end){d.push(cur.toISOString().slice(0,10));cur.setDate(cur.getDate()+1);}
+  return d;
+})();
+
+// 視聴率遅延キャッシュ
+// TODO: AWS移行時は genRatings → S3/DynamoDB APIへの差し替えポイント
+const rCache={};
+function getRatings(date,slot){
+  const key=`${date}|${slot}`;
+  if(!rCache[key])rCache[key]=genRatings(date,slot);
+  return rCache[key];
+}
+// ALL_DATES分を初期ロード（Search/Analysisで使用）
+(()=>{for(const d of ALL_DATES)for(const s of ALL_SLOTS)getRatings(d,s);})();
 
 function buildCornerIndex(){
   const idx=[];
@@ -1125,7 +1146,7 @@ function ModalChart({rData,sData,mainStId,mainStColor,sM,eM,activeRivals,rivals}
   </svg>;
 }
 
-function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,weatherData}){
+function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,weatherData,dashboardUrl}){
   const[activeRivals,setActiveRivals]=useState(new Set());
   const st=ST.find(s=>s.id===corner.stId);
   // navList が渡されていれば検索結果順ナビ、なければ同局同日の時間順ナビ
@@ -1148,7 +1169,7 @@ function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,
   const sData=useMemo(()=>rData.map(e=>{const t=ST.reduce((s,st2)=>s+(e[st2.id]||0),0);const o={time:e.time,minute:e.minute};ST.forEach(s=>{o[s.id]=t>0?(e[s.id]/t)*100:0;});return o;}),[rData]);
   const sliceR=rData.filter(d=>d.minute>=sM&&d.minute<=eM);
   const sliceS=sData.filter(d=>d.minute>=sM&&d.minute<=eM);
-  const fmt=(v,isShare)=>v!=null?(isShare?v.toFixed(1):v.toFixed(2))+"%":"—";
+  const fmt=(v,isShare)=>v!=null?v.toFixed(1)+"%":"—";
   const iVr=sliceR[0]?.[corner.stId]??null;
   const oVr=sliceR[sliceR.length-1]?.[corner.stId]??null;
   const avgR=sliceR.length?sliceR.reduce((s,d)=>s+d[corner.stId],0)/sliceR.length:null;
@@ -1208,11 +1229,14 @@ function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,
           <div style={{fontSize:9,color:"#9CA3AF",marginBottom:1}}>📺 {corner.progName}</div>
           <div style={{fontSize:15,fontWeight:700,color:"#111827",lineHeight:1.3,marginBottom:4}}>{corner.title}</div>
           {corner.tags.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:4}}>{corner.tags.map(t=><span key={t} style={{padding:"1px 6px",fontSize:9,border:"1px solid #E5E7EB",borderRadius:3,color:"#6B7280",background:"#F9FAFB"}}>#{t}</span>)}</div>}
-          <div style={{fontSize:10.5,color:"#6B7280",lineHeight:1.55,padding:"6px 10px",background:"#F9FAFB",borderRadius:5,borderLeft:`2px solid ${st.c}`}}>{corner.summary}</div>
+          {corner.summary&&<div style={{fontSize:10.5,color:"#6B7280",lineHeight:1.55,padding:"6px 10px",background:"#F9FAFB",borderRadius:5,borderLeft:`2px solid ${st.c}`}}>{corner.summary}</div>}
         </div>
         <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:5,flexShrink:0}}>
           <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:6,width:28,height:28,cursor:"pointer",fontSize:14,color:"#6B7280",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
-          <div style={{display:"flex",gap:4}}>{navBtn(prevCorner,"◀")}{navBtn(nextCorner,"▶")}</div>
+          <div style={{display:"flex",gap:4}}>
+            {navBtn(prevCorner,"◀")}{navBtn(nextCorner,"▶")}
+            {dashboardUrl&&<button onClick={()=>window.open(dashboardUrl,'_blank')} title="Dashboardで詳細を見る" style={{background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:6,width:28,height:28,cursor:"pointer",fontSize:12,color:"#2563EB",display:"flex",alignItems:"center",justifyContent:"center"}}>📊</button>}
+          </div>
         </div>
       </div>
 
@@ -1225,7 +1249,7 @@ function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,padding:"10px 14px 8px",flexShrink:0}}>
             {[
               {lb:"視聴率 IN",v:fmt(iVr,false),c:st.c},{lb:"視聴率 OUT",v:fmt(oVr,false),c:st.c},
-              {lb:"視聴率 AVG",v:fmt(avgR,false),c:"#111827"},{lb:"視聴率 DIFF",v:dfR!=null?`${dfR>=0?"+":""}${dfR.toFixed(2)}%`:"—",c:dfR!=null?(dfR>=0?"#16A34A":"#DC2626"):"#9CA3AF"},
+              {lb:"視聴率 AVG",v:fmt(avgR,false),c:"#111827"},{lb:"視聴率 DIFF",v:dfR!=null?`${dfR>=0?"+":""}${dfR.toFixed(1)}%`:"—",c:dfR!=null?(dfR>=0?"#16A34A":"#DC2626"):"#9CA3AF"},
               {lb:"占拠率 IN",v:fmt(iVs,true),c:"#6366F1"},{lb:"占拠率 OUT",v:fmt(oVs,true),c:"#6366F1"},
               {lb:"占拠率 AVG",v:fmt(avgS,true),c:"#111827"},{lb:"占拠率 DIFF",v:dfS!=null?`${dfS>=0?"+":""}${dfS.toFixed(1)}%`:"—",c:dfS!=null?(dfS>=0?"#16A34A":"#DC2626"):"#9CA3AF"},
             ].map(({lb,v,c})=><div key={lb} style={{background:"#F9FAFB",borderRadius:6,padding:"5px 8px",border:"1px solid #F3F4F6"}}>
@@ -1250,12 +1274,11 @@ function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,
                   <div style={{width:18,height:2.5,background:"#6366F1",borderRadius:2}}/>
                   <span style={{fontSize:8.5,color:"#6B7280",fontFamily:"monospace"}}>{corner.stId} 占拠率</span>
                 </div>
-                {[...activeRivals].map(key=>{
-                  const rv=rivals.find(r=>r.key===key);if(!rv)return null;
-                  const rst=ST.find(s=>s.id===rv.sid);
-                  return <div key={key} style={{display:"flex",alignItems:"center",gap:4}}>
+                {[...new Set([...activeRivals].map(key=>rivals.find(r=>r.key===key)?.sid).filter(Boolean))].map(sid=>{
+                  const rst=ST.find(s=>s.id===sid);
+                  return <div key={sid} style={{display:"flex",alignItems:"center",gap:4}}>
                     <svg width="18" height="8"><line x1="0" y1="4" x2="18" y2="4" stroke={rst.c} strokeWidth="1.5" strokeDasharray="4,3"/></svg>
-                    <span style={{fontSize:8.5,color:rst.c,fontFamily:"monospace",fontWeight:700}}>{rv.sid}</span>
+                    <span style={{fontSize:8.5,color:rst.c,fontFamily:"monospace",fontWeight:700}}>{sid}</span>
                   </div>;
                 })}
               </div>
@@ -1314,7 +1337,7 @@ function SearchPage({page,setPage,metric,setMetric,
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState(null);
   const index=useMemo(()=>buildCornerIndex(),[]);
-  const ratingsCache=useMemo(()=>{const c={};for(const date of ALL_DATES)for(const slot of ALL_SLOTS)c[`${date}|${slot}`]=genRatings(date,slot);return c;},[]);
+  const ratingsCache=rCache;
 
   const togStation=id=>setSelStations(p=>p.includes(id)?p.filter(s=>s!==id):[...p,id]);
   const togSlot=id=>setSelSlots(p=>p.includes(id)?p.filter(s=>s!==id):[...p,id]);
@@ -1776,7 +1799,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
       </div>
       {mode==="daily"
         ?<><select value={selDate} onChange={e=>setSelDate(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"4px 8px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none"}}>
-          {ALL_DATES.map(d=><option key={d} value={d}>{d} ({dow(d)})</option>)}
+          {DASHBOARD_DATES.map(d=><option key={d} value={d}>{d} ({dow(d)})</option>)}
         </select><WeatherBadge weather={weatherData?.[selDate]}/></>
         :<select value={selWeek} onChange={e=>setSelWeek(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"4px 8px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none"}}>
           {WEEK_RANGES.map(w=><option key={w.id} value={w.id}>{w.label}</option>)}
@@ -2110,8 +2133,8 @@ function ProgramGuidePage(){
   const[ppmIdx,setPpmIdx]=useState(3); // index3=6px/分(約2時間)
   const[tooltip,setTooltip]=useState(null); // {title,avg,stId,x,y}
 
-  const mornR=useMemo(()=>genRatings(guideDate,'morning'),[guideDate]);
-  const eveR=useMemo(()=>genRatings(guideDate,'evening'),[guideDate]);
+  const mornR=useMemo(()=>getRatings(guideDate,'morning'),[guideDate]);
+  const eveR=useMemo(()=>getRatings(guideDate,'evening'),[guideDate]);
 
   // S3 から CSV を取得
   useEffect(()=>{
@@ -2147,18 +2170,23 @@ function ProgramGuidePage(){
     return r;
   },[programs]);
 
-  // 番組クリック→新タブでグラフを開く
-  const openProgram=(p,stId)=>{
+  const[guideModal,setGuideModal]=useState(null);
+
+  // 番組→コーナー風オブジェクトに変換
+  const makeGuideCorner=(p,stId)=>{
     const adj=m=>m>1440?m-1440:m;
     const aS=adj(p.startMin),aE=adj(p.endMin);
     const mid=(aS+aE)/2;
     const slot=mid>=960&&mid<1170?'evening':'morning';
-    const params=new URLSearchParams({
-      mode:'program',station:stId,date:guideDate,
-      start:aS,end:aE,name:encodeURIComponent(p.title),slot
-    });
-    window.open(`${window.location.origin}${window.location.pathname}?${params}`,'_blank');
+    const params=new URLSearchParams({mode:'program',station:stId,date:guideDate,start:aS,end:aE,name:encodeURIComponent(p.title),slot});
+    return{stId,date:guideDate,slot,startMin:m2t(aS),endMin:m2t(Math.min(aE,slot==='morning'?509:1169)),title:p.title,progName:p.title,segment:"other",tags:[],summary:"",_dashUrl:`${window.location.origin}${window.location.pathname}?${params}`};
   };
+
+  // 同局の番組リスト（◀▶ナビ用）
+  const guideNavList=useMemo(()=>{
+    if(!programs)return[];
+    return programs.filter(p=>p.stId===guideModal?.corner?.stId).map(p=>makeGuideCorner(p,p.stId)).sort((a,b)=>t2m(a.startMin)-t2m(b.startMin));
+  },[programs,guideDate,guideModal?.corner?.stId]);
 
   const G_START=300,G_END=1740;
   const PPM=GUIDE_PPM_STEPS[ppmIdx];
@@ -2187,6 +2215,7 @@ function ProgramGuidePage(){
       <div style={{fontWeight:700,marginBottom:tooltip.avg!==null?3:0,wordBreak:"break-all"}}>{tooltip.title}</div>
       {tooltip.avg!==null&&<div style={{fontFamily:"monospace",color:(ST.find(s=>s.id===tooltip.stId)||{c:"#60A5FA"}).c,fontWeight:700}}>平均 {tooltip.avg.toFixed(2)}%</div>}
     </div>}
+    {guideModal&&<CornerModal corner={guideModal.corner} cache={rCache} onClose={()=>setGuideModal(null)} navList={guideNavList} navIdx={guideModal.idx} onNavigate={c=>{const idx=guideNavList.findIndex(item=>item.title===c.title&&item.startMin===c.startMin);setGuideModal({corner:c,idx});}} dashboardUrl={guideModal.corner._dashUrl}/>}
     {!programs&&!loading&&!error&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>日付を選択してください</div>}
     {loading&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>読み込み中...</div>}
     {programs&&<div style={{flex:1,overflow:"auto"}}>
@@ -2222,7 +2251,7 @@ function ProgramGuidePage(){
                 const h=Math.max(22,bot-top-1);
                 const avg=calcAvg(sid,p.startMin,p.endMin);
                 const compact=h<46;
-                return <div key={i} onClick={()=>openProgram(p,sid)}
+                return <div key={i} onClick={()=>{const c=makeGuideCorner(p,sid);const idx=programs.filter(pr=>pr.stId===sid).map(pr=>makeGuideCorner(pr,sid)).sort((a,b)=>t2m(a.startMin)-t2m(b.startMin)).findIndex(item=>item.title===c.title&&item.startMin===c.startMin);setGuideModal({corner:c,idx});}}
                   style={{position:"absolute",top,left:2,right:2,height:h,background:"#fff",border:"1px solid #E5E7EB",borderLeft:`3px solid ${st.c}`,borderRadius:3,padding:"3px 5px",overflow:"hidden",cursor:"pointer",fontSize:10,display:"flex",flexDirection:"column",gap:1,transition:"background 0.1s"}}
                   onMouseMove={e=>{e.currentTarget.style.background="#EFF6FF";e.currentTarget.style.borderColor="#BFDBFE";setTooltip({title:p.title,avg,stId:sid,x:e.clientX,y:e.clientY});}}
                   onMouseLeave={e=>{e.currentTarget.style.background="#fff";e.currentTarget.style.borderColor="#E5E7EB";setTooltip(null);}}>
@@ -2240,7 +2269,7 @@ function ProgramGuidePage(){
 }
 
 export default function App(){
-  const[date,setDate]=useState(PROGRAM_MODE?PM_DATE:"2026-04-01");
+  const[date,setDate]=useState(PROGRAM_MODE?PM_DATE:GUIDE_DATE_MAX);
   const[slot,setSlot]=useState(PROGRAM_MODE?PM_SLOT:"morning");
   const[sel,setSel]=useState(PROGRAM_MODE?[...new Set([PM_STATION,"NBN","THK","CTV","CBC","NHK"])]:ST.map(s=>s.id));
   const[selMin,setSelMin]=useState(null);
@@ -2265,7 +2294,7 @@ export default function App(){
   const[sSortBy,setSSortBy]=useState("avg");
   // Analysis persistent state (kept across page switches)
   const[aMode,setAMode]=useState("daily");
-  const[aDate,setADate]=useState(ALL_DATES[0]);
+  const[aDate,setADate]=useState(GUIDE_DATE_MAX);
   const[aWeek,setAWeek]=useState(WEEK_RANGES[0].id);
   const[aSlot,setASlot]=useState("morning");
   const[aTab,setATab]=useState("overview");
@@ -2292,7 +2321,7 @@ export default function App(){
       })
       .catch(()=>{});
   },[]);
-  const rData=useMemo(()=>genRatings(date,slot),[date,slot]);
+  const rData=useMemo(()=>getRatings(date,slot),[date,slot]);
   const sData=useMemo(()=>rData.map(e=>{const t=ST.reduce((s,st)=>s+(e[st.id]||0),0);const o={time:e.time,minute:e.minute};ST.forEach(s=>{o[s.id]=t>0?(e[s.id]/t)*100:0;});return o;}),[rData]);
   const dData=metric==="share"?sData:rData;
   const zoomHalf=ZOOM_HALF[zoomLevel];
@@ -2321,7 +2350,7 @@ export default function App(){
       if(offset>=0)videoRef.current.currentTime=offset;
     }
   },[selMin,date,slot]);
-  const dates=useMemo(()=>{const d=[];for(let i=1;i<=14;i++)d.push(`2026-04-${String(i).padStart(2,"0")}`);d.push("2026-04-17");return d;},[]);
+  const dates=DASHBOARD_DATES;
   const dow=ds=>["日","月","火","水","木","金","土"][new Date(ds).getDay()];
   const isWd=ds=>{const d=new Date(ds).getDay();return d!==0&&d!==6;};
 
@@ -2349,7 +2378,7 @@ export default function App(){
     </div>
   </div>;
 
-  const ratingsCache=useMemo(()=>{const c={};for(const date of ALL_DATES)for(const slot of ALL_SLOTS)c[`${date}|${slot}`]=genRatings(date,slot);return c;},[]);
+  const ratingsCache=rCache;
 
   if(page==="guide"){
     return <div style={{width:"100%",minHeight:"100vh",background:"#F8F9FB",fontFamily:"system-ui,-apple-system,sans-serif",color:"#111827"}}>
