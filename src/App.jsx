@@ -1156,7 +1156,8 @@ function ModalChart({rData,sData,mainStId,mainStColor,sM,eM,activeRivals,rivals}
   </svg>;
 }
 
-function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,weatherData,dashboardUrl}){
+function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,weatherData,dashboardUrl,guideMode}){
+  const[activeRivals,setActiveRivals]=useState(new Set());
   const st=ST.find(s=>s.id===corner.stId);
   // navList が渡されていれば検索結果順ナビ、なければ同局同日の時間順ナビ
   const{prevCorner,nextCorner}=useMemo(()=>{
@@ -1189,9 +1190,43 @@ function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,
   const dfS=iVs!=null&&oVs!=null?oVs-iVs:null;
   const dow=["日","月","火","水","木","金","土"][new Date(corner.date).getDay()];
 
+  // Rival corners overlapping [sM, eM], with a stable key (コーナー別・検索用)
+  const rivals=useMemo(()=>{
+    if(guideMode)return[];
+    const out=[];
+    for(const sid of ST.map(s=>s.id)){
+      if(sid===corner.stId)continue;
+      const tpl=corner.slot==="morning"?getDailyMorn(corner.date):getDailyEve(corner.date);
+      const progs=tpl[sid]||[];
+      for(const[pn,,,corners2] of progs){
+        for(const cn of corners2){
+          const[title,cs,ce,seg,tags,summary]=cn;
+          const csM=t2m(cs),ceM=t2m(ce);
+          if(ceM<=sM||csM>=eM)continue;
+          const ovS=Math.max(csM,sM),ovE=Math.min(ceM,eM);
+          const rSl=rData.filter(d=>d.minute>=ovS&&d.minute<=ovE);
+          const sSl=sData.filter(d=>d.minute>=ovS&&d.minute<=ovE);
+          const iVr2=rSl[0]?.[sid]??null;
+          const oVr2=rSl[rSl.length-1]?.[sid]??null;
+          const avgR2=rSl.length?rSl.reduce((s,d)=>s+d[sid],0)/rSl.length:null;
+          const avgS2=sSl.length?sSl.reduce((s,d)=>s+d[sid],0)/sSl.length:null;
+          const key=`${sid}|${cs}`;
+          out.push({key,sid,progName:pn,title,startMin:cs,endMin:ce,segment:seg,tags,summary,iVr:iVr2,oVr:oVr2,avgR:avgR2,avgS:avgS2,overlapStart:m2t(ovS),overlapEnd:m2t(ovE)});
+        }
+      }
+    }
+    out.sort((a,b)=>{
+      const si=ST.findIndex(s=>s.id===a.sid)-ST.findIndex(s=>s.id===b.sid);
+      if(si!==0)return si;
+      return t2m(a.startMin)-t2m(b.startMin);
+    });
+    return out;
+  },[corner,rData,sData,guideMode]);
+
+  const toggleRival=key=>setActiveRivals(prev=>{const n=new Set(prev);n.has(key)?n.delete(key):n.add(key);return n;});
 
   return <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-    <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:660,maxHeight:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 20px 60px rgba(0,0,0,0.25)"}}>
+    <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:guideMode?660:900,maxHeight:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 20px 60px rgba(0,0,0,0.25)"}}>
       {/* Header */}
       <div style={{padding:"13px 18px",borderBottom:"1px solid #F3F4F6",display:"flex",alignItems:"flex-start",gap:10,position:"sticky",top:0,background:"#fff",zIndex:2,borderRadius:"12px 12px 0 0",flexShrink:0}}>
         <div style={{flex:1,minWidth:0}}>
@@ -1203,77 +1238,157 @@ function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,
           </div>
           <div style={{fontSize:9,color:"#9CA3AF",marginBottom:1}}>📺 {corner.progName}</div>
           <div style={{fontSize:15,fontWeight:700,color:"#111827",lineHeight:1.3,marginBottom:4}}>{corner.title}</div>
-          {corner.tags.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:4}}>{corner.tags.map(t=><span key={t} style={{padding:"1px 6px",fontSize:9,border:"1px solid #E5E7EB",borderRadius:3,color:"#6B7280",background:"#F9FAFB"}}>#{t}</span>)}</div>}
+          {corner.tags&&corner.tags.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:4}}>{corner.tags.map(t=><span key={t} style={{padding:"1px 6px",fontSize:9,border:"1px solid #E5E7EB",borderRadius:3,color:"#6B7280",background:"#F9FAFB"}}>#{t}</span>)}</div>}
           {corner.summary&&<div style={{fontSize:10.5,color:"#6B7280",lineHeight:1.55,padding:"6px 10px",background:"#F9FAFB",borderRadius:5,borderLeft:`2px solid ${st.c}`}}>{corner.summary}</div>}
         </div>
         <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:5,flexShrink:0}}>
           <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:6,width:28,height:28,cursor:"pointer",fontSize:14,color:"#6B7280",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
           <div style={{display:"flex",gap:4}}>
             {navBtn(prevCorner,"◀")}{navBtn(nextCorner,"▶")}
+            {!guideMode&&dashboardUrl&&<button onClick={()=>window.open(dashboardUrl,'_blank')} title="Dashboardで詳細を見る" style={{background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:6,width:28,height:28,cursor:"pointer",fontSize:12,color:"#2563EB",display:"flex",alignItems:"center",justifyContent:"center"}}>📊</button>}
           </div>
         </div>
       </div>
 
-      {/* Body */}
-      <div style={{flex:1,overflowY:"auto",padding:"16px 20px"}}>
-        {/* Stats: 2 large groups */}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
-          <div style={{background:"#F9FAFB",borderRadius:10,padding:"14px 16px",border:"1px solid #F3F4F6"}}>
-            <div style={{fontSize:11,fontWeight:700,color:st.c,marginBottom:10,fontFamily:"monospace",letterSpacing:"0.05em"}}>視聴率</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+      {guideMode?(
+        // 番組別専用レイアウト: 大きい数値 + フルwidth グラフ + CTAボタン
+        <>
+          <div style={{flex:1,overflowY:"auto",padding:"16px 20px"}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+              <div style={{background:"#F9FAFB",borderRadius:10,padding:"14px 16px",border:"1px solid #F3F4F6"}}>
+                <div style={{fontSize:11,fontWeight:700,color:st.c,marginBottom:10,fontFamily:"monospace",letterSpacing:"0.05em"}}>視聴率</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                  {[
+                    {lb:"IN",v:fmt(iVr),c:st.c},{lb:"OUT",v:fmt(oVr),c:st.c},
+                    {lb:"AVG",v:fmt(avgR),c:"#111827"},{lb:"DIFF",v:dfR!=null?`${dfR>=0?"+":""}${dfR.toFixed(1)}%`:"—",c:dfR!=null?(dfR>=0?"#16A34A":"#DC2626"):"#9CA3AF"},
+                  ].map(({lb,v,c})=><div key={lb}>
+                    <div style={{fontSize:9,color:"#9CA3AF",fontFamily:"monospace",marginBottom:2}}>{lb}</div>
+                    <div style={{fontSize:22,fontWeight:800,color:c,fontFamily:"monospace"}}>{v}</div>
+                  </div>)}
+                </div>
+              </div>
+              <div style={{background:"#F5F3FF",borderRadius:10,padding:"14px 16px",border:"1px solid #EDE9FE"}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#6366F1",marginBottom:10,fontFamily:"monospace",letterSpacing:"0.05em"}}>占拠率</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                  {[
+                    {lb:"IN",v:fmt(iVs),c:"#6366F1"},{lb:"OUT",v:fmt(oVs),c:"#6366F1"},
+                    {lb:"AVG",v:fmt(avgS),c:"#111827"},{lb:"DIFF",v:dfS!=null?`${dfS>=0?"+":""}${dfS.toFixed(1)}%`:"—",c:dfS!=null?(dfS>=0?"#16A34A":"#DC2626"):"#9CA3AF"},
+                  ].map(({lb,v,c})=><div key={lb}>
+                    <div style={{fontSize:9,color:"#9CA3AF",fontFamily:"monospace",marginBottom:2}}>{lb}</div>
+                    <div style={{fontSize:22,fontWeight:800,color:c,fontFamily:"monospace"}}>{v}</div>
+                  </div>)}
+                </div>
+              </div>
+            </div>
+            <div style={{background:"#FAFBFC",borderRadius:8,padding:"14px 14px 10px",border:"1px solid #F3F4F6"}}>
+              <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:10,flexWrap:"wrap"}}>
+                <span style={{fontSize:10,color:"#6B7280",fontWeight:600}}>推移グラフ（{corner.startMin} – {corner.endMin}）</span>
+                <div style={{display:"flex",alignItems:"center",gap:4}}>
+                  <div style={{width:20,height:3,background:st.c,borderRadius:2}}/>
+                  <span style={{fontSize:8.5,color:"#6B7280",fontFamily:"monospace"}}>{corner.stId} 視聴率</span>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:4}}>
+                  <div style={{width:20,height:3,background:"#6366F1",borderRadius:2}}/>
+                  <span style={{fontSize:8.5,color:"#6B7280",fontFamily:"monospace"}}>{corner.stId} 占拠率</span>
+                </div>
+              </div>
+              <ModalChart rData={rData} sData={sData} mainStId={corner.stId} mainStColor={st.c} sM={sM} eM={eM} activeRivals={[]} rivals={[]}/>
+            </div>
+          </div>
+          {dashboardUrl&&<div style={{padding:"12px 20px",borderTop:"1px solid #F3F4F6",flexShrink:0}}>
+            <button onClick={()=>window.open(dashboardUrl,'_blank')}
+              onMouseEnter={e=>e.currentTarget.style.opacity="0.88"}
+              onMouseLeave={e=>e.currentTarget.style.opacity="1"}
+              style={{width:"100%",background:"linear-gradient(135deg,#1D4ED8,#2563EB)",color:"#fff",border:"none",borderRadius:10,padding:"14px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:12,transition:"opacity 0.15s"}}>
+              <span style={{fontSize:22,flexShrink:0}}>📊</span>
+              <div style={{textAlign:"left",flex:1}}>
+                <div style={{fontSize:14,fontWeight:700,lineHeight:1.3}}>ダッシュボードでこの番組の放送時間の詳細を見る</div>
+                <div style={{fontSize:11,opacity:0.8,marginTop:3}}>分単位の視聴率・占拠率推移や裏番組との比較が確認できます</div>
+              </div>
+              <span style={{fontSize:18,flexShrink:0,opacity:0.8}}>↗</span>
+            </button>
+          </div>}
+        </>
+      ):(
+        // コーナー別・検索用レイアウト: 左(数値+グラフ) | 右(裏番組)
+        <div style={{display:"flex",flex:1,minHeight:0,overflow:"hidden"}}>
+          {/* Left pane */}
+          <div style={{flex:"0 0 56%",display:"flex",flexDirection:"column",borderRight:"1px solid #F3F4F6",overflow:"hidden"}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,padding:"10px 14px 8px",flexShrink:0}}>
               {[
-                {lb:"IN",v:fmt(iVr),c:st.c},{lb:"OUT",v:fmt(oVr),c:st.c},
-                {lb:"AVG",v:fmt(avgR),c:"#111827"},{lb:"DIFF",v:dfR!=null?`${dfR>=0?"+":""}${dfR.toFixed(1)}%`:"—",c:dfR!=null?(dfR>=0?"#16A34A":"#DC2626"):"#9CA3AF"},
-              ].map(({lb,v,c})=><div key={lb}>
-                <div style={{fontSize:9,color:"#9CA3AF",fontFamily:"monospace",marginBottom:2}}>{lb}</div>
-                <div style={{fontSize:22,fontWeight:800,color:c,fontFamily:"monospace"}}>{v}</div>
+                {lb:"視聴率 IN",v:fmt(iVr,false),c:st.c},{lb:"視聴率 OUT",v:fmt(oVr,false),c:st.c},
+                {lb:"視聴率 AVG",v:fmt(avgR,false),c:"#111827"},{lb:"視聴率 DIFF",v:dfR!=null?`${dfR>=0?"+":""}${dfR.toFixed(1)}%`:"—",c:dfR!=null?(dfR>=0?"#16A34A":"#DC2626"):"#9CA3AF"},
+                {lb:"占拠率 IN",v:fmt(iVs,true),c:"#6366F1"},{lb:"占拠率 OUT",v:fmt(oVs,true),c:"#6366F1"},
+                {lb:"占拠率 AVG",v:fmt(avgS,true),c:"#111827"},{lb:"占拠率 DIFF",v:dfS!=null?`${dfS>=0?"+":""}${dfS.toFixed(1)}%`:"—",c:dfS!=null?(dfS>=0?"#16A34A":"#DC2626"):"#9CA3AF"},
+              ].map(({lb,v,c})=><div key={lb} style={{background:"#F9FAFB",borderRadius:6,padding:"5px 8px",border:"1px solid #F3F4F6"}}>
+                <div style={{fontSize:7.5,color:"#9CA3AF",fontFamily:"monospace",marginBottom:1}}>{lb}</div>
+                <div style={{fontSize:13,fontWeight:700,color:c,fontFamily:"monospace"}}>{v}</div>
               </div>)}
             </div>
-          </div>
-          <div style={{background:"#F5F3FF",borderRadius:10,padding:"14px 16px",border:"1px solid #EDE9FE"}}>
-            <div style={{fontSize:11,fontWeight:700,color:"#6366F1",marginBottom:10,fontFamily:"monospace",letterSpacing:"0.05em"}}>占拠率</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-              {[
-                {lb:"IN",v:fmt(iVs),c:"#6366F1"},{lb:"OUT",v:fmt(oVs),c:"#6366F1"},
-                {lb:"AVG",v:fmt(avgS),c:"#111827"},{lb:"DIFF",v:dfS!=null?`${dfS>=0?"+":""}${dfS.toFixed(1)}%`:"—",c:dfS!=null?(dfS>=0?"#16A34A":"#DC2626"):"#9CA3AF"},
-              ].map(({lb,v,c})=><div key={lb}>
-                <div style={{fontSize:9,color:"#9CA3AF",fontFamily:"monospace",marginBottom:2}}>{lb}</div>
-                <div style={{fontSize:22,fontWeight:800,color:c,fontFamily:"monospace"}}>{v}</div>
-              </div>)}
+            <div style={{flex:1,overflowY:"auto",padding:"0 14px 14px"}}>
+              <div style={{background:"#FAFBFC",borderRadius:8,padding:"10px 10px 6px",border:"1px solid #F3F4F6"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <span style={{fontSize:9.5,color:"#6B7280",fontWeight:600}}>推移グラフ（{corner.startMin} – {corner.endMin}）</span>
+                  {activeRivals.size>0&&<span style={{fontSize:8.5,color:"#9CA3AF"}}>破線 = 裏番組（重複区間）</span>}
+                </div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:8}}>
+                  <div style={{display:"flex",alignItems:"center",gap:4}}>
+                    <div style={{width:18,height:2.5,background:st.c,borderRadius:2}}/>
+                    <span style={{fontSize:8.5,color:"#6B7280",fontFamily:"monospace"}}>{corner.stId} 視聴率</span>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:4}}>
+                    <div style={{width:18,height:2.5,background:"#6366F1",borderRadius:2}}/>
+                    <span style={{fontSize:8.5,color:"#6B7280",fontFamily:"monospace"}}>{corner.stId} 占拠率</span>
+                  </div>
+                  {[...new Set([...activeRivals].map(key=>rivals.find(r=>r.key===key)?.sid).filter(Boolean))].map(sid=>{
+                    const rst=ST.find(s=>s.id===sid);
+                    return <div key={sid} style={{display:"flex",alignItems:"center",gap:4}}>
+                      <svg width="18" height="8"><line x1="0" y1="4" x2="18" y2="4" stroke={rst.c} strokeWidth="1.5" strokeDasharray="4,3"/></svg>
+                      <span style={{fontSize:8.5,color:rst.c,fontFamily:"monospace",fontWeight:700}}>{sid}</span>
+                    </div>;
+                  })}
+                </div>
+                <ModalChart rData={rData} sData={sData} mainStId={corner.stId} mainStColor={st.c} sM={sM} eM={eM} activeRivals={[...activeRivals]} rivals={rivals}/>
+              </div>
             </div>
+          </div>
+          {/* Right pane: rivals */}
+          <div style={{flex:"0 0 44%",overflowY:"auto",padding:"10px 12px"}}>
+            <div style={{fontSize:10.5,fontWeight:700,color:"#111827",marginBottom:2}}>同時間帯の裏番組</div>
+            <div style={{fontSize:8.5,color:"#9CA3AF",marginBottom:8}}>クリックするとグラフに追加表示（重複区間のみ）</div>
+            {rivals.length===0&&<div style={{color:"#9CA3AF",fontSize:12,textAlign:"center",padding:24}}>データなし</div>}
+            {rivals.map((r)=>{
+              const rst=ST.find(s=>s.id===r.sid);
+              const rsg=SEG[r.segment]||SEG.other;
+              const isActive=activeRivals.has(r.key);
+              return <div key={r.key} onClick={()=>toggleRival(r.key)}
+                style={{borderBottom:"1px solid #F3F4F6",padding:"7px 6px",display:"flex",gap:7,alignItems:"flex-start",cursor:"pointer",borderRadius:6,background:isActive?`${rst.c}0D`:"transparent",border:isActive?`1px solid ${rst.c}33`:"1px solid transparent",marginBottom:3,transition:"all 0.12s"}}>
+                <div style={{width:16,height:16,borderRadius:4,border:`1.5px solid ${isActive?rst.c:"#D1D5DB"}`,background:isActive?rst.c:"transparent",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",marginTop:1}}>
+                  {isActive&&<svg width="10" height="8" viewBox="0 0 10 8"><polyline points="1,4 4,7 9,1" fill="none" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                </div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:2}}>
+                    <span style={{background:rst.c,color:"#fff",fontSize:8,fontWeight:800,padding:"1.5px 5px",borderRadius:3,fontFamily:"monospace"}}>{r.sid}</span>
+                    <span style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace"}}>{r.startMin}–{r.endMin}</span>
+                    <span style={{fontSize:7.5,padding:"0.5px 4px",background:"#F3F4F6",borderRadius:2,color:"#6B7280",fontFamily:"monospace"}}>重複: {r.overlapStart}–{r.overlapEnd}</span>
+                  </div>
+                  <div style={{fontSize:8.5,color:"#9CA3AF",marginBottom:1}}>📺 {r.progName}</div>
+                  <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:2}}>
+                    <span style={{background:rsg.c,color:"#fff",fontSize:7.5,fontWeight:700,padding:"0.5px 4px",borderRadius:2}}>{rsg.lb}</span>
+                    <span style={{fontSize:11,fontWeight:600,color:isActive?rst.c:"#374151",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.title}</span>
+                  </div>
+                  <div style={{fontSize:8.5,color:"#6B7280",lineHeight:1.45,overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{r.summary}</div>
+                  <div style={{display:"flex",gap:8,marginTop:4,fontFamily:"monospace",fontSize:8.5}}>
+                    <span style={{color:"#9CA3AF"}}>IN <b style={{color:rst.c}}>{fmt(r.iVr,false)}</b></span>
+                    <span style={{color:"#9CA3AF"}}>OUT <b style={{color:rst.c}}>{fmt(r.oVr,false)}</b></span>
+                    <span style={{color:"#9CA3AF"}}>AVG <b style={{color:"#111827"}}>{fmt(r.avgR,false)}</b></span>
+                  </div>
+                </div>
+              </div>;
+            })}
           </div>
         </div>
-        {/* Chart */}
-        <div style={{background:"#FAFBFC",borderRadius:8,padding:"14px 14px 10px",border:"1px solid #F3F4F6"}}>
-          <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:10,flexWrap:"wrap"}}>
-            <span style={{fontSize:10,color:"#6B7280",fontWeight:600}}>推移グラフ（{corner.startMin} – {corner.endMin}）</span>
-            <div style={{display:"flex",alignItems:"center",gap:4}}>
-              <div style={{width:20,height:3,background:st.c,borderRadius:2}}/>
-              <span style={{fontSize:8.5,color:"#6B7280",fontFamily:"monospace"}}>{corner.stId} 視聴率</span>
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:4}}>
-              <div style={{width:20,height:3,background:"#6366F1",borderRadius:2}}/>
-              <span style={{fontSize:8.5,color:"#6B7280",fontFamily:"monospace"}}>{corner.stId} 占拠率</span>
-            </div>
-          </div>
-          <ModalChart rData={rData} sData={sData} mainStId={corner.stId} mainStColor={st.c} sM={sM} eM={eM} activeRivals={[]} rivals={[]}/>
-        </div>
-      </div>
-
-      {/* Dashboard CTA */}
-      {dashboardUrl&&<div style={{padding:"12px 20px",borderTop:"1px solid #F3F4F6",flexShrink:0}}>
-        <button onClick={()=>window.open(dashboardUrl,'_blank')}
-          onMouseEnter={e=>e.currentTarget.style.opacity="0.88"}
-          onMouseLeave={e=>e.currentTarget.style.opacity="1"}
-          style={{width:"100%",background:"linear-gradient(135deg,#1D4ED8,#2563EB)",color:"#fff",border:"none",borderRadius:10,padding:"14px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:12,transition:"opacity 0.15s"}}>
-          <span style={{fontSize:22,flexShrink:0}}>📊</span>
-          <div style={{textAlign:"left",flex:1}}>
-            <div style={{fontSize:14,fontWeight:700,lineHeight:1.3}}>ダッシュボードでこの番組の放送時間の詳細を見る</div>
-            <div style={{fontSize:11,opacity:0.8,marginTop:3}}>分単位の視聴率・占拠率推移や裏番組との比較が確認できます</div>
-          </div>
-          <span style={{fontSize:18,flexShrink:0,opacity:0.8}}>↗</span>
-        </button>
-      </div>}
+      )}
     </div>
   </div>;
 }
@@ -2163,7 +2278,7 @@ function ProgramGuidePage({metric="rating"}){
       <div style={{fontWeight:700,marginBottom:tooltip.avg!==null?3:0,wordBreak:"break-all"}}>{tooltip.title}</div>
       {tooltip.avg!==null&&<div style={{fontFamily:"monospace",color:(ST.find(s=>s.id===tooltip.stId)||{c:"#60A5FA"}).c,fontWeight:700}}>平均 {tooltip.avg.toFixed(1)}%</div>}
     </div>}
-    {guideModal&&<CornerModal corner={guideModal.corner} cache={rCache} onClose={()=>setGuideModal(null)} navList={guideModal.navList} navIdx={guideModal.idx} onNavigate={c=>{const idx=guideModal.navList.findIndex(item=>item.title===c.title&&item.startMin===c.startMin);setGuideModal({...guideModal,corner:c,idx});}} dashboardUrl={guideModal.corner._dashUrl}/>}
+    {guideModal&&<CornerModal corner={guideModal.corner} cache={rCache} onClose={()=>setGuideModal(null)} navList={guideModal.navList} navIdx={guideModal.idx} onNavigate={c=>{const idx=guideModal.navList.findIndex(item=>item.title===c.title&&item.startMin===c.startMin);setGuideModal({...guideModal,corner:c,idx});}} dashboardUrl={guideModal.corner._dashUrl} guideMode={true}/>}
     {!programs&&!loading&&!error&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>日付を選択してください</div>}
     {loading&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>読み込み中...</div>}
     {programs&&<div style={{flex:1,overflow:"auto"}}>
