@@ -169,7 +169,7 @@ bangumi-info/
 
 ### 概要
 在名7局の番組表（EPG: Electronic Program Guide）データを毎日自動取得し、
-ダッシュボードで参照できる形式（CSV）に変換してS3に保存する。
+S3に保存する。**2026-06-16 以降は JSON 形式**、それ以前は CSV 形式。
 
 ### 処理フロー
 
@@ -178,7 +178,7 @@ Amazon EventBridge (毎日スケジュール実行)
     ↓
 AWS Lambda (番組表取得・変換処理)
     ↓
-Amazon S3 (CSVファイルとして保存)
+Amazon S3 (JSONファイルとして保存)
     ↓
 ダッシュボード (フロントエンドから直接S3にアクセス)
 ```
@@ -188,14 +188,55 @@ Amazon S3 (CSVファイルとして保存)
 |---------|------|
 | Amazon EventBridge | 毎日定時に Lambda を起動するスケジューラ |
 | AWS Lambda | EPGデータの取得・整形・S3保存 |
-| Amazon S3 | 番組表CSVファイルの保管 |
+| Amazon S3 | 番組表ファイルの保管 |
 
 ### S3バケット
 - **バケット名**: `bangumi-info`
 - **リージョン**: `ap-northeast-1`（東京）
-- **格納パス**: `epg-all/bangumi_YYYYMMDD.csv`（日付ごとにファイルを生成）
+- **格納パス**:
+  - `epg-all/bangumi_YYYYMMDD.json`（2026-06-16 以降）
+  - `epg-all/bangumi_YYYYMMDD.csv`（2026-06-15 以前・旧形式）
 
-### CSVフォーマット
+### JSONフォーマット（2026-06-16 以降）
+
+トップレベル:
+
+| フィールド | 内容 |
+|-----------|------|
+| `broadcast_date` | 放送日（`YYYYMMDD`）|
+| `ggm_group_id` | グループID |
+| `generated_at` | 生成日時（ISO 8601）|
+| `program_count` | 番組数 |
+| `programs` | 番組オブジェクトの配列 |
+
+`programs` 配列の各要素:
+
+| フィールド | 内容 |
+|-----------|------|
+| `ChannelId` | チャンネルID（例: `"0x0C08"`）|
+| `ChannelName` | チャンネル名 |
+| `Pid` | プログラムID |
+| `SeId` | サービス・イベントID |
+| `StartTime` | 開始日時（`YYYYMMDDHHmm`形式）|
+| `EndTime` | 終了日時（`YYYYMMDDHHmm`形式）|
+| `ProgramTitle` | 番組名 |
+| `ProgramDetail` | 番組説明 |
+
+#### ChannelId → 局の対応
+
+| ChannelId | 局 |
+|-----------|-----|
+| `0x0C08` | NHKE（NHKEテレ）|
+| `0x0C10` | THK（東海テレビ）|
+| `0x0C18` | CBC |
+| `0x0C20` | NBN（メ～テレ）|
+| `0x0C28` | CTV（中京テレビ）|
+| `0x8400` | NHK（NHK総合）|
+| `0x8430` | TVA（テレビ愛知）|
+| `0x9830` | 三重テレビ（ダッシュボード対象外）|
+| `0x9C30` | びわ湖放送（ダッシュボード対象外）|
+
+### CSVフォーマット（2026-06-15 以前・旧形式）
 | カラム | 内容 |
 |-------|------|
 | station | 局番号（1=THK, 2=NHKE, 3=NHK, 4=CTV, 5=CBC, 6=NBN, 10=TVA）|
@@ -203,6 +244,14 @@ Amazon S3 (CSVファイルとして保存)
 | description | 番組説明 |
 | start_time | 開始時刻（HH:MM形式）|
 | end_time | 終了時刻（HH:MM形式）|
+
+### フロントエンドの日付分岐ロジック
+
+```js
+// 20260616 以降は JSON、それ以前は CSV を取得
+const isJson = parseInt(yyyymmdd) >= 20260616;
+const url = `.../bangumi_${yyyymmdd}.${isJson ? 'json' : 'csv'}`;
+```
 
 ### 注意事項
 - ダッシュボードのフロントエンドが S3 に直接アクセスするため、バケットの CORS 設定が必要

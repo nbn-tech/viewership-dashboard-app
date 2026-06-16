@@ -32,6 +32,7 @@ const m2t = m => `${String(Math.floor(m/60)).padStart(2,"0")}:${String(m%60).pad
 
 // 番組表用: S3 CSV ステーションマッピング & ユーティリティ
 const STATION_MAP={"1":"THK","2":"NHKE","3":"NHK","4":"CTV","5":"CBC","6":"NBN","10":"TVA"};
+const CHANNEL_ID_MAP={"0x0C08":"NHKE","0x0C10":"THK","0x0C18":"CBC","0x0C20":"NBN","0x0C28":"CTV","0x8400":"NHK","0x8430":"TVA"};
 const GUIDE_ST_ORDER=["NBN","THK","CTV","CBC","NHK","NHKE","TVA"];
 const ZOOM_HALF=[5,10,15,20,30,45,60,90,120,180]; // 各ズームレベルの片側分数
 
@@ -53,6 +54,20 @@ function parseGuideCSV(text){
     const startMin=tvt2m(start_time);let endMin=tvt2m(end_time);
     if(endMin<=startMin)endMin+=1440;
     programs.push({stId,title,startMin,endMin,start_time,end_time});
+  }
+  return programs;
+}
+
+// S3 JSON をパース: bangumi_YYYYMMDD.json (20260616以降)
+function parseGuideJSON(data){
+  const programs=[];
+  for(const p of data.programs){
+    const stId=CHANNEL_ID_MAP[p.ChannelId];if(!stId)continue;
+    const start_time=p.StartTime.slice(8,10)+":"+p.StartTime.slice(10,12);
+    const end_time=p.EndTime.slice(8,10)+":"+p.EndTime.slice(10,12);
+    const startMin=tvt2m(start_time);let endMin=tvt2m(end_time);
+    if(endMin<=startMin)endMin+=1440;
+    programs.push({stId,title:p.ProgramTitle,startMin,endMin,start_time,end_time});
   }
   return programs;
 }
@@ -2194,14 +2209,15 @@ function ProgramGuidePage({metric="rating"}){
   const mornR=useMemo(()=>getRatings(guideDate,'morning'),[guideDate]);
   const eveR=useMemo(()=>getRatings(guideDate,'evening'),[guideDate]);
 
-  // S3 から CSV を取得
+  // S3 から番組表を取得 (20260616以降はJSON、それ以前はCSV)
   useEffect(()=>{
     const yyyymmdd=guideDate.replace(/-/g,'');
-    const url=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/epg-all/bangumi_${yyyymmdd}.csv`;
+    const isJson=parseInt(yyyymmdd)>=20260616;
+    const url=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/epg-all/bangumi_${yyyymmdd}.${isJson?'json':'csv'}`;
     setLoading(true);setError(null);setPrograms(null);setGuideModal(null);
     fetch(url)
-      .then(r=>{if(!r.ok)throw new Error(`データ取得エラー (HTTP ${r.status})`);return r.text();})
-      .then(text=>{const p=parseGuideCSV(text);setPrograms(p);})
+      .then(r=>{if(!r.ok)throw new Error(`データ取得エラー (HTTP ${r.status})`);return isJson?r.json():r.text();})
+      .then(data=>{const p=isJson?parseGuideJSON(data):parseGuideCSV(data);setPrograms(p);})
       .catch(e=>setError(e.message))
       .finally(()=>setLoading(false));
   },[guideDate]);
