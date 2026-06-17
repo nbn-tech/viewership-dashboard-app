@@ -772,7 +772,7 @@ function Chart({data,sel,onClick,selMin,hl,metric,onPan}){
         <g>
           <rect x={Math.min(xS(hv)+10,d.w-165)} y={p.t} width={150} height={18+sel.length*16} rx={5} fill="rgba(255,255,255,0.97)" stroke="#E5E7EB"/>
           <text x={Math.min(xS(hv)+18,d.w-157)} y={p.t+13} fill="#374151" fontSize="10.5" fontFamily="monospace" fontWeight="600">{data[hv].time}</text>
-          {sel.map((sid,i)=>{const st=ST.find(s=>s.id===sid);return <g key={sid}><circle cx={Math.min(xS(hv)+20,d.w-155)} cy={p.t+28+i*16} r={3.5} fill={st.c}/><text x={Math.min(xS(hv)+28,d.w-147)} y={p.t+32+i*16} fill="#374151" fontSize="10" fontFamily="monospace">{st.id} {data[hv][sid].toFixed(metric==="share"?1:2)}%</text></g>;})}
+          {sel.map((sid,i)=>{const st=ST.find(s=>s.id===sid);return <g key={sid}><circle cx={Math.min(xS(hv)+20,d.w-155)} cy={p.t+28+i*16} r={3.5} fill={st.c}/><text x={Math.min(xS(hv)+28,d.w-147)} y={p.t+32+i*16} fill="#374151" fontSize="10" fontFamily="monospace">{st.id} {data[hv][sid].toFixed(1)}%</text></g>;})}
         </g>
       </>}
     </svg>
@@ -830,7 +830,7 @@ function SegmentBands({slot,sel,selMin,onClickMinute,date,customStart,customEnd}
 
 function TimetableView({slot,sel,allR,allS,metric,date,onCornerClick}){
   const startMin=slot==="morning"?330:960, endMin=slot==="morning"?510:1170;
-  const fmt=v=>v!=null?(metric==="share"?v.toFixed(1):v.toFixed(2))+"%":"—";
+  const fmt=v=>v!=null?(v.toFixed(1))+"%":"—";
   const getVal=(src,sid,min)=>{const e=src?.find(d=>d.minute===min);return e?e[sid]:null;};
   const colWidth=220;
   const pxPerMin=22;
@@ -883,7 +883,7 @@ function TimetableView({slot,sel,allR,allS,metric,date,onCornerClick}){
                 <div style={{marginTop:"auto",display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
                   {iV!=null&&<span style={{fontSize:9,fontFamily:"monospace",color:st.c,fontWeight:700}}>IN {fmt(iV)}</span>}
                   {oV!=null&&<span style={{fontSize:9,fontFamily:"monospace",color:st.c,fontWeight:700}}>OUT {fmt(oV)}</span>}
-                  {df!=null&&<span style={{fontSize:9,fontFamily:"monospace",fontWeight:700,color:df>=0?"#16A34A":"#DC2626"}}>{df>=0?"+":""}{metric==="share"?df.toFixed(1):df.toFixed(2)}</span>}
+                  {df!=null&&<span style={{fontSize:9,fontFamily:"monospace",fontWeight:700,color:df>=0?"#16A34A":"#DC2626"}}>{df>=0?"+":""}{df.toFixed(1)}</span>}
                 </div>
               </div>;
             })}
@@ -1461,7 +1461,7 @@ function SearchPage({page,setPage,metric,setMetric,
       setMatchedIdxs([]);
     }finally{setLoading(false);}
   };
-  const fmt=v=>v!=null?(metric==="share"?v.toFixed(1):v.toFixed(2))+"%":"—";
+  const fmt=v=>v!=null?(v.toFixed(1))+"%":"—";
   const dow=ds=>["日","月","火","水","木","金","土"][new Date(ds).getDay()];
 
   return <>
@@ -1548,7 +1548,7 @@ function SearchPage({page,setPage,metric,setMetric,
               <div style={{textAlign:"right",fontFamily:"monospace",fontSize:11,fontWeight:700,color:st.c}}>{fmt(iV)}</div>
               <div style={{textAlign:"right",fontFamily:"monospace",fontSize:11,fontWeight:700,color:st.c}}>{fmt(oV)}</div>
               <div style={{textAlign:"right",fontFamily:"monospace",fontSize:11,fontWeight:700,color:"#111827"}}>{fmt(avg)}</div>
-              <div style={{textAlign:"right",fontFamily:"monospace",fontSize:11,fontWeight:700,color:df!=null?(df>=0?"#16A34A":"#DC2626"):"#9CA3AF"}}>{df!=null?`${df>=0?"+":""}${metric==="share"?df.toFixed(1):df.toFixed(2)}`:"—"}</div>
+              <div style={{textAlign:"right",fontFamily:"monospace",fontSize:11,fontWeight:700,color:df!=null?(df>=0?"#16A34A":"#DC2626"):"#9CA3AF"}}>{df!=null?`${df>=0?"+":""}${df.toFixed(1)}`:"—"}</div>
             </div>;
           })}
         </div>
@@ -1855,8 +1855,8 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
   // eslint-disable-next-line
   },[tab]);
 
-  const fmt=v=>v!=null?v.toFixed(2)+"%":"—";
-  const fmtD=v=>v!=null?`${v>=0?"+":""}${v.toFixed(2)}%`:"—";
+  const fmt=v=>v!=null?v.toFixed(1)+"%":"—";
+  const fmtD=v=>v!=null?`${v>=0?"+":""}${v.toFixed(1)}%`:"—";
 
   // Markdown-lite renderer
   const renderMd=text=>text.split("\n").map((line,i)=>{
@@ -2105,7 +2105,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
                       <span style={{background:rst?.c,color:"#fff",fontSize:8,fontWeight:800,padding:"1px 4px",borderRadius:2,fontFamily:"monospace",flexShrink:0,marginTop:1}}>{r.rid}</span>
                       {titleText&&<span style={{color:"#6B7280",flexShrink:0}}>「{titleText}」</span>}
                       <span style={{color:flowColor,fontFamily:"monospace",fontWeight:600}}>{flowLabel}</span>
-                      <span style={{color:"#9CA3AF",fontFamily:"monospace",marginLeft:"auto",flexShrink:0}}>{r.avgIN.toFixed(2)}%→{r.avgOUT.toFixed(2)}%</span>
+                      <span style={{color:"#9CA3AF",fontFamily:"monospace",marginLeft:"auto",flexShrink:0}}>{r.avgIN.toFixed(1)}%→{r.avgOUT.toFixed(1)}%</span>
                     </div>;
                   })}
                 </div>}
@@ -2134,13 +2134,13 @@ function Panel({selMin,rData,allR,allS,sel,onHL,metric,date}){
   const ap=sel.map(sid=>{
     const st=ST.find(s=>s.id===sid);
     const{prog,corner}=getProg(slot,sid,selMin,date);
-    const cR=rData?.rating?.[sid],cS=rData?.share?.[sid],dv=metric==="share"?cS:cR,ds=dv!=null?(metric==="share"?dv.toFixed(1):dv.toFixed(2)):"—";
+    const cR=rData?.rating?.[sid],cS=rData?.share?.[sid],dv=metric==="share"?cS:cR,ds=dv!=null?(dv.toFixed(1)):"—";
     let iV=null,oV=null,df=null;
     if(corner){const src=metric==="share"?allS:allR;if(src){const iE=src.find(d=>d.minute===t2m(corner.startMin)),oE=src.find(d=>d.minute===Math.min(t2m(corner.endMin),src[src.length-1].minute));if(iE)iV=iE[sid];if(oE)oV=oE[sid];if(iV!=null&&oV!=null)df=oV-iV;}}
     return{st,prog,corner,ds,iV,oV,df};
   }).filter(p=>p.prog);
   ap.sort((a,b)=>(parseFloat(b.ds)||0)-(parseFloat(a.ds)||0));
-  const fmt=v=>v!=null?(metric==="share"?v.toFixed(1):v.toFixed(2))+"%":"—";
+  const fmt=v=>v!=null?(v.toFixed(1))+"%":"—";
   return <div style={{overflowY:"auto",height:"100%",padding:"0 2px"}}>
     <div style={{position:"sticky",top:0,background:"#fff",padding:"10px 8px 8px",borderBottom:"1px solid #F3F4F6",zIndex:2}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -2171,7 +2171,7 @@ function Panel({selMin,rData,allR,allS,sel,onHL,metric,date}){
           <div style={{display:"flex",gap:6,marginTop:6,marginBottom:6}}>
             <div style={{flex:1,background:"#F9FAFB",borderRadius:5,padding:"5px 8px",border:"1px solid #F3F4F6"}}><div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",marginBottom:2}}>IN ({corner.startMin})</div><div style={{fontSize:13,fontWeight:700,color:st.c,fontFamily:"monospace"}}>{fmt(iV)}</div></div>
             <div style={{flex:1,background:"#F9FAFB",borderRadius:5,padding:"5px 8px",border:"1px solid #F3F4F6"}}><div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",marginBottom:2}}>OUT ({corner.endMin})</div><div style={{fontSize:13,fontWeight:700,color:st.c,fontFamily:"monospace"}}>{fmt(oV)}</div></div>
-            <div style={{flex:1,background:df!=null?(df>=0?"#F0FDF4":"#FEF2F2"):"#F9FAFB",borderRadius:5,padding:"5px 8px",border:`1px solid ${df!=null?(df>=0?"#DCFCE7":"#FEE2E2"):"#F3F4F6"}`}}><div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",marginBottom:2}}>DIFF</div><div style={{fontSize:13,fontWeight:700,fontFamily:"monospace",color:df!=null?(df>=0?"#16A34A":"#DC2626"):"#9CA3AF"}}>{df!=null?`${df>=0?"+":""}${metric==="share"?df.toFixed(1):df.toFixed(2)}`:"—"}</div></div>
+            <div style={{flex:1,background:df!=null?(df>=0?"#F0FDF4":"#FEF2F2"):"#F9FAFB",borderRadius:5,padding:"5px 8px",border:`1px solid ${df!=null?(df>=0?"#DCFCE7":"#FEE2E2"):"#F3F4F6"}`}}><div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",marginBottom:2}}>DIFF</div><div style={{fontSize:13,fontWeight:700,fontFamily:"monospace",color:df!=null?(df>=0?"#16A34A":"#DC2626"):"#9CA3AF"}}>{df!=null?`${df>=0?"+":""}${df.toFixed(1)}`:"—"}</div></div>
           </div>
           <div style={{padding:"7px 9px",background:"#F9FAFB",borderRadius:5,borderLeft:`2px solid ${st.c}`,color:"#4B5563",fontSize:11,lineHeight:1.65}}>{corner.summary}</div>
         </div>}
@@ -2290,9 +2290,9 @@ function ProgramGuidePage({metric="rating"}){
         <button onClick={()=>setPpmIdx(i=>Math.min(GUIDE_PPM_STEPS.length-1,i+1))} disabled={ppmIdx===GUIDE_PPM_STEPS.length-1} style={{width:24,height:24,border:"none",background:"transparent",cursor:ppmIdx===GUIDE_PPM_STEPS.length-1?"default":"pointer",fontSize:16,color:ppmIdx===GUIDE_PPM_STEPS.length-1?"#D1D5DB":"#374151",borderRadius:4,display:"flex",alignItems:"center",justifyContent:"center"}}>＋</button>
       </div>
     </div>
-    {tooltip&&<div style={{position:"fixed",left:tooltip.x+14,top:tooltip.y-10,background:"#1F2937",color:"#fff",padding:"7px 11px",borderRadius:7,fontSize:11.5,pointerEvents:"none",zIndex:9999,maxWidth:220,boxShadow:"0 4px 16px rgba(0,0,0,0.25)",lineHeight:1.5}}>
-      <div style={{fontWeight:700,marginBottom:tooltip.avg!==null?3:0,wordBreak:"break-all"}}>{tooltip.title}</div>
-      {tooltip.avg!==null&&<div style={{fontFamily:"monospace",color:(ST.find(s=>s.id===tooltip.stId)||{c:"#60A5FA"}).c,fontWeight:700}}>平均 {tooltip.avg.toFixed(1)}%</div>}
+    {tooltip&&<div style={{position:"fixed",left:tooltip.x+14,top:tooltip.y-10,background:"#fff",color:"#1d1d1f",padding:"8px 12px",borderRadius:8,fontSize:11.5,pointerEvents:"none",zIndex:9999,maxWidth:220,border:"1px solid #e0e0e0",boxShadow:"0 2px 12px rgba(0,0,0,0.08)",lineHeight:1.5}}>
+      <div style={{fontWeight:600,marginBottom:tooltip.avg!==null?4:0,wordBreak:"break-all",letterSpacing:"-0.224px"}}>{tooltip.title}</div>
+      {tooltip.avg!==null&&<div style={{fontFamily:"monospace",color:(ST.find(s=>s.id===tooltip.stId)||{c:"#0066cc"}).c,fontWeight:700,fontSize:13}}>平均 {tooltip.avg.toFixed(1)}%</div>}
     </div>}
     {guideModal&&<CornerModal corner={guideModal.corner} cache={rCache} onClose={()=>setGuideModal(null)} navList={guideModal.navList} navIdx={guideModal.idx} onNavigate={c=>{const idx=guideModal.navList.findIndex(item=>item.title===c.title&&item.startMin===c.startMin);setGuideModal({...guideModal,corner:c,idx});}} dashboardUrl={guideModal.corner._dashUrl} guideMode={true}/>}
     {!programs&&!loading&&!error&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>日付を選択してください</div>}
@@ -2450,7 +2450,7 @@ export default function App(){
     </div>
     <div style={{background:"#f5f5f7",borderBottom:"1px solid #e0e0e0",padding:"4px 18px",fontSize:11,color:"#333",display:"flex",alignItems:"center",gap:5}}>
       <span style={{flexShrink:0}}>⚠</span>
-      <span>視聴率データは実データ（名古屋地区・世帯視聴率）を使用しています。番組内容・コーナー情報はデモ用のダミーデータです。ただし、4/17のドデスカ（6:00〜8:00）のコーナー情報は実際の放送内容を開発途中のシステムで分析した結果です。</span>
+      <span>視聴率データは実データ（名古屋地区・世帯視聴率）を使用しています。番組内容・コーナー情報はデモ用のダミーデータです。ただし、4/17のドデスカ！（6:00〜8:00）のコーナー情報は実際の放送内容を開発途中のシステムで分析した結果です。</span>
     </div>
   </div>;
 
