@@ -1484,7 +1484,7 @@ function SearchPage({page,setPage,metric,setMetric,
       </div>
       <div style={{display:"flex",alignItems:"center",gap:5}}>
         <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace",fontWeight:600}}>時間帯</span>
-        {[{id:"morning",l:"朝"},{id:"evening",l:"夕方"}].map(s=><button key={s.id} onClick={()=>togSlot(s.id)} style={{padding:"3px 9px",borderRadius:14,border:`1.5px solid ${selSlots.includes(s.id)?"#D94F00":"#E5E7EB"}`,background:selSlots.includes(s.id)?"#FFF7ED":"#fff",color:selSlots.includes(s.id)?"#D94F00":"#9CA3AF",cursor:"pointer",fontSize:10.5,fontWeight:600}}>{s.l}</button>)}
+        {[{id:"morning",l:"朝"},{id:"evening",l:"夕方"}].map(s=><button key={s.id} onClick={()=>togSlot(s.id)} style={{padding:"3px 9px",borderRadius:14,border:`1.5px solid ${selSlots.includes(s.id)?"#0066cc":"#e0e0e0"}`,background:selSlots.includes(s.id)?"#EFF6FF":"#fff",color:selSlots.includes(s.id)?"#0066cc":"#7a7a7a",cursor:"pointer",fontSize:10.5,fontWeight:600}}>{s.l}</button>)}
       </div>
       <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
         <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace",fontWeight:600}}>局</span>
@@ -1860,7 +1860,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
 
   // Markdown-lite renderer
   const renderMd=text=>text.split("\n").map((line,i)=>{
-    if(line.startsWith("■ "))return <div key={i} style={{fontSize:13,fontWeight:700,color:"#D94F00",margin:"14px 0 4px",borderBottom:"1px solid #FEE2E2",paddingBottom:3}}>{line}</div>;
+    if(line.startsWith("■ "))return <div key={i} style={{fontSize:17,fontWeight:600,color:"#1d1d1f",margin:"14px 0 4px",borderBottom:"1px solid #e0e0e0",paddingBottom:3,letterSpacing:"-0.374px"}}>{line}</div>;
     if(line.startsWith("### "))return <div key={i} style={{fontSize:13,fontWeight:700,color:"#111827",margin:"12px 0 4px"}}>{line.slice(4)}</div>;
     if(line.startsWith("## "))return <div key={i} style={{fontSize:14,fontWeight:700,color:"#111827",margin:"14px 0 5px",borderBottom:"1px solid #F3F4F6",paddingBottom:3}}>{line.slice(3)}</div>;
     if(line.startsWith("# "))return <div key={i} style={{fontSize:15,fontWeight:800,color:"#111827",margin:"16px 0 6px"}}>{line.slice(2)}</div>;
@@ -1874,8 +1874,8 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
   return <>
     {/* Controls */}
     <div style={{padding:"10px 18px",background:"#fff",borderBottom:"1px solid #F3F4F6",display:"flex",flexWrap:"wrap",gap:10,alignItems:"center"}}>
-      <div style={{display:"flex",borderRadius:7,overflow:"hidden",border:"1px solid #E5E7EB"}}>
-        {[{id:"daily",l:"Daily"},{id:"weekly",l:"Weekly"}].map(m=><button key={m.id} onClick={()=>setMode(m.id)} style={{padding:"4px 14px",border:"none",background:mode===m.id?"#FFF7ED":"#fff",color:mode===m.id?"#D94F00":"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600}}>{m.l}</button>)}
+      <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
+        {[{id:"daily",l:"Daily"},{id:"weekly",l:"Weekly"}].map(m=><button key={m.id} onClick={()=>setMode(m.id)} style={{padding:"4px 14px",border:"none",background:mode===m.id?"#EFF6FF":"#fff",color:mode===m.id?"#0066cc":"#7a7a7a",cursor:"pointer",fontSize:11,fontWeight:600}}>{m.l}</button>)}
       </div>
       {mode==="daily"
         ?<><select value={selDate} onChange={e=>setSelDate(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"4px 8px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none"}}>
@@ -1884,11 +1884,11 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
         :<select value={selWeek} onChange={e=>setSelWeek(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"4px 8px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none"}}>
           {WEEK_RANGES.map(w=><option key={w.id} value={w.id}>{w.label}</option>)}
         </select>}
-      <div style={{display:"flex",borderRadius:7,overflow:"hidden",border:"1px solid #E5E7EB"}}>
-        {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 16:00–19:30"}].map(s=><button key={s.id} onClick={()=>setSlot(s.id)} style={{padding:"4px 13px",border:"none",background:slot===s.id?"#FFF7ED":"#fff",color:slot===s.id?"#D94F00":"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600}}>{s.l}</button>)}
+      <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
+        {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 16:00–19:30"}].map(s=><button key={s.id} onClick={()=>setSlot(s.id)} style={{padding:"4px 13px",border:"none",background:slot===s.id?"#EFF6FF":"#fff",color:slot===s.id?"#0066cc":"#7a7a7a",cursor:"pointer",fontSize:11,fontWeight:600}}>{s.l}</button>)}
       </div>
-      <button onClick={()=>runAnalysis(false)} disabled={loading} style={{padding:"5px 18px",borderRadius:7,border:"none",background:loading?"#F3F4F6":"linear-gradient(135deg,#D94F00,#DC2626)",color:loading?"#9CA3AF":"#fff",cursor:loading?"wait":"pointer",fontSize:12,fontWeight:700,display:"flex",alignItems:"center",gap:6}}>
-        {loading?<><div style={{width:13,height:13,border:"2px solid #D1D5DB",borderTopColor:"#9CA3AF",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/> 分析中…</>:<>✨ {cachedAt?"キャッシュ表示":"分析する"}</>}
+      <button onClick={()=>runAnalysis(false)} disabled={loading} style={{padding:"11px 22px",borderRadius:9999,border:"none",background:loading?"#f5f5f7":"#0066cc",color:loading?"#7a7a7a":"#fff",cursor:loading?"wait":"pointer",fontSize:17,fontWeight:400,letterSpacing:"-0.374px",display:"flex",alignItems:"center",gap:6}}>
+        {loading?<><div style={{width:13,height:13,border:"2px solid #e0e0e0",borderTopColor:"#7a7a7a",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/> 分析中…</>:<>{cachedAt?"キャッシュ表示":"分析する"}</>}
       </button>
       {cachedAt&&!loading&&<button onClick={()=>runAnalysis(true)} style={{padding:"5px 12px",borderRadius:7,border:"1px solid #E5E7EB",background:"#F9FAFB",color:"#6B7280",cursor:"pointer",fontSize:11,fontWeight:600}}>🔄 再分析</button>}
       {cachedAt&&!loading&&<span style={{fontSize:10,color:"#9CA3AF"}}>保存済 {cachedAt}</span>}
@@ -1897,7 +1897,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
 
     {/* Tabs */}
     <div style={{padding:"0 18px",background:"#fff",borderBottom:"1px solid #E5E7EB",display:"flex",gap:0}}>
-      {[{id:"overview",l:"📊 統括・ハイライト"},{id:"topic",l:"🔍 トピック分析"}].map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"10px 18px",border:"none",borderBottom:tab===t.id?"2px solid #D94F00":"2px solid transparent",background:"transparent",color:tab===t.id?"#D94F00":"#6B7280",cursor:"pointer",fontSize:12,fontWeight:600}}>{t.l}</button>)}
+      {[{id:"overview",l:"統括・ハイライト"},{id:"topic",l:"トピック分析"}].map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"10px 18px",border:"none",borderBottom:tab===t.id?"2px solid #0066cc":"2px solid transparent",background:"transparent",color:tab===t.id?"#0066cc":"#7a7a7a",cursor:"pointer",fontSize:14,fontWeight:400,letterSpacing:"-0.224px"}}>{t.l}</button>)}
     </div>
 
     {/* Tab: Overview */}
@@ -1913,15 +1913,15 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
         {/* ① 総評・今後の示唆（常に上・展開済み） */}
         {conclusionText&&<div style={{marginBottom:20}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-            <span style={{background:"linear-gradient(135deg,#D94F00,#DC2626)",color:"#fff",fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:4}}>★</span>
+            <span style={{background:"#0066cc",color:"#fff",fontSize:10,fontWeight:600,padding:"2px 10px",borderRadius:9999}}>総評</span>
             <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>総評・今後の示唆</span>
           </div>
-          <div style={{background:"#FFF7ED",border:"1px solid #FED7AA",borderRadius:8,padding:"16px 18px",lineHeight:1.8}}>
+          <div style={{background:"#f5f5f7",border:"1px solid #e0e0e0",borderRadius:8,padding:"16px 18px",lineHeight:1.8}}>
             {renderMd(conclusionText)}
           </div>
         </div>}
-        {!conclusionText&&loading&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0",color:"#D94F00",fontSize:12,marginBottom:16}}>
-          <div style={{width:14,height:14,border:"2px solid #FED7AA",borderTopColor:"#D94F00",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>総評・今後の示唆を生成中…
+        {!conclusionText&&loading&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0",color:"#0066cc",fontSize:12,marginBottom:16}}>
+          <div style={{width:14,height:14,border:"2px solid #BAE6FD",borderTopColor:"#0066cc",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>総評・今後の示唆を生成中…
         </div>}
 
         {/* ② 根拠となる分析（折りたたみ） */}
@@ -1954,7 +1954,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
         </div>}
 
         {loading&&overviewText&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"12px 0",color:"#6B7280",fontSize:12}}>
-          <div style={{width:14,height:14,border:"2px solid #E5E7EB",borderTopColor:"#D94F00",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>生成中…
+          <div style={{width:14,height:14,border:"2px solid #E5E7EB",borderTopColor:"#0066cc",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>生成中…
         </div>}
       </>}
     </div>}
@@ -1966,8 +1966,8 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
       <div style={{display:"flex",alignItems:"center",gap:0,marginBottom:20}}>
         {[{n:1,l:"キーワード入力"},{n:2,l:"対象コーナー選択"},{n:3,l:"分析結果"}].map((s,i)=><>
           <div key={s.n} style={{display:"flex",alignItems:"center",gap:6}}>
-            <div style={{width:22,height:22,borderRadius:"50%",background:topicStep>=s.n?"#D94F00":"#E5E7EB",color:topicStep>=s.n?"#fff":"#9CA3AF",fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{s.n}</div>
-            <span style={{fontSize:11,fontWeight:600,color:topicStep===s.n?"#D94F00":topicStep>s.n?"#6B7280":"#9CA3AF"}}>{s.l}</span>
+            <div style={{width:22,height:22,borderRadius:"50%",background:topicStep>=s.n?"#0066cc":"#e0e0e0",color:topicStep>=s.n?"#fff":"#7a7a7a",fontSize:11,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center"}}>{s.n}</div>
+            <span style={{fontSize:11,fontWeight:400,color:topicStep===s.n?"#0066cc":topicStep>s.n?"#7a7a7a":"#b0b0b0",letterSpacing:"-0.12px"}}>{s.l}</span>
           </div>
           {i<2&&<div key={`a${i}`} style={{flex:1,height:1,background:"#E5E7EB",margin:"0 8px"}}/>}
         </>)}
@@ -2058,7 +2058,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
       {/* Step 3: 結果 */}
       {topicStep===3&&<>
         {topicLoading&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"40px 0",justifyContent:"center",color:"#6B7280",fontSize:13}}>
-          <div style={{width:16,height:16,border:"2px solid #E5E7EB",borderTopColor:"#D94F00",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>分析中…
+          <div style={{width:16,height:16,border:"2px solid #E5E7EB",borderTopColor:"#0066cc",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>分析中…
         </div>}
         {topicResult&&<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -2272,7 +2272,7 @@ function ProgramGuidePage({metric="rating"}){
   const totalH=(G_END-G_START)*PPM;
   const timeMarks=[];for(let m=G_START;m<=G_END;m+=60)timeMarks.push(m);
 
-  return <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 88px)",fontFamily:"system-ui,-apple-system,sans-serif"}}>
+  return <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 88px)",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif"}}>
     {/* 番組表ヘッダー */}
     <div style={{padding:"10px 18px",borderBottom:"1px solid #E5E7EB",background:"#fff",display:"flex",alignItems:"center",gap:12,flexShrink:0,flexWrap:"wrap"}}>
       <span style={{fontSize:13,fontWeight:700,color:"#111827"}}>📺 番組表</span>
@@ -2433,26 +2433,23 @@ export default function App(){
   const dow=ds=>["日","月","火","水","木","金","土"][new Date(ds).getDay()];
   const isWd=ds=>{const d=new Date(ds).getDay();return d!==0&&d!==6;};
 
-  const NavBar=()=><div style={{background:"#fff",position:"sticky",top:0,zIndex:100,borderBottom:"1px solid #E5E7EB"}}>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 18px"}}>
-      <div style={{display:"flex",alignItems:"center",gap:10}}>
-        <div style={{width:30,height:30,borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,background:"linear-gradient(135deg,#D94F00,#DC2626)",color:"#fff"}}>📺</div>
-        <div>
-          <div style={{fontSize:14,fontWeight:700}}>視聴率ダッシュボード</div>
-          <div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",letterSpacing:"0.12em"}}>ANALYTICS PLATFORM — 在名7局</div>
-        </div>
+  const NavBar=()=><div style={{position:"sticky",top:0,zIndex:100}}>
+    <div style={{background:"#000",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0 18px",height:44}}>
+      <div style={{display:"flex",alignItems:"center",gap:12}}>
+        <span style={{fontSize:14,fontWeight:600,color:"#fff",letterSpacing:"-0.28px"}}>視聴率ダッシュボード</span>
+        <span style={{fontSize:11,color:"rgba(255,255,255,0.4)",letterSpacing:"0.06em"}}>在名7局</span>
       </div>
       <div style={{display:"flex",gap:8,alignItems:"center"}}>
-        <div style={{display:"flex",borderRadius:7,overflow:"hidden",border:"1px solid #E5E7EB"}}>
-          {[{id:"rating",l:"視聴率"},{id:"share",l:"占拠率"}].map(m=><button key={m.id} onClick={()=>setMetric(m.id)} style={{padding:"4px 13px",border:"none",background:metric===m.id?"#EFF6FF":"#fff",color:metric===m.id?"#2563EB":"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600}}>{m.l}</button>)}
+        <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid rgba(255,255,255,0.2)"}}>
+          {[{id:"rating",l:"視聴率"},{id:"share",l:"占拠率"}].map(m=><button key={m.id} onClick={()=>setMetric(m.id)} style={{padding:"5px 14px",border:"none",background:metric===m.id?"#0066cc":"transparent",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:400,letterSpacing:"-0.12px"}}>{m.l}</button>)}
         </div>
-        <div style={{display:"flex",gap:3}}>
-          {[{id:"guide",i:"📺",l:"番組表〜番組別〜"},{id:"dashboard",i:"📊",l:"Dashboard"},{id:"search",i:"🔍",l:"Search"},{id:"analysis",i:"✨",l:"Analysis"}].map(p=><button key={p.id} onClick={()=>setPage(p.id)} style={{padding:"5px 14px",borderRadius:6,border:"none",background:page===p.id?"#FFF7ED":"transparent",color:page===p.id?"#D94F00":"#9CA3AF",cursor:"pointer",fontSize:11.5,fontWeight:600,fontFamily:"monospace"}}>{p.i} {p.l}</button>)}
+        <div style={{display:"flex",gap:2}}>
+          {[{id:"guide",l:"番組表"},{id:"dashboard",l:"Dashboard"},{id:"search",l:"Search"},{id:"analysis",l:"Analysis"}].map(p=><button key={p.id} onClick={()=>setPage(p.id)} style={{padding:"6px 12px",borderRadius:9999,border:"none",background:page===p.id?"#0066cc":"transparent",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:400,letterSpacing:"-0.12px"}}>{p.l}</button>)}
         </div>
       </div>
     </div>
-    <div style={{background:"#FFFBEB",borderTop:"1px solid #FDE68A",padding:"3px 18px",fontSize:10,color:"#92400E",display:"flex",alignItems:"center",gap:5}}>
-      <span style={{fontSize:11}}>⚠️</span>
+    <div style={{background:"#f5f5f7",borderBottom:"1px solid #e0e0e0",padding:"4px 18px",fontSize:11,color:"#333",display:"flex",alignItems:"center",gap:5}}>
+      <span style={{flexShrink:0}}>⚠</span>
       <span>視聴率データは実データ（名古屋地区・世帯視聴率）を使用しています。番組内容・コーナー情報はデモ用のダミーデータです。ただし、4/17のドデスカ（6:00〜8:00）のコーナー情報は実際の放送内容を開発途中のシステムで分析した結果です。</span>
     </div>
   </div>;
@@ -2460,14 +2457,14 @@ export default function App(){
   const ratingsCache=rCache;
 
   if(page==="guide"){
-    return <div style={{width:"100%",minHeight:"100vh",background:"#F8F9FB",fontFamily:"system-ui,-apple-system,sans-serif",color:"#111827"}}>
+    return <div style={{width:"100%",minHeight:"100vh",background:"#f5f5f7",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif",color:"#111827"}}>
       <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}`}</style>
       <NavBar/>
       <ProgramGuidePage metric={metric}/>
     </div>;
   }
   if(page==="search"){
-    return <div style={{width:"100%",minHeight:"100vh",background:"#F8F9FB",fontFamily:"system-ui,-apple-system,sans-serif",color:"#111827"}}>
+    return <div style={{width:"100%",minHeight:"100vh",background:"#f5f5f7",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif",color:"#111827"}}>
       <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       <NavBar/>
       <SearchPage page={page} setPage={setPage} metric={metric} setMetric={setMetric}
@@ -2482,7 +2479,7 @@ export default function App(){
     </div>;
   }
   if(page==="analysis"){
-    return <div style={{width:"100%",minHeight:"100vh",background:"#F8F9FB",fontFamily:"system-ui,-apple-system,sans-serif",color:"#111827"}}>
+    return <div style={{width:"100%",minHeight:"100vh",background:"#f5f5f7",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif",color:"#111827"}}>
       <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       <NavBar/>
       <AnalysisPage page={page} setPage={setPage} metric={metric} setMetric={setMetric} ratingsCache={ratingsCache} weatherData={weatherData}
@@ -2500,7 +2497,7 @@ export default function App(){
     </div>;
   }
 
-  return <div style={{width:"100%",minHeight:"100vh",background:"#F8F9FB",fontFamily:"system-ui,-apple-system,sans-serif",color:"#111827"}}>
+  return <div style={{width:"100%",minHeight:"100vh",background:"#f5f5f7",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif",color:"#111827"}}>
     <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}`}</style>
     <NavBar/>
     <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",padding:"10px 18px",borderBottom:"1px solid #F3F4F6",background:"#fff"}}>
@@ -2511,11 +2508,11 @@ export default function App(){
         </select>
       </div>
       <WeatherBadge weather={weatherData[date]}/>
-      <div style={{display:"flex",borderRadius:7,overflow:"hidden",border:"1px solid #E5E7EB"}}>
-        {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 16:00–19:30"}].map(s=><button key={s.id} onClick={()=>{setSlot(s.id);setSelMin(null);setHL(null);}} style={{padding:"4px 13px",border:"none",background:slot===s.id?"#FFF7ED":"#fff",color:slot===s.id?"#D94F00":"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600}}>{s.l}</button>)}
+      <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
+        {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 16:00–19:30"}].map(s=><button key={s.id} onClick={()=>{setSlot(s.id);setSelMin(null);setHL(null);}} style={{padding:"4px 13px",border:"none",background:slot===s.id?"#EFF6FF":"#fff",color:slot===s.id?"#0066cc":"#7a7a7a",cursor:"pointer",fontSize:11,fontWeight:600}}>{s.l}</button>)}
       </div>
-      <div style={{display:"flex",borderRadius:7,overflow:"hidden",border:"1px solid #E5E7EB"}}>
-        {[{id:"chart",l:"📈 グラフ表示"},{id:"timetable",l:"📋 番組表〜コーナー別〜"}].map(m=><button key={m.id} onClick={()=>{setDashMode(m.id);setSelMin(null);setHL(null);}} style={{padding:"4px 13px",border:"none",background:dashMode===m.id?"#F0FDF4":"#fff",color:dashMode===m.id?"#16A34A":"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600}}>{m.l}</button>)}
+      <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
+        {[{id:"chart",l:"📈 グラフ表示"},{id:"timetable",l:"📋 番組表〜コーナー別〜"}].map(m=><button key={m.id} onClick={()=>{setDashMode(m.id);setSelMin(null);setHL(null);}} style={{padding:"4px 13px",border:"none",background:dashMode===m.id?"#EFF6FF":"#fff",color:dashMode===m.id?"#0066cc":"#7a7a7a",cursor:"pointer",fontSize:11,fontWeight:600}}>{m.l}</button>)}
       </div>
       {selMin!==null&&<div style={{display:"flex",alignItems:"center",gap:5,padding:"3px 9px",borderRadius:5,background:"#FEF2F2",border:"1px solid #FEE2E2"}}>
         <span style={{fontSize:9,color:"#DC2626"}}>⏱</span>
