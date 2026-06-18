@@ -2579,7 +2579,7 @@ export default function App(){
           {videoFiles.length===0&&<div style={{padding:"20px 0",textAlign:"center",fontSize:12,color:"#9CA3AF"}}>この日の動画データはありません</div>}
           {videoFiles.length>0&&!videoUrl&&!noVideoForTime&&<div style={{padding:"20px 0",textAlign:"center",fontSize:12,color:"#9CA3AF"}}>グラフの時刻をクリックすると動画を表示します</div>}
           {noVideoForTime&&<div style={{padding:"20px 0",textAlign:"center",fontSize:12,color:"#9CA3AF"}}>この時刻の動画はありません</div>}
-          {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls onLoadedMetadata={()=>{if(videoRef.current&&pendingSeekRef.current!==null){videoRef.current.currentTime=pendingSeekRef.current;pendingSeekRef.current=null;}}} style={{width:"100%",borderRadius:8,background:"#000",maxHeight:400}}/>}
+          {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls onLoadedMetadata={()=>{if(videoRef.current&&pendingSeekRef.current!==null){videoRef.current.currentTime=pendingSeekRef.current;pendingSeekRef.current=null;}}} onEnded={()=>{if(!videoFiles)return;const idx=videoFiles.findIndex(f=>`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${f.key}`===videoUrl);if(idx===-1||idx===videoFiles.length-1)return;const nxt=videoFiles[idx+1];const nxtUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}} style={{width:"100%",borderRadius:8,background:"#000",maxHeight:400}}/>}
         </div>}
         <div style={{padding:"0 18px"}}>
           <SegmentBands slot={slot} sel={sel} selMin={selMin} onClickMinute={click} date={date} customStart={programContext?winStart:undefined} customEnd={programContext?winEnd:undefined}/>
