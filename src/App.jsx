@@ -903,9 +903,7 @@ const ALL_SLOTS=["morning","evening"];
 const GUIDE_DATE_MIN="2025-06-25";
 const GUIDE_DATE_MAX=(()=>{
   const t=new Date();
-  const d=t.getDay();
-  const back=d===0?6:d-1;
-  t.setDate(t.getDate()-back);
+  t.setTime(t.getTime()+9*60*60*1000); // JST補正
   return t.toISOString().slice(0,10);
 })();
 
@@ -2355,6 +2353,11 @@ export default function App(){
   const[selData,setSelData]=useState(null);
   const[hl,setHL]=useState(null);
   const videoRef=useRef(null);
+  const[videoFiles,setVideoFiles]=useState(null);
+  const[videoUrl,setVideoUrl]=useState(null);
+  const[noVideoForTime,setNoVideoForTime]=useState(false);
+  const prevVideoUrlRef=useRef(null);
+  const pendingSeekRef=useRef(null);
   const[page,setPage]=useState(PROGRAM_MODE?"dashboard":"guide");
   const[programContext]=useState(PROGRAM_MODE?{name:PM_NAME,stId:PM_STATION,date:PM_DATE,start:PM_START,end:PM_END,center:Math.floor((PM_START+PM_END)/2),slot:PM_SLOT}:null);
   const[zoomLevel,setZoomLevel]=useState(4);
@@ -2423,12 +2426,41 @@ export default function App(){
   useEffect(()=>{setPanCenter(null);},[slot,date]);
   const tog=id=>setSel(p=>p.includes(id)?p.filter(s=>s!==id):[...p,id]);
   const click=m=>{setSelMin(m);const r=rData.find(d=>d.minute===m),s=sData.find(d=>d.minute===m);setSelData({rating:r,share:s});setHL(null);};
+  useEffect(()=>{setVideoUrl(null);setNoVideoForTime(false);prevVideoUrlRef.current=null;},[date,slot]);
   useEffect(()=>{
-    if(videoRef.current&&date==="2026-04-17"&&slot==="morning"&&selMin!==null){
-      const offset=(selMin-360)*60+77;
-      if(offset>=0)videoRef.current.currentTime=offset;
+    if(date==="2026-04-17"&&slot==="morning"&&selMin!==null){
+      if(videoRef.current){const offset=(selMin-360)*60+77;if(offset>=0)videoRef.current.currentTime=offset;}
+      return;
     }
-  },[selMin,date,slot]);
+    if(!videoFiles||selMin===null)return;
+    const tgt=selMin*60;let found=null;
+    for(let i=0;i<videoFiles.length;i++){
+      if(videoFiles[i].startSec<=tgt&&(i===videoFiles.length-1||videoFiles[i+1].startSec>tgt)){found=videoFiles[i];break;}
+    }
+    if(!found){setVideoUrl(null);setNoVideoForTime(true);return;}
+    setNoVideoForTime(false);
+    const offSec=tgt-found.startSec;
+    const newUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${found.key}`;
+    if(newUrl===prevVideoUrlRef.current){if(videoRef.current)videoRef.current.currentTime=offSec;}
+    else{pendingSeekRef.current=offSec;prevVideoUrlRef.current=newUrl;setVideoUrl(newUrl);}
+  },[selMin,date,slot,videoFiles]);
+  useEffect(()=>{
+    if(date==="2026-04-17"||date<"2026-06-17"){setVideoFiles(null);setVideoUrl(null);setNoVideoForTime(false);prevVideoUrlRef.current=null;return;}
+    const yyyymmdd=date.replace(/-/g,'');
+    setVideoFiles(null);setVideoUrl(null);setNoVideoForTime(false);prevVideoUrlRef.current=null;
+    fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/?prefix=movie/ch1/${yyyymmdd}/&list-type=2`)
+      .then(r=>r.ok?r.text():Promise.reject())
+      .then(text=>{
+        const xml=new DOMParser().parseFromString(text,'text/xml');
+        const files=[...xml.querySelectorAll('Contents')]
+          .map(c=>({key:c.querySelector('Key').textContent,size:parseInt(c.querySelector('Size').textContent)}))
+          .filter(f=>f.size>1000000)
+          .map(f=>{const fn=f.key.split('/').pop();const m=fn.match(/CH\d+_\d{8}_(\d{2})(\d{2})(\d{2})\.mp4$/);if(!m)return null;return{...f,fn,startSec:parseInt(m[1])*3600+parseInt(m[2])*60+parseInt(m[3])};})
+          .filter(Boolean).sort((a,b)=>a.startSec-b.startSec);
+        setVideoFiles(files);
+      })
+      .catch(()=>setVideoFiles([]));
+  },[date]);
   const dates=DASHBOARD_DATES;
   const dow=ds=>["日","月","火","水","木","金","土"][new Date(ds).getDay()];
   const isWd=ds=>{const d=new Date(ds).getDay();return d!==0&&d!==6;};
@@ -2538,6 +2570,16 @@ export default function App(){
             {selMin!==null&&<span style={{fontSize:10,color:"#6B7280",fontFamily:"monospace"}}>→ {m2t(selMin)} にシーク済み</span>}
           </div>
           <video ref={videoRef} src="https://dodesca-video.s3.ap-northeast-1.amazonaws.com/0417.mp4" controls style={{width:"100%",borderRadius:8,background:"#000",maxHeight:400}}/>
+        </div>}
+        {date>="2026-06-17"&&videoFiles!==null&&<div style={{padding:"0 18px 12px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
+            <span style={{fontSize:11,fontWeight:700,color:"#374151"}}>📹 放送動画（NBN）</span>
+            {videoUrl&&selMin!==null&&<span style={{fontSize:10,color:"#6B7280",fontFamily:"monospace"}}>→ {m2t(selMin)} にシーク済み</span>}
+          </div>
+          {videoFiles.length===0&&<div style={{padding:"20px 0",textAlign:"center",fontSize:12,color:"#9CA3AF"}}>この日の動画データはありません</div>}
+          {videoFiles.length>0&&!videoUrl&&!noVideoForTime&&<div style={{padding:"20px 0",textAlign:"center",fontSize:12,color:"#9CA3AF"}}>グラフの時刻をクリックすると動画を表示します</div>}
+          {noVideoForTime&&<div style={{padding:"20px 0",textAlign:"center",fontSize:12,color:"#9CA3AF"}}>この時刻の動画はありません</div>}
+          {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls onLoadedMetadata={()=>{if(videoRef.current&&pendingSeekRef.current!==null){videoRef.current.currentTime=pendingSeekRef.current;pendingSeekRef.current=null;}}} style={{width:"100%",borderRadius:8,background:"#000",maxHeight:400}}/>}
         </div>}
         <div style={{padding:"0 18px"}}>
           <SegmentBands slot={slot} sel={sel} selMin={selMin} onClickMinute={click} date={date} customStart={programContext?winStart:undefined} customEnd={programContext?winEnd:undefined}/>
