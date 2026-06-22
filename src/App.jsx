@@ -615,7 +615,7 @@ function WeatherBadge({ weather }) {
   if (!weather) return null;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 6, background: "#F0F9FF", border: "1px solid #BAE6FD" }}>
-      <span style={{ fontSize: 16 }}>{weather.icon}</span>
+      <span style={{ fontSize: 16 }}>{weather.label}</span>
       <span style={{ fontSize: 11, color: "#0369A1", fontFamily: "monospace", fontWeight: 600, whiteSpace: "nowrap" }}>
         {weather.max.toFixed(1)}℃ | {weather.min.toFixed(1)}℃
       </span>
@@ -1247,7 +1247,7 @@ function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,
             <span style={{background:st.c,color:"#fff",fontSize:10,fontWeight:800,padding:"2px 7px",borderRadius:4,fontFamily:"monospace"}}>{corner.stId}</span>
             <span style={{background:sg.c,color:"#fff",fontSize:9,fontWeight:700,padding:"1.5px 6px",borderRadius:3}}>{sg.lb}</span>
             <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace"}}>{corner.date} ({dow}) {corner.startMin}–{corner.endMin} {corner.slot==="morning"?"朝":"夕方"}</span>
-            {weatherData?.[corner.date]&&<span style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:10,color:"#0369A1",fontFamily:"monospace",background:"#F0F9FF",border:"1px solid #BAE6FD",borderRadius:4,padding:"0px 6px"}}><span style={{fontSize:12}}>{weatherData[corner.date].icon}</span>{weatherData[corner.date].max.toFixed(1)}℃ | {weatherData[corner.date].min.toFixed(1)}℃</span>}
+            {weatherData?.[corner.date]&&<span style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:10,color:"#0369A1",fontFamily:"monospace",background:"#F0F9FF",border:"1px solid #BAE6FD",borderRadius:4,padding:"0px 6px"}}><span style={{fontSize:12}}>{weatherData[corner.date].label}</span>{weatherData[corner.date].max.toFixed(1)}℃ | {weatherData[corner.date].min.toFixed(1)}℃</span>}
           </div>
           <div style={{fontSize:9,color:"#9CA3AF",marginBottom:1}}>📺 {corner.progName}</div>
           <div style={{fontSize:15,fontWeight:700,color:"#111827",lineHeight:1.3,marginBottom:4}}>{corner.title}</div>
@@ -1531,7 +1531,7 @@ function SearchPage({page,setPage,metric,setMetric,
                 <div style={{color:"#111827",fontWeight:600}}>{c.date.slice(5)}({dow(c.date)})</div>
                 <div style={{fontSize:9.5,color:"#9CA3AF"}}>{c.startMin}–{c.endMin}</div>
                 <div style={{fontSize:9,color:"#9CA3AF",marginTop:1}}>{c.slot==="morning"?"朝":"夕方"}</div>
-                {weatherData?.[c.date]&&<div style={{fontSize:9,color:"#0369A1",marginTop:2}}>{weatherData[c.date].icon} {weatherData[c.date].max.toFixed(0)}℃/{weatherData[c.date].min.toFixed(0)}℃</div>}
+                {weatherData?.[c.date]&&<div style={{fontSize:9,color:"#0369A1",marginTop:2}}>{weatherData[c.date].label} {weatherData[c.date].max.toFixed(0)}℃/{weatherData[c.date].min.toFixed(0)}℃</div>}
               </div>
               <div><span style={{background:st.c,color:"#fff",fontSize:9,fontWeight:800,padding:"2px 5px",borderRadius:3,fontFamily:"monospace"}}>{c.stId}</span></div>
               <div style={{minWidth:0}}>
@@ -2345,6 +2345,66 @@ function ProgramGuidePage({metric="rating"}){
   </div>;
 }
 
+function CalendarPicker({value,onChange,dates}){
+  const[open,setOpen]=useState(false);
+  const[viewYear,setViewYear]=useState(()=>parseInt(value.slice(0,4)));
+  const[viewMonth,setViewMonth]=useState(()=>parseInt(value.slice(5,7))-1);
+  const ref=useRef(null);
+  useEffect(()=>{setViewYear(parseInt(value.slice(0,4)));setViewMonth(parseInt(value.slice(5,7))-1);},[value]);
+  useEffect(()=>{
+    if(!open)return;
+    const h=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false);};
+    document.addEventListener('mousedown',h);
+    return()=>document.removeEventListener('mousedown',h);
+  },[open]);
+  const dset=new Set(dates);
+  const dow=ds=>["日","月","火","水","木","金","土"][new Date(ds).getDay()];
+  const mnames=["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+  const minD=dates[0],maxD=dates[dates.length-1];
+  const prevOk=viewYear>parseInt(minD.slice(0,4))||(viewYear===parseInt(minD.slice(0,4))&&viewMonth>parseInt(minD.slice(5,7))-1);
+  const nextOk=viewYear<parseInt(maxD.slice(0,4))||(viewYear===parseInt(maxD.slice(0,4))&&viewMonth<parseInt(maxD.slice(5,7))-1);
+  const prevM=()=>{if(viewMonth===0){setViewYear(y=>y-1);setViewMonth(11);}else setViewMonth(m=>m-1);};
+  const nextM=()=>{if(viewMonth===11){setViewYear(y=>y+1);setViewMonth(0);}else setViewMonth(m=>m+1);};
+  const first=new Date(viewYear,viewMonth,1);
+  const last=new Date(viewYear,viewMonth+1,0);
+  const cells=[];
+  for(let i=0;i<first.getDay();i++)cells.push(null);
+  for(let d=1;d<=last.getDate();d++)cells.push(`${viewYear}-${String(viewMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+  while(cells.length%7!==0)cells.push(null);
+  return(
+    <div ref={ref} style={{position:"relative"}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:5,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,padding:"4px 10px",fontSize:11.5,fontFamily:"monospace",cursor:"pointer",outline:"none",color:"#374151"}}>
+        <span style={{fontSize:10,color:"#9CA3AF"}}>📅</span>
+        <span>{value} ({dow(value)})</span>
+        <span style={{fontSize:9,color:"#9CA3AF",marginLeft:2}}>{open?"▲":"▼"}</span>
+      </button>
+      {open&&<div style={{position:"absolute",top:"calc(100% + 4px)",left:0,background:"#fff",border:"1px solid #E5E7EB",borderRadius:12,zIndex:9999,padding:"12px",width:244,userSelect:"none",boxShadow:"0 4px 20px rgba(0,0,0,0.08)"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+          <button onClick={prevM} disabled={!prevOk} style={{background:"none",border:"none",cursor:prevOk?"pointer":"default",color:prevOk?"#374151":"#D1D5DB",fontSize:18,width:28,height:28,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center"}}>‹</button>
+          <span style={{fontSize:12,fontWeight:600,color:"#111827",letterSpacing:"-0.224px"}}>{viewYear}年 {mnames[viewMonth]}</span>
+          <button onClick={nextM} disabled={!nextOk} style={{background:"none",border:"none",cursor:nextOk?"pointer":"default",color:nextOk?"#374151":"#D1D5DB",fontSize:18,width:28,height:28,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center"}}>›</button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,marginBottom:3}}>
+          {["日","月","火","水","木","金","土"].map((d,i)=><div key={d} style={{textAlign:"center",fontSize:9,fontWeight:600,padding:"2px 0",color:i===0?"#DC2626":i===6?"#2563EB":"#9CA3AF"}}>{d}</div>)}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1}}>
+          {cells.map((ds,i)=>{
+            if(!ds)return<div key={i}/>;
+            const isSel=ds===value,isAvail=dset.has(ds),isToday=ds===GUIDE_DATE_MAX,dw=new Date(ds).getDay();
+            return<button key={ds} onClick={()=>{if(isAvail){onChange(ds);setOpen(false);}}} style={{
+              width:"100%",aspectRatio:"1/1",border:isToday&&!isSel?"1px solid #0066cc":"none",borderRadius:6,
+              background:isSel?"#0066cc":isToday&&!isSel?"#EFF6FF":"transparent",
+              color:isSel?"#fff":!isAvail?"#D1D5DB":dw===0?"#DC2626":dw===6?"#2563EB":"#111827",
+              cursor:isAvail?"pointer":"default",fontSize:11.5,fontWeight:isSel?700:400,
+              display:"flex",alignItems:"center",justifyContent:"center",padding:0
+            }}>{parseInt(ds.slice(8))}</button>;
+          })}
+        </div>
+      </div>}
+    </div>
+  );
+}
+
 export default function App(){
   const[date,setDate]=useState(PROGRAM_MODE?PM_DATE:GUIDE_DATE_MAX);
   const[slot,setSlot]=useState(PROGRAM_MODE?PM_SLOT:"morning");
@@ -2397,7 +2457,7 @@ export default function App(){
       .then(items=>{
         const result={};
         items.forEach(item=>{
-          result[item.date]={icon:item.weather_icon,max:item.max_temp,min:item.min_temp};
+          result[item.date]={label:item.weather_label,max:item.max_temp,min:item.min_temp};
         });
         setWeatherData(result);
       })
@@ -2533,12 +2593,7 @@ export default function App(){
     <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}`}</style>
     <NavBar/>
     <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",padding:"10px 18px",borderBottom:"1px solid #F3F4F6",background:"#fff"}}>
-      <div style={{display:"flex",alignItems:"center",gap:6}}>
-        <span style={{color:"#9CA3AF",fontSize:10}}>📅</span>
-        <select value={date} onChange={e=>{setDate(e.target.value);setSelMin(null);setHL(null);}} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,color:"#374151",padding:"4px 8px",fontSize:11.5,fontFamily:"monospace",cursor:"pointer",outline:"none"}}>
-          {dates.map(d=><option key={d} value={d}>{d} ({dow(d)})</option>)}
-        </select>
-      </div>
+      <CalendarPicker value={date} onChange={d=>{setDate(d);setSelMin(null);setHL(null);}} dates={dates}/>
       <WeatherBadge weather={weatherData[date]}/>
       <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
         {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 16:00–19:30"}].map(s=><button key={s.id} onClick={()=>{setSlot(s.id);setSelMin(null);setHL(null);}} style={{padding:"4px 13px",border:"none",background:slot===s.id?"#EFF6FF":"#fff",color:slot===s.id?"#0066cc":"#7a7a7a",cursor:"pointer",fontSize:11,fontWeight:600}}>{s.l}</button>)}
