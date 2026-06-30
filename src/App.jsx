@@ -2542,7 +2542,7 @@ export default function App(){
     </div>
     <div style={{background:"#f5f5f7",borderBottom:"1px solid #e0e0e0",padding:"4px 18px",fontSize:11,color:"#333",display:"flex",alignItems:"center",gap:5}}>
       <span style={{flexShrink:0}}>⚠</span>
-      <span>視聴率データは実データ（名古屋地区・世帯視聴率）を使用しています。番組内容・コーナー情報はデモ用のダミーデータです。ただし、4/17のドデスカ！（6:00〜8:00）のコーナー情報は実際の放送内容を開発途中のシステムで分析した結果です。</span>
+      <span>視聴率は4/1〜4/14・4/17が実データ（名古屋地区・世帯視聴率）、それ以外はデモデータです。番組表・天気は実データ、番組内容・コーナー情報はデモ用のダミーデータです。ただし、4/17のドデスカ！（6:00〜8:00）のコーナー情報は実際の放送内容を開発途中のシステムで分析した結果です。</span>
     </div>
   </div>;
 
