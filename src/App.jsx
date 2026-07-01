@@ -30,6 +30,10 @@ const SEG_ORDER = ["news","weather","sports","feature","ent","live","opening","e
 const t2m = t => { const [h,m] = t.split(":").map(Number); return h*60+m; };
 const m2t = m => `${String(Math.floor(m/60)).padStart(2,"0")}:${String(m%60).padStart(2,"0")}`;
 
+// 共通セグメントトグルのスタイル（選択=アクションブルー #0066cc 塗り・DESIGN.md準拠）
+// 容器側に {borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"} を付ける
+const seg = active => ({ padding:"4px 13px", border:"none", background:active?"#0066cc":"transparent", color:active?"#fff":"#7a7a7a", cursor:"pointer", fontSize:11, fontWeight:600 });
+
 // 番組表用: S3 CSV ステーションマッピング & ユーティリティ
 const STATION_MAP={"1":"THK","2":"NHKE","3":"NHK","4":"CTV","5":"CBC","6":"NBN","10":"TVA"};
 const CHANNEL_ID_MAP={"0x0C08":"NHKE","0x0C10":"THK","0x0C18":"CBC","0x0C20":"NBN","0x0C28":"CTV","0x8400":"NHK","0x8430":"TVA"};
@@ -1258,7 +1262,7 @@ function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,
           <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:6,width:28,height:28,cursor:"pointer",fontSize:14,color:"#6B7280",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
           <div style={{display:"flex",gap:4}}>
             {navBtn(prevCorner,"◀")}{navBtn(nextCorner,"▶")}
-            {!guideMode&&dashboardUrl&&<button onClick={()=>window.open(dashboardUrl,'_blank')} title="Dashboardで詳細を見る" style={{background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:6,width:28,height:28,cursor:"pointer",fontSize:12,color:"#2563EB",display:"flex",alignItems:"center",justifyContent:"center"}}>📊</button>}
+            {!guideMode&&dashboardUrl&&<button onClick={()=>window.open(dashboardUrl,'_blank')} title="Dashboardで詳細を見る" style={{background:"#fff",border:"1px solid #0066cc",borderRadius:8,padding:"0 12px",height:28,cursor:"pointer",fontSize:11,fontWeight:600,color:"#0066cc",display:"flex",alignItems:"center",justifyContent:"center",whiteSpace:"nowrap"}}>詳細</button>}
           </div>
         </div>
       </div>
@@ -1468,8 +1472,8 @@ function SearchPage({page,setPage,metric,setMetric,
         <input value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")runSearch("keyword");}}
           placeholder="検索ワードを入力（例: 大谷翔平、半導体、名古屋城、グルメ）"
           style={{flex:1,padding:"10px 14px",border:"1px solid #E5E7EB",borderRadius:8,fontSize:13,outline:"none",fontFamily:"system-ui,sans-serif"}}/>
-        <button onClick={()=>runSearch("keyword")} disabled={loading} style={{padding:"0 16px",border:"1px solid #E5E7EB",borderRadius:8,background:searchMode==="keyword"?"#EFF6FF":"#fff",color:searchMode==="keyword"?"#2563EB":"#374151",cursor:loading?"wait":"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:5}}>🔍 部分一致</button>
-        <button onClick={()=>runSearch("semantic")} disabled={loading} style={{padding:"0 16px",border:"1px solid #E5E7EB",borderRadius:8,background:searchMode==="semantic"?"#FAF5FF":"#fff",color:searchMode==="semantic"?"#A855F7":"#374151",cursor:loading?"wait":"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:5}}>✨ AI意味検索</button>
+        <button onClick={()=>runSearch("keyword")} disabled={loading} style={{padding:"0 16px",border:`1px solid ${searchMode==="keyword"?"#0066cc":"#e0e0e0"}`,borderRadius:8,background:searchMode==="keyword"?"#0066cc":"#fff",color:searchMode==="keyword"?"#fff":"#374151",cursor:loading?"wait":"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:5}}>部分一致</button>
+        <button onClick={()=>runSearch("semantic")} disabled={loading} style={{padding:"0 16px",border:`1px solid ${searchMode==="semantic"?"#0066cc":"#e0e0e0"}`,borderRadius:8,background:searchMode==="semantic"?"#0066cc":"#fff",color:searchMode==="semantic"?"#fff":"#374151",cursor:loading?"wait":"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:5}}>AI意味検索</button>
       </div>
       {error&&<div style={{marginTop:8,padding:"6px 10px",background:"#FEF2F2",border:"1px solid #FEE2E2",borderRadius:6,color:"#DC2626",fontSize:11.5}}>{error}</div>}
     </div>
@@ -1482,7 +1486,7 @@ function SearchPage({page,setPage,metric,setMetric,
       </div>
       <div style={{display:"flex",alignItems:"center",gap:5}}>
         <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace",fontWeight:600}}>時間帯</span>
-        {[{id:"morning",l:"朝"},{id:"evening",l:"夕方"}].map(s=><button key={s.id} onClick={()=>togSlot(s.id)} style={{padding:"3px 9px",borderRadius:14,border:`1.5px solid ${selSlots.includes(s.id)?"#0066cc":"#e0e0e0"}`,background:selSlots.includes(s.id)?"#EFF6FF":"#fff",color:selSlots.includes(s.id)?"#0066cc":"#7a7a7a",cursor:"pointer",fontSize:10.5,fontWeight:600}}>{s.l}</button>)}
+        {[{id:"morning",l:"朝"},{id:"evening",l:"夕方"}].map(s=><button key={s.id} onClick={()=>togSlot(s.id)} style={{padding:"3px 11px",borderRadius:9999,border:`1px solid ${selSlots.includes(s.id)?"#0066cc":"#e0e0e0"}`,background:selSlots.includes(s.id)?"#0066cc":"#fff",color:selSlots.includes(s.id)?"#fff":"#7a7a7a",cursor:"pointer",fontSize:10.5,fontWeight:600}}>{s.l}</button>)}
       </div>
       <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
         <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace",fontWeight:600}}>局</span>
@@ -1504,15 +1508,15 @@ function SearchPage({page,setPage,metric,setMetric,
         <div style={{width:18,height:18,border:"2px solid #E5E7EB",borderTopColor:"#0891B2",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
         {searchMode==="semantic"?"AIが意味検索中…":"検索中…"}
       </div>}
-      {!loading&&displayResults===null&&<div style={{padding:60,textAlign:"center",color:"#9CA3AF",fontSize:12.5,lineHeight:1.8}}>検索ワードを入力して、🔍 部分一致 または ✨ AI意味検索 を実行してください<br/><span style={{fontSize:10.5}}>対象: 2026/04/01〜04/14 平日 ・ 朝帯&夕方帯 ・ 全7局 ・ 全コーナー</span></div>}
+      {!loading&&displayResults===null&&<div style={{padding:60,textAlign:"center",color:"#9CA3AF",fontSize:12.5,lineHeight:1.8}}>検索ワードを入力して、「部分一致」または「AI意味検索」を実行してください<br/><span style={{fontSize:10.5}}>対象: 2026/04/01〜04/14 平日 ・ 朝帯&夕方帯 ・ 全7局 ・ 全コーナー</span></div>}
       {!loading&&displayResults!==null&&displayResults.length===0&&<div style={{padding:60,textAlign:"center",color:"#9CA3AF",fontSize:13}}>該当するコーナーが見つかりませんでした</div>}
       {!loading&&displayResults&&displayResults.length>0&&<>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <div style={{fontSize:11.5,color:"#6B7280"}}><b style={{color:"#111827",fontSize:13}}>{displayResults.length}</b> 件ヒット {searchMode==="semantic"&&<span style={{marginLeft:6,padding:"1px 6px",background:"#FAF5FF",color:"#A855F7",borderRadius:3,fontSize:10,fontWeight:600}}>AI関連度順</span>}</div>
+            <div style={{fontSize:11.5,color:"#6B7280"}}><b style={{color:"#111827",fontSize:13}}>{displayResults.length}</b> 件ヒット {searchMode==="semantic"&&<span style={{marginLeft:6,padding:"1px 6px",background:"#f5f5f7",color:"#7a7a7a",borderRadius:9999,fontSize:10,fontWeight:600}}>AI関連度順</span>}</div>
             <button onClick={()=>{setATopicQuery(query);setATab("topic");setPage("analysis");}}
-              style={{display:"flex",alignItems:"center",gap:4,padding:"3px 10px",borderRadius:6,border:"1px solid #D1FAE5",background:"#ECFDF5",color:"#059669",cursor:"pointer",fontSize:10.5,fontWeight:700}}>
-              ✨ 「{query}」をAnalysisで分析 →
+              style={{display:"flex",alignItems:"center",gap:4,padding:"3px 12px",borderRadius:9999,border:"1px solid #0066cc",background:"#fff",color:"#0066cc",cursor:"pointer",fontSize:10.5,fontWeight:600}}>
+              「{query}」をAnalysisで分析 →
             </button>
           </div>
           <div style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace"}}>指標: {metric==="share"?"占拠率":"視聴率"}</div>
@@ -1873,7 +1877,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
     {/* Controls */}
     <div style={{padding:"10px 18px",background:"#fff",borderBottom:"1px solid #F3F4F6",display:"flex",flexWrap:"wrap",gap:10,alignItems:"center"}}>
       <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
-        {[{id:"daily",l:"Daily"},{id:"weekly",l:"Weekly"}].map(m=><button key={m.id} onClick={()=>setMode(m.id)} style={{padding:"4px 14px",border:"none",background:mode===m.id?"#EFF6FF":"#fff",color:mode===m.id?"#0066cc":"#7a7a7a",cursor:"pointer",fontSize:11,fontWeight:600}}>{m.l}</button>)}
+        {[{id:"daily",l:"Daily"},{id:"weekly",l:"Weekly"}].map(m=><button key={m.id} onClick={()=>setMode(m.id)} style={seg(mode===m.id)}>{m.l}</button>)}
       </div>
       {mode==="daily"
         ?<><select value={selDate} onChange={e=>setSelDate(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"4px 8px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none"}}>
@@ -1883,7 +1887,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
           {WEEK_RANGES.map(w=><option key={w.id} value={w.id}>{w.label}</option>)}
         </select>}
       <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
-        {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 16:00–19:30"}].map(s=><button key={s.id} onClick={()=>setSlot(s.id)} style={{padding:"4px 13px",border:"none",background:slot===s.id?"#EFF6FF":"#fff",color:slot===s.id?"#0066cc":"#7a7a7a",cursor:"pointer",fontSize:11,fontWeight:600}}>{s.l}</button>)}
+        {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 16:00–19:30"}].map(s=><button key={s.id} onClick={()=>setSlot(s.id)} style={seg(slot===s.id)}>{s.l}</button>)}
       </div>
       <button onClick={()=>runAnalysis(false)} disabled={loading} style={{padding:"11px 22px",borderRadius:9999,border:"none",background:loading?"#f5f5f7":"#0066cc",color:loading?"#7a7a7a":"#fff",cursor:loading?"wait":"pointer",fontSize:17,fontWeight:400,letterSpacing:"-0.374px",display:"flex",alignItems:"center",gap:6}}>
         {loading?<><div style={{width:13,height:13,border:"2px solid #e0e0e0",borderTopColor:"#7a7a7a",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/> 分析中…</>:<>{cachedAt?"キャッシュ表示":"分析する"}</>}
@@ -1978,7 +1982,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
           <input value={topicQuery} onChange={e=>setTopicQuery(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")searchTopicCandidates();}}
             placeholder="例: 大谷翔平、中東情勢、グルメ、名古屋城…"
             style={{flex:1,padding:"9px 14px",border:"1px solid #E5E7EB",borderRadius:8,fontSize:13,outline:"none"}}/>
-          <button onClick={searchTopicCandidates} style={{padding:"0 20px",borderRadius:8,border:"none",background:"#111827",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:600}}>🔍 検索</button>
+          <button onClick={searchTopicCandidates} style={{padding:"0 20px",borderRadius:9999,border:"none",background:"#0066cc",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:600}}>検索</button>
         </div>
       </div>}
 
@@ -2048,7 +2052,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
             style={{padding:"7px 16px",borderRadius:7,border:"1px solid #E5E7EB",background:"#F9FAFB",color:"#374151",cursor:"pointer",fontSize:12}}>← キーワードを修正</button>
           <button onClick={runTopicAnalysis} disabled={topicSelected.size===0||topicLoading}
             style={{flex:1,padding:"7px 0",borderRadius:7,border:"none",background:topicSelected.size===0?"#F3F4F6":"#111827",color:topicSelected.size===0?"#9CA3AF":"#fff",cursor:topicSelected.size===0?"not-allowed":"pointer",fontSize:12,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
-            {topicLoading?<><div style={{width:13,height:13,border:"2px solid #6B7280",borderTopColor:"#fff",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/> 分析中…</>:`✨ 選択した ${topicSelected.size} 番組で分析する`}
+            {topicLoading?<><div style={{width:13,height:13,border:"2px solid #6B7280",borderTopColor:"#fff",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/> 分析中…</>:`選択した ${topicSelected.size} 番組で分析する`}
           </button>
         </div>
       </div>}
@@ -2062,7 +2066,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
             <div>
               <div style={{fontSize:11,color:"#9CA3AF",fontFamily:"monospace"}}>「{topicQuery}」— {topicResult.totalCount}コーナーを分析</div>
-              <div style={{fontSize:10,color:"#9CA3AF",marginTop:2}}>対象: 全期間（4/1〜4/14平日）× 朝帯・夕方帯 ／ 指標: <b style={{color:"#2563EB"}}>占拠率</b></div>
+              <div style={{fontSize:10,color:"#9CA3AF",marginTop:2}}>対象: 全期間（4/1〜4/14平日）× 朝帯・夕方帯 ／ 指標: <b style={{color:"#0066cc"}}>占拠率</b></div>
             </div>
             <button onClick={()=>{setTopicStep(2);setTopicResult(null);}} style={{padding:"4px 10px",borderRadius:6,border:"1px solid #E5E7EB",background:"#F9FAFB",fontSize:10.5,cursor:"pointer",color:"#374151"}}>← 選択に戻る</button>
           </div>
@@ -2273,7 +2277,7 @@ function ProgramGuidePage({metric="rating"}){
   return <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 88px)",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif"}}>
     {/* 番組表ヘッダー */}
     <div style={{padding:"10px 18px",borderBottom:"1px solid #E5E7EB",background:"#fff",display:"flex",alignItems:"center",gap:12,flexShrink:0,flexWrap:"wrap"}}>
-      <span style={{fontSize:13,fontWeight:700,color:"#111827"}}>📺 番組表</span>
+      <span style={{fontSize:13,fontWeight:700,color:"#111827"}}>番組表</span>
       <input type="date" value={guideDate} onChange={e=>setGuideDate(e.target.value)}
         min={GUIDE_DATE_MIN} max={GUIDE_DATE_MAX}
         style={{border:"1px solid #E5E7EB",borderRadius:5,padding:"4px 8px",fontSize:12,fontFamily:"monospace",outline:"none",cursor:"pointer"}}/>
@@ -2425,6 +2429,7 @@ export default function App(){
   const[metric,setMetric]=useState("rating");
   const[dashMode,setDashMode]=useState("chart");
   const[timetableModal,setTimetableModal]=useState(null);
+  const[bannerOpen,setBannerOpen]=useState(false);
   // Search persistent state
   const[sQuery,setSQuery]=useState("");
   const[sMode,setSMode]=useState(null);
@@ -2540,9 +2545,13 @@ export default function App(){
         </div>
       </div>
     </div>
-    <div style={{background:"#f5f5f7",borderBottom:"1px solid #e0e0e0",padding:"4px 18px",fontSize:11,color:"#333",display:"flex",alignItems:"center",gap:5}}>
-      <span style={{flexShrink:0}}>⚠</span>
-      <span>視聴率は4/1〜4/14・4/17が実データ（名古屋地区・世帯視聴率）、それ以外はデモデータです。番組表・天気は実データ、番組内容・コーナー情報はデモ用のダミーデータです。ただし、4/17のドデスカ！（6:00〜8:00）のコーナー情報は実際の放送内容を開発途中のシステムで分析した結果です。</span>
+    <div style={{background:"#f5f5f7",borderBottom:"1px solid #e0e0e0",padding:"5px 18px",fontSize:11,color:"#7a7a7a"}}>
+      <button onClick={()=>setBannerOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:6,background:"transparent",border:"none",padding:0,cursor:"pointer",color:"#7a7a7a",fontSize:11}}>
+        <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:14,height:14,borderRadius:9999,border:"1px solid #7a7a7a",fontSize:9,lineHeight:1,fontStyle:"italic",fontFamily:"Georgia,serif"}}>i</span>
+        <span>データについて</span>
+        <span style={{fontSize:8}}>{bannerOpen?"▲":"▼"}</span>
+      </button>
+      {bannerOpen&&<div style={{marginTop:5,lineHeight:1.6,maxWidth:920}}>視聴率は4/1〜4/14・4/17が実データ（名古屋地区・世帯視聴率）、それ以外はデモデータです。番組表・天気は実データ、番組内容・コーナー情報はデモ用のダミーデータです。ただし、4/17のドデスカ！（6:00〜8:00）のコーナー情報は実際の放送内容を開発途中のシステムで分析した結果です。</div>}
     </div>
   </div>;
 
@@ -2596,24 +2605,23 @@ export default function App(){
       <CalendarPicker value={date} onChange={d=>{setDate(d);setSelMin(null);setHL(null);}} dates={dates}/>
       <WeatherBadge weather={weatherData[date]}/>
       <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
-        {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 16:00–19:30"}].map(s=><button key={s.id} onClick={()=>{setSlot(s.id);setSelMin(null);setHL(null);}} style={{padding:"4px 13px",border:"none",background:slot===s.id?"#EFF6FF":"#fff",color:slot===s.id?"#0066cc":"#7a7a7a",cursor:"pointer",fontSize:11,fontWeight:600}}>{s.l}</button>)}
+        {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 16:00–19:30"}].map(s=><button key={s.id} onClick={()=>{setSlot(s.id);setSelMin(null);setHL(null);}} style={seg(slot===s.id)}>{s.l}</button>)}
       </div>
       <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
-        {[{id:"chart",l:"📈 グラフ表示"},{id:"timetable",l:"📋 番組表〜コーナー別〜"}].map(m=><button key={m.id} onClick={()=>{setDashMode(m.id);setSelMin(null);setHL(null);}} style={{padding:"4px 13px",border:"none",background:dashMode===m.id?"#EFF6FF":"#fff",color:dashMode===m.id?"#0066cc":"#7a7a7a",cursor:"pointer",fontSize:11,fontWeight:600}}>{m.l}</button>)}
+        {[{id:"chart",l:"グラフ表示"},{id:"timetable",l:"番組表〜コーナー別〜"}].map(m=><button key={m.id} onClick={()=>{setDashMode(m.id);setSelMin(null);setHL(null);}} style={seg(dashMode===m.id)}>{m.l}</button>)}
       </div>
-      {selMin!==null&&<div style={{display:"flex",alignItems:"center",gap:5,padding:"3px 9px",borderRadius:5,background:"#FEF2F2",border:"1px solid #FEE2E2"}}>
-        <span style={{fontSize:9,color:"#DC2626"}}>⏱</span>
-        <span style={{fontSize:11.5,color:"#DC2626",fontFamily:"monospace",fontWeight:600}}>{m2t(selMin)}</span>
+      {selMin!==null&&<div style={{display:"flex",alignItems:"center",gap:6,padding:"3px 10px",borderRadius:8,background:"#f5f5f7"}}>
+        <span style={{fontSize:10,color:"#7a7a7a"}}>選択時刻</span>
+        <span style={{fontSize:11.5,color:"#0066cc",fontFamily:"monospace",fontWeight:600}}>{m2t(selMin)}</span>
       </div>}
-      {programContext&&<div style={{display:"flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:5,background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
-        <span style={{fontSize:9,color:"#16A34A"}}>📺</span>
-        <span style={{fontSize:11,color:"#166534",fontWeight:700}}>{programContext.name}</span>
-        <span style={{fontSize:10,color:"#16A34A",fontFamily:"monospace"}}>{m2t(programContext.start)}–{m2t(programContext.end)}</span>
+      {programContext&&<div style={{display:"flex",alignItems:"center",gap:6,padding:"3px 10px",borderRadius:8,background:"#f5f5f7"}}>
+        <span style={{fontSize:11,color:"#1d1d1f",fontWeight:600}}>{programContext.name}</span>
+        <span style={{fontSize:10,color:"#7a7a7a",fontFamily:"monospace"}}>{m2t(programContext.start)}–{m2t(programContext.end)}</span>
       </div>}
     </div>
     {programContext&&dashMode==="chart"&&<div style={{display:"flex",alignItems:"center",gap:5,padding:"5px 18px",background:"#FAFAFA",borderBottom:"1px solid #F3F4F6",flexWrap:"wrap"}}>
-      <span style={{fontSize:10.5,color:"#6B7280",fontWeight:600,marginRight:4}}>🔍 ズーム</span>
-      {ZOOM_HALF.map((h,i)=><button key={i} onClick={()=>setZoomLevel(i)} style={{padding:"3px 9px",borderRadius:5,border:"1px solid",borderColor:zoomLevel===i?"#2563EB":"#E5E7EB",background:zoomLevel===i?"#EFF6FF":"#fff",color:zoomLevel===i?"#2563EB":"#6B7280",fontSize:10.5,cursor:"pointer",fontFamily:"monospace",fontWeight:zoomLevel===i?700:400}}>±{h}分</button>)}
+      <span style={{fontSize:10.5,color:"#7a7a7a",fontWeight:600,marginRight:4}}>ズーム</span>
+      {ZOOM_HALF.map((h,i)=><button key={i} onClick={()=>setZoomLevel(i)} style={{padding:"3px 9px",borderRadius:8,border:"1px solid",borderColor:zoomLevel===i?"#0066cc":"#e0e0e0",background:zoomLevel===i?"#0066cc":"#fff",color:zoomLevel===i?"#fff":"#7a7a7a",fontSize:10.5,cursor:"pointer",fontFamily:"monospace",fontWeight:zoomLevel===i?600:400}}>±{h}分</button>)}
     </div>}
     {dashMode==="chart"?<div style={{display:"flex",height:programContext?"calc(100vh - 140px)":"calc(100vh - 100px)"}}>
       <div style={{flex:"1 1 0",display:"flex",flexDirection:"column",minWidth:0,overflowY:"auto"}}>
@@ -2621,14 +2629,14 @@ export default function App(){
         <div style={{padding:"0 18px",height:360,flexShrink:0}}><Chart data={chartData} sel={sel} onClick={click} selMin={selMin} hl={hl} metric={metric} onPan={programContext?handlePan:undefined}/></div>
         {date==="2026-04-17"&&slot==="morning"&&<div style={{padding:"0 18px 12px"}}>
           <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
-            <span style={{fontSize:11,fontWeight:700,color:"#374151"}}>📹 4/17 ドデスカ! 放送動画</span>
+            <span style={{fontSize:11,fontWeight:700,color:"#374151"}}>4/17 ドデスカ! 放送動画</span>
             {selMin!==null&&<span style={{fontSize:10,color:"#6B7280",fontFamily:"monospace"}}>→ {m2t(selMin)} にシーク済み</span>}
           </div>
           <video ref={videoRef} src="https://dodesca-video.s3.ap-northeast-1.amazonaws.com/0417.mp4" controls style={{width:"100%",borderRadius:8,background:"#000",maxHeight:400}}/>
         </div>}
         {date>="2026-06-17"&&videoFiles!==null&&<div style={{padding:"0 18px 12px"}}>
           <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
-            <span style={{fontSize:11,fontWeight:700,color:"#374151"}}>📹 放送動画（NBN）</span>
+            <span style={{fontSize:11,fontWeight:700,color:"#374151"}}>放送動画（NBN）</span>
             {videoUrl&&selMin!==null&&<span style={{fontSize:10,color:"#6B7280",fontFamily:"monospace"}}>→ {m2t(selMin)} にシーク済み</span>}
           </div>
           {videoFiles.length===0&&<div style={{padding:"20px 0",textAlign:"center",fontSize:12,color:"#9CA3AF"}}>この日の動画データはありません</div>}
