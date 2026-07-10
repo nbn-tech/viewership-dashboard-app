@@ -986,6 +986,9 @@ const API_CONFIG = {
   baseUrl: "https://fecc7uq4uapxx37bmockq3gyvi0ibsdf.lambda-url.ap-northeast-1.on.aws",
 };
 
+// 番組アノテーション検索Lambda (Athena経由、video_analyzer.corner_csvを検索)
+const ANNOTATION_SEARCH_URL = "https://htfd3lomkkplj4363w7cczdidy0olqcs.lambda-url.ap-northeast-1.on.aws/";
+
 // コーナーのテキスト表現
 function cornerToText(c){
   return `${c.title} ${c.tags.join(" ")} ${c.summary}`;
@@ -1033,6 +1036,21 @@ const apiClient = {
     });
 
     return results.map(c => c._origIdx);
+  },
+
+  // 実データ検索（アノテーションCSVをAthena経由で検索）
+  async annotationSearch(query) {
+    const res = await fetch(ANNOTATION_SEARCH_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, limit: 200 }),
+    });
+    if (!res.ok) throw new Error(`アノテーション検索API error: ${res.status}`);
+    const { results = [] } = await res.json();
+    return results.map(r => ({
+      ...r,
+      tags: r.tags ? r.tags.split("|").filter(Boolean) : [],
+    }));
   },
 
   // 統括分析
@@ -1412,6 +1430,7 @@ function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,
 
 function SearchPage({page,setPage,metric,setMetric,
   query,setQuery,searchMode,setSearchMode,matchedIdxs,setMatchedIdxs,
+  athenaResults,setAthenaResults,
   selStations,setSelStations,selSlots,setSelSlots,dateFrom,setDateFrom,dateTo,setDateTo,sortBy,setSortBy,
   setATopicQuery,setATab,weatherData}){
   const[modalCorner,setModalCorner]=useState(null);
@@ -1446,6 +1465,11 @@ function SearchPage({page,setPage,metric,setMetric,
     if(!query.trim()){setError("検索ワードを入力してください");return;}
     setError(null);setLoading(true);setSearchMode(searchMode);
     try{
+      if(searchMode==="athena"){
+        const results=await apiClient.annotationSearch(query);
+        setAthenaResults(results);
+        return;
+      }
       let idxs;
       if(searchMode==="keyword"){
         idxs=index.map((c,i)=>keywordMatch(c,query)?i:-1).filter(i=>i>=0);
@@ -1461,6 +1485,7 @@ function SearchPage({page,setPage,metric,setMetric,
     }catch(e){
       setError("検索エラー: "+(e.message||"unknown"));
       setMatchedIdxs([]);
+      setAthenaResults([]);
     }finally{setLoading(false);}
   };
   const fmt=v=>v!=null?(v.toFixed(1))+"%":"—";
@@ -1474,6 +1499,7 @@ function SearchPage({page,setPage,metric,setMetric,
           style={{flex:1,padding:"10px 14px",border:"1px solid #E5E7EB",borderRadius:8,fontSize:13,outline:"none",fontFamily:"system-ui,sans-serif"}}/>
         <button onClick={()=>runSearch("keyword")} disabled={loading} style={{padding:"0 16px",border:`1px solid ${searchMode==="keyword"?"#0066cc":"#e0e0e0"}`,borderRadius:8,background:searchMode==="keyword"?"#0066cc":"#fff",color:searchMode==="keyword"?"#fff":"#374151",cursor:loading?"wait":"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:5}}>部分一致</button>
         <button onClick={()=>runSearch("semantic")} disabled={loading} style={{padding:"0 16px",border:`1px solid ${searchMode==="semantic"?"#0066cc":"#e0e0e0"}`,borderRadius:8,background:searchMode==="semantic"?"#0066cc":"#fff",color:searchMode==="semantic"?"#fff":"#374151",cursor:loading?"wait":"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:5}}>AI意味検索</button>
+        <button onClick={()=>runSearch("athena")} disabled={loading} style={{padding:"0 16px",border:`1px solid ${searchMode==="athena"?"#0066cc":"#e0e0e0"}`,borderRadius:8,background:searchMode==="athena"?"#0066cc":"#fff",color:searchMode==="athena"?"#fff":"#374151",cursor:loading?"wait":"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:5}}>実データ検索</button>
       </div>
       {error&&<div style={{marginTop:8,padding:"6px 10px",background:"#FEF2F2",border:"1px solid #FEE2E2",borderRadius:6,color:"#DC2626",fontSize:11.5}}>{error}</div>}
     </div>
@@ -1506,11 +1532,38 @@ function SearchPage({page,setPage,metric,setMetric,
     <div style={{padding:"14px 18px"}}>
       {loading&&<div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:60,color:"#6B7280",fontSize:13,gap:10}}>
         <div style={{width:18,height:18,border:"2px solid #E5E7EB",borderTopColor:"#0891B2",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
-        {searchMode==="semantic"?"AIが意味検索中…":"検索中…"}
+        {searchMode==="semantic"?"AIが意味検索中…":searchMode==="athena"?"実データを検索中…":"検索中…"}
       </div>}
-      {!loading&&displayResults===null&&<div style={{padding:60,textAlign:"center",color:"#9CA3AF",fontSize:12.5,lineHeight:1.8}}>検索ワードを入力して、「部分一致」または「AI意味検索」を実行してください<br/><span style={{fontSize:10.5}}>対象: 2026/04/01〜04/14 平日 ・ 朝帯&夕方帯 ・ 全7局 ・ 全コーナー</span></div>}
-      {!loading&&displayResults!==null&&displayResults.length===0&&<div style={{padding:60,textAlign:"center",color:"#9CA3AF",fontSize:13}}>該当するコーナーが見つかりませんでした</div>}
-      {!loading&&displayResults&&displayResults.length>0&&<>
+      {!loading&&searchMode==="athena"&&<>
+        {athenaResults===null&&<div style={{padding:60,textAlign:"center",color:"#9CA3AF",fontSize:12.5,lineHeight:1.8}}>検索ワードを入力して「実データ検索」を実行してください<br/><span style={{fontSize:10.5}}>対象: アノテーション済みの実際の放送内容（video_analyzer.corner_csv）</span></div>}
+        {athenaResults!==null&&athenaResults.length===0&&<div style={{padding:60,textAlign:"center",color:"#9CA3AF",fontSize:13}}>該当するコーナーが見つかりませんでした</div>}
+        {athenaResults&&athenaResults.length>0&&<>
+          <div style={{fontSize:11.5,color:"#6B7280",marginBottom:10}}><b style={{color:"#111827",fontSize:13}}>{athenaResults.length}</b> 件ヒット <span style={{marginLeft:6,padding:"1px 6px",background:"#f5f5f7",color:"#7a7a7a",borderRadius:9999,fontSize:10,fontWeight:600}}>実データ</span></div>
+          <div style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:8,overflow:"hidden"}}>
+            <div style={{display:"grid",gridTemplateColumns:"90px 60px 1fr",gap:8,padding:"8px 12px",background:"#F9FAFB",borderBottom:"1px solid #E5E7EB",fontSize:9.5,color:"#6B7280",fontFamily:"monospace",fontWeight:700,letterSpacing:"0.06em"}}>
+              <div>日付/時刻</div><div>局</div><div>タイトル / 要約</div>
+            </div>
+            {athenaResults.map((r,i)=>{
+              const st=ST.find(s=>s.id===r.stId);
+              return <div key={r.object_key+r.start_sec+i} style={{display:"grid",gridTemplateColumns:"90px 60px 1fr",gap:8,padding:"10px 12px",borderBottom:i<athenaResults.length-1?"1px solid #F3F4F6":"none",alignItems:"start",fontSize:11.5,animation:`fi 0.25s ease ${Math.min(i*0.015,0.4)}s both`}}>
+                <div style={{fontFamily:"monospace",fontSize:10.5,color:"#6B7280",lineHeight:1.4}}>
+                  <div style={{color:"#111827",fontWeight:600}}>{r.date?r.date.slice(5):"—"}{r.date&&`(${dow(r.date)})`}</div>
+                  <div style={{fontSize:9.5,color:"#9CA3AF"}}>{r.startMin&&r.endMin?`${r.startMin}–${r.endMin}`:"—"}</div>
+                </div>
+                <div>{st?<span style={{background:st.c,color:"#fff",fontSize:9,fontWeight:800,padding:"2px 5px",borderRadius:3,fontFamily:"monospace"}}>{r.stId}</span>:<span style={{color:"#9CA3AF",fontSize:9.5,fontFamily:"monospace"}}>{r.object_key}</span>}</div>
+                <div style={{minWidth:0}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"#111827",marginBottom:3}}>{r.title}</div>
+                  <div style={{fontSize:10.5,color:"#6B7280",lineHeight:1.5,marginBottom:3,overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{r.summary}</div>
+                  {r.tags.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:3}}>{r.tags.map(t=><span key={t} style={{padding:"0.5px 5px",borderRadius:2,fontSize:9,border:"1px solid #E5E7EB",color:"#6B7280",background:"#F9FAFB"}}>#{t}</span>)}</div>}
+                </div>
+              </div>;
+            })}
+          </div>
+        </>}
+      </>}
+      {!loading&&searchMode!=="athena"&&displayResults===null&&<div style={{padding:60,textAlign:"center",color:"#9CA3AF",fontSize:12.5,lineHeight:1.8}}>検索ワードを入力して、「部分一致」または「AI意味検索」を実行してください<br/><span style={{fontSize:10.5}}>対象: 2026/04/01〜04/14 平日 ・ 朝帯&夕方帯 ・ 全7局 ・ 全コーナー</span></div>}
+      {!loading&&searchMode!=="athena"&&displayResults!==null&&displayResults.length===0&&<div style={{padding:60,textAlign:"center",color:"#9CA3AF",fontSize:13}}>該当するコーナーが見つかりませんでした</div>}
+      {!loading&&searchMode!=="athena"&&displayResults&&displayResults.length>0&&<>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div style={{fontSize:11.5,color:"#6B7280"}}><b style={{color:"#111827",fontSize:13}}>{displayResults.length}</b> 件ヒット {searchMode==="semantic"&&<span style={{marginLeft:6,padding:"1px 6px",background:"#f5f5f7",color:"#7a7a7a",borderRadius:9999,fontSize:10,fontWeight:600}}>AI関連度順</span>}</div>
@@ -2434,6 +2487,7 @@ export default function App(){
   const[sQuery,setSQuery]=useState("");
   const[sMode,setSMode]=useState(null);
   const[sIdxs,setSIdxs]=useState(null);
+  const[sAthenaResults,setSAthenaResults]=useState(null);
   const[sStations,setSStations]=useState(ST.map(s=>s.id));
   const[sSlots,setSSlots]=useState(["morning","evening"]);
   const[sDateFrom,setSDateFrom]=useState(ALL_DATES[0]);
@@ -2571,6 +2625,7 @@ export default function App(){
       <SearchPage page={page} setPage={setPage} metric={metric} setMetric={setMetric}
         query={sQuery} setQuery={setSQuery} searchMode={sMode} setSearchMode={setSMode}
         matchedIdxs={sIdxs} setMatchedIdxs={setSIdxs}
+        athenaResults={sAthenaResults} setAthenaResults={setSAthenaResults}
         selStations={sStations} setSelStations={setSStations}
         selSlots={sSlots} setSelSlots={setSSlots}
         dateFrom={sDateFrom} setDateFrom={setSDateFrom}

@@ -1,23 +1,27 @@
 """
 番組アノテーション検索 Lambda。
 
-Glue Data Catalog (bangumi_annotations.annotation) を Athena 経由で検索し、
-object_key (movie/ch{n}/YYYYMMDD/CH{n}_YYYYMMDD_HHMMSS.mp4) から
-局コード・放送日・実時刻を逆算して返す。
+Glue Data Catalog (video_analyzer.corner_csv, 実体は s3://bangumi-info/results/
+以下のCSV) を Athena 経由で検索する。このテーブルはLake Formation非管理の
+通常のGlue外部テーブルなので、Lambda実行ロールへの標準的なIAM権限
+(Athena/Glue/S3のGetObject)だけでアクセスできる。
 
 デプロイ想定:
-- Lambda ランタイム: Python 3.12 (boto3 同梱)
+- Lambda ランタイム: Python 3.13 (boto3 同梱)
 - 実行ロールに以下を許可:
     athena:StartQueryExecution / GetQueryExecution / GetQueryResults
-    glue:GetTable / GetDatabase / GetPartitions (bangumi_annotations.annotation)
-    s3:GetObject (アノテーションデータ本体)
-    s3:GetObject, s3:PutObject, s3:GetBucketLocation
-      (Athena結果出力先 s3://bangumi-info/athena-results/)
+    glue:GetTable / GetDatabase (video_analyzer.corner_csv)
+    s3:GetObject / ListBucket (s3://bangumi-info/results/)
+    s3:GetObject / PutObject (Athena結果出力先 s3://bangumi-info/athena-results/)
 - Lambda Function URL 経由で /api/search/annotation として公開する想定
   (既存の /api/search/semantic と同じ構成)
-- 認証情報は Lambda 実行ロールに任せる (静的アクセスキーは使わない)。
-  ローカル実行時は `aws configure` / 環境変数 (AWS_ACCESS_KEY_ID 等) の
-  boto3標準の資格情報チェーンがそのまま使える。
+
+補足(旧S3 Tablesベースからの移行経緯):
+以前は bangumi_annotations.annotation (S3 Tables/Iceberg, Lake Formation管理)
+を対象にしていたが、Lambda実行ロールからのアクセスがLake Formation側で
+常に0件になる問題があり(原因は組織のネットワーク制限の可能性が高いが未特定)、
+解析結果を video_analyzer.corner_csv という通常のCSVベースのGlueテーブルに
+集約する方式に切り替えた。
 """
 
 import json
@@ -29,8 +33,8 @@ from datetime import datetime, timedelta
 import boto3
 
 AWS_REGION = os.environ.get("AWS_REGION", "ap-northeast-1")
-ATHENA_DATABASE = os.environ.get("ATHENA_DATABASE", "bangumi_annotations")
-ATHENA_TABLE = os.environ.get("ATHENA_TABLE", "annotation")
+ATHENA_DATABASE = os.environ.get("ATHENA_DATABASE", "video_analyzer")
+ATHENA_TABLE = os.environ.get("ATHENA_TABLE", "corner_csv")
 ATHENA_OUTPUT_LOCATION = os.environ.get(
     "ATHENA_OUTPUT_LOCATION", "s3://bangumi-info/athena-results/"
 )
@@ -40,7 +44,7 @@ MAX_POLL_ATTEMPTS = 30
 DEFAULT_LIMIT = 200
 MAX_LIMIT = 1000
 
-# movie/ch{n}/ の n → 局コード（録画対象の6chのみ。NHKE は録画対象外）
+# channel列 (例: "ch6") → 局コード（録画対象の6chのみ。NHKE は録画対象外）
 CH_TO_STATION = {
     "1": "THK",
     "2": "TVA",
@@ -50,9 +54,9 @@ CH_TO_STATION = {
     "6": "NBN",
 }
 
-OBJECT_KEY_RE = re.compile(
-    r"movie/ch(?P<ch>\d+)/\d{8}/CH\d+_(?P<date>\d{8})_(?P<time>\d{6})\.mp4$"
-)
+CHANNEL_RE = re.compile(r"ch(?P<ch>\d+)", re.IGNORECASE)
+# filename列 (例: "CH6_20260629_231500.mp4") から録画開始時刻(HHMMSS)を取り出す
+FILENAME_TIME_RE = re.compile(r"_(?P<time>\d{6})\.mp4$", re.IGNORECASE)
 
 _athena_client = None
 
@@ -76,20 +80,19 @@ def _build_query(search_term: str, limit: int) -> str:
     term = _escape_like_literal(search_term)
     return f"""
 SELECT
-    object_key,
-    trim(split_part(text_value, ',', 1)) AS start_sec,
-    trim(split_part(text_value, ',', 2)) AS end_sec,
-    trim(split_part(text_value, ',', 3)) AS title,
-    trim(split_part(text_value, ',', 4)) AS summary,
-    trim(split_part(text_value, ',', 5)) AS tags
+    broadcast_date,
+    channel,
+    filename,
+    trim(start_sec) AS start_sec,
+    trim(end_sec) AS end_sec,
+    trim(title) AS title,
+    trim(summary) AS summary,
+    trim(tags) AS tags
 FROM {ATHENA_TABLE}
-WHERE name LIKE 'corner\\_%' ESCAPE '\\'
-  AND (
-    split_part(text_value, ',', 3) LIKE '%{term}%' ESCAPE '\\'
-    OR split_part(text_value, ',', 4) LIKE '%{term}%' ESCAPE '\\'
-    OR split_part(text_value, ',', 5) LIKE '%{term}%' ESCAPE '\\'
-  )
-ORDER BY object_key, CAST(split_part(text_value, ',', 1) AS DOUBLE)
+WHERE title LIKE '%{term}%' ESCAPE '\\'
+   OR summary LIKE '%{term}%' ESCAPE '\\'
+   OR tags LIKE '%{term}%' ESCAPE '\\'
+ORDER BY broadcast_date, channel, filename, TRY_CAST(start_sec AS DOUBLE)
 LIMIT {limit}
 """
 
@@ -141,24 +144,29 @@ def _fetch_all_rows(query_execution_id: str):
     return rows
 
 
-def _derive_schedule_fields(object_key: str, start_sec: float, end_sec: float):
-    match = OBJECT_KEY_RE.search(object_key)
-    if not match:
+def _derive_schedule_fields(broadcast_date: str, channel: str, filename: str,
+                             start_sec: float, end_sec: float):
+    ch_match = CHANNEL_RE.search(channel)
+    if not ch_match:
         return None
-    station_id = CH_TO_STATION.get(match.group("ch"))
-    if station_id is None:
+    station_id = CH_TO_STATION.get(ch_match.group("ch"))
+    if station_id is None or not re.fullmatch(r"\d{8}", broadcast_date):
         return None
-    date_str = match.group("date")  # YYYYMMDD
-    time_str = match.group("time")  # HHMMSS (このファイルの録画開始時刻)
-    file_start_dt = datetime.strptime(date_str + time_str, "%Y%m%d%H%M%S")
-    corner_start_dt = file_start_dt + timedelta(seconds=start_sec)
-    corner_end_dt = file_start_dt + timedelta(seconds=end_sec)
-    return {
+
+    result = {
         "stId": station_id,
-        "date": f"{date_str[0:4]}-{date_str[4:6]}-{date_str[6:8]}",
-        "startMin": corner_start_dt.strftime("%H:%M"),
-        "endMin": corner_end_dt.strftime("%H:%M"),
+        "date": f"{broadcast_date[0:4]}-{broadcast_date[4:6]}-{broadcast_date[6:8]}",
     }
+
+    time_match = FILENAME_TIME_RE.search(filename)
+    if time_match:
+        file_start_dt = datetime.strptime(
+            broadcast_date + time_match.group("time"), "%Y%m%d%H%M%S"
+        )
+        result["startMin"] = (file_start_dt + timedelta(seconds=start_sec)).strftime("%H:%M")
+        result["endMin"] = (file_start_dt + timedelta(seconds=end_sec)).strftime("%H:%M")
+
+    return result
 
 
 def _to_float(value: str, default: float = 0.0) -> float:
@@ -169,20 +177,20 @@ def _to_float(value: str, default: float = 0.0) -> float:
 
 
 def _row_to_result(row):
-    padded = (row + [""] * 6)[:6]
-    object_key, start_sec_str, end_sec_str, title, summary, tags = padded
+    padded = (row + [""] * 8)[:8]
+    broadcast_date, channel, filename, start_sec_str, end_sec_str, title, summary, tags = padded
     start_sec = _to_float(start_sec_str)
     end_sec = _to_float(end_sec_str, default=start_sec)
 
     result = {
-        "object_key": object_key,
+        "object_key": filename,
         "start_sec": start_sec,
         "end_sec": end_sec,
         "title": title,
         "summary": summary,
         "tags": tags,
     }
-    schedule = _derive_schedule_fields(object_key, start_sec, end_sec)
+    schedule = _derive_schedule_fields(broadcast_date, channel, filename, start_sec, end_sec)
     if schedule:
         result.update(schedule)
     return result
