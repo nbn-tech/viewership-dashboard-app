@@ -81,9 +81,24 @@ def _escape_like_literal(value: str) -> str:
     return escaped
 
 
-def _build_query(search_term: str, limit: int) -> str:
+def _validate_yyyymmdd(value):
+    if value and re.fullmatch(r"\d{8}", str(value)):
+        return str(value)
+    return None
+
+
+def _build_query(search_term: str, limit: int, date_from=None, date_to=None) -> str:
     term = _escape_like_literal(search_term)
     channels = ",".join(f"'{c}'" for c in KNOWN_CHANNELS)
+
+    date_conditions = ""
+    date_from = _validate_yyyymmdd(date_from)
+    date_to = _validate_yyyymmdd(date_to)
+    if date_from:
+        date_conditions += f"  AND broadcast_date >= '{date_from}'\n"
+    if date_to:
+        date_conditions += f"  AND broadcast_date <= '{date_to}'\n"
+
     return f"""
 SELECT
     channel,
@@ -97,7 +112,7 @@ SELECT
     tags
 FROM {ATHENA_TABLE}
 WHERE channel IN ({channels})
-  AND (
+{date_conditions}  AND (
     title LIKE '%{term}%' ESCAPE '\\'
     OR summary LIKE '%{term}%' ESCAPE '\\'
     OR tags LIKE '%{term}%' ESCAPE '\\'
@@ -211,11 +226,11 @@ def _row_to_result(row):
     return result
 
 
-def search_annotations(query_text: str, limit: int = DEFAULT_LIMIT):
+def search_annotations(query_text: str, limit: int = DEFAULT_LIMIT, date_from=None, date_to=None):
     if not query_text or not query_text.strip():
         return []
     limit = max(1, min(int(limit), MAX_LIMIT))
-    sql = _build_query(query_text.strip(), limit)
+    sql = _build_query(query_text.strip(), limit, date_from, date_to)
     query_execution_id = _run_athena_query(sql)
     _wait_for_query(query_execution_id)
     rows = _fetch_all_rows(query_execution_id)
@@ -230,9 +245,11 @@ def lambda_handler(event, context):
 
     query_text = body.get("query", "")
     limit = body.get("limit", DEFAULT_LIMIT)
+    date_from = body.get("date_from")
+    date_to = body.get("date_to")
 
     try:
-        results = search_annotations(query_text, limit)
+        results = search_annotations(query_text, limit, date_from, date_to)
     except (RuntimeError, TimeoutError) as exc:
         return {
             "statusCode": 502,

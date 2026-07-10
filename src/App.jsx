@@ -902,6 +902,8 @@ function TimetableView({slot,sel,allR,allS,metric,date,onCornerClick}){
 // Search / Analysis で使う実データ対象日（視聴率の実データがある日）
 const ALL_DATES=(()=>{const d=[];for(let i=1;i<=14;i++){d.push(`2026-04-${String(i).padStart(2,"0")}`);}d.push("2026-04-17");return d;})();
 const ALL_SLOTS=["morning","evening"];
+// 実データ検索（Athena）対象期間
+const REAL_DATES=(()=>{const d=[];for(let i=1;i<=14;i++){d.push(`2026-07-${String(i).padStart(2,"0")}`);}return d;})();
 
 // 番組表・Dashboard 共通の日付範囲定数
 const GUIDE_DATE_MIN="2025-06-25";
@@ -1039,11 +1041,16 @@ const apiClient = {
   },
 
   // 実データ検索（アノテーションCSVをAthena経由で検索）
-  async annotationSearch(query) {
+  async annotationSearch(query, dateFrom, dateTo) {
     const res = await fetch(ANNOTATION_SEARCH_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, limit: 200 }),
+      body: JSON.stringify({
+        query,
+        limit: 200,
+        date_from: dateFrom ? dateFrom.replaceAll("-", "") : undefined,
+        date_to: dateTo ? dateTo.replaceAll("-", "") : undefined,
+      }),
     });
     if (!res.ok) throw new Error(`アノテーション検索API error: ${res.status}`);
     const { results = [] } = await res.json();
@@ -1439,6 +1446,7 @@ function SearchPage({page,setPage,metric,setMetric,
   const[error,setError]=useState(null);
   const index=useMemo(()=>buildCornerIndex(),[]);
   const ratingsCache=rCache;
+  const dateOptions=searchMode==="athena"?REAL_DATES:ALL_DATES;
 
   const togStation=id=>setSelStations(p=>p.includes(id)?p.filter(s=>s!==id):[...p,id]);
   const togSlot=id=>setSelSlots(p=>p.includes(id)?p.filter(s=>s!==id):[...p,id]);
@@ -1466,7 +1474,10 @@ function SearchPage({page,setPage,metric,setMetric,
     setError(null);setLoading(true);setSearchMode(searchMode);
     try{
       if(searchMode==="athena"){
-        const results=await apiClient.annotationSearch(query);
+        let df=dateFrom,dt=dateTo;
+        if(df<REAL_DATES[0]||df>REAL_DATES[REAL_DATES.length-1]){df=REAL_DATES[0];setDateFrom(df);}
+        if(dt<REAL_DATES[0]||dt>REAL_DATES[REAL_DATES.length-1]){dt=REAL_DATES[REAL_DATES.length-1];setDateTo(dt);}
+        const results=await apiClient.annotationSearch(query,df,dt);
         setAthenaResults(results);
         return;
       }
@@ -1506,9 +1517,9 @@ function SearchPage({page,setPage,metric,setMetric,
     <div style={{padding:"10px 18px",background:"#fff",borderBottom:"1px solid #F3F4F6",display:"flex",flexWrap:"wrap",gap:14,alignItems:"center"}}>
       <div style={{display:"flex",alignItems:"center",gap:5}}>
         <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace",fontWeight:600}}>期間</span>
-        <select value={dateFrom} onChange={e=>setDateFrom(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"3px 6px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none"}}>{ALL_DATES.map(d=><option key={d} value={d}>{d.slice(5)} ({dow(d)})</option>)}</select>
+        <select value={dateFrom} onChange={e=>setDateFrom(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"3px 6px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none"}}>{dateOptions.map(d=><option key={d} value={d}>{d.slice(5)} ({dow(d)})</option>)}</select>
         <span style={{color:"#9CA3AF",fontSize:11}}>〜</span>
-        <select value={dateTo} onChange={e=>setDateTo(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"3px 6px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none"}}>{ALL_DATES.map(d=><option key={d} value={d}>{d.slice(5)} ({dow(d)})</option>)}</select>
+        <select value={dateTo} onChange={e=>setDateTo(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"3px 6px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none"}}>{dateOptions.map(d=><option key={d} value={d}>{d.slice(5)} ({dow(d)})</option>)}</select>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:5}}>
         <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace",fontWeight:600}}>時間帯</span>
