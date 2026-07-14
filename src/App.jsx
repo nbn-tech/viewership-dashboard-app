@@ -76,6 +76,19 @@ function parseGuideJSON(data){
   return programs;
 }
 
+// S3 JSON をパース(絶対時刻版): 検索結果の番組名突き合わせ用。
+// epg-all は「放送日」区切り(概ね5時前後〜翌5時前後だが日によって多少前後する)、
+// daily_corners は「暦日」区切り(0時始まり)なので、両者の日付定義がズレる。
+// そのため分オフセットではなく実際のYYYYMMDDHHMM文字列のまま比較する。
+function parseEpgAbsolute(data){
+  const programs=[];
+  for(const p of data.programs){
+    const stId=CHANNEL_ID_MAP[p.ChannelId];if(!stId)continue;
+    programs.push({stId,title:p.ProgramTitle,start:p.StartTime.slice(0,12),end:p.EndTime.slice(0,12)});
+  }
+  return programs;
+}
+
 // ============================================================
 // デモデータ: コンテンツプール + 番組テンプレート
 // 番組枠・時間・セグメントは毎日固定、コーナーの中身は日替わり
@@ -1437,34 +1450,38 @@ function SearchPage({page,setPage,
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState(null);
   const[modalResult,setModalResult]=useState(null);
-  const[epgCache,setEpgCache]=useState({}); // date -> programs[] (番組表, epg-all由来)
+  const[epgCache,setEpgCache]=useState({}); // date(YYYY-MM-DD) -> 絶対時刻付き番組[]
 
-  // 検索結果に含まれる日付のぶんだけ番組表(epg-all)を取得し、番組名の突き合わせに使う
+  const prevDate=d=>{const[y,m,day]=d.split("-").map(Number);const dt=new Date(y,m-1,day-1);return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;};
+
+  // 検索結果に含まれる日付のぶんだけ番組表(epg-all)を取得し、番組名の突き合わせに使う。
+  // epg-allは放送日区切り(概ね5時前後〜翌5時前後)、daily_corners側は暦日区切り(0時始まり)なので、
+  // 早朝のコーナーは前日のepgファイルに実体があるケースがある → 前日分も合わせて取得する
   useEffect(()=>{
     if(!athenaResults)return;
-    const dates=[...new Set(athenaResults.map(r=>r.date).filter(Boolean))];
-    const missing=dates.filter(d=>!(d in epgCache));
+    const dates=new Set();
+    athenaResults.forEach(r=>{if(r.date){dates.add(r.date);dates.add(prevDate(r.date));}});
+    const missing=[...dates].filter(d=>!(d in epgCache));
     if(missing.length===0)return;
     missing.forEach(d=>{
       setEpgCache(prev=>d in prev?prev:{...prev,[d]:null});
       const yyyymmdd=d.replace(/-/g,'');
-      const isJson=parseInt(yyyymmdd)>=20260616;
-      const url=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/epg-all/bangumi_${yyyymmdd}.${isJson?'json':'csv'}`;
+      const url=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/epg-all/bangumi_${yyyymmdd}.json`;
       fetch(url)
-        .then(r=>r.ok?(isJson?r.json():r.text()):Promise.reject())
-        .then(data=>setEpgCache(prev=>({...prev,[d]:isJson?parseGuideJSON(data):parseGuideCSV(data)})))
+        .then(r=>r.ok?r.json():Promise.reject())
+        .then(data=>setEpgCache(prev=>({...prev,[d]:parseEpgAbsolute(data)})))
         .catch(()=>setEpgCache(prev=>({...prev,[d]:[]})));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[athenaResults]);
 
-  // 検索結果(コーナー)の日時から、それを含む番組表エントリの番組名を引く
+  // 検索結果(コーナー)の実時刻(YYYYMMDDHHMM文字列)から、それを含む番組表エントリの番組名を引く。
+  // 当日分・前日分の両ファイルを対象に、絶対時刻の範囲で突き合わせる(放送日と暦日のズレを吸収するため)
   const lookupProgName=r=>{
     if(!r.date||!r.startMin)return null;
-    const programs=epgCache[r.date];
-    if(!programs)return null;
-    const cornerMin=tvt2m(r.startMin);
-    const p=programs.find(p=>p.stId===r.stId&&p.startMin<=cornerMin&&cornerMin<p.endMin);
+    const cornerKey=r.date.replaceAll("-","")+r.startMin.replace(":","");
+    const candidates=[...(epgCache[r.date]||[]),...(epgCache[prevDate(r.date)]||[])];
+    const p=candidates.find(p=>p.stId===r.stId&&p.start<=cornerKey&&cornerKey<p.end);
     return p?p.title:null;
   };
 
