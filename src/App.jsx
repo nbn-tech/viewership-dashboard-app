@@ -1436,6 +1436,7 @@ function SearchPage({page,setPage,
   setATopicQuery,setATab}){
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState(null);
+  const[modalResult,setModalResult]=useState(null);
 
   const togStation=id=>setSelStations(p=>p.includes(id)?p.filter(s=>s!==id):[...p,id]);
 
@@ -1511,7 +1512,7 @@ function SearchPage({page,setPage,
           </div>
           {displayResults.map((r,i)=>{
             const st=ST.find(s=>s.id===r.stId);
-            return <div key={r.object_key+r.start_sec+i} style={{display:"grid",gridTemplateColumns:"90px 60px 1fr",gap:8,padding:"10px 12px",borderBottom:i<displayResults.length-1?"1px solid #F3F4F6":"none",alignItems:"start",fontSize:11.5,animation:`fi 0.25s ease ${Math.min(i*0.015,0.4)}s both`}}>
+            return <div key={r.object_key+r.start_sec+i} onClick={()=>setModalResult(r)} style={{display:"grid",gridTemplateColumns:"90px 60px 1fr",gap:8,padding:"10px 12px",borderBottom:i<displayResults.length-1?"1px solid #F3F4F6":"none",alignItems:"start",fontSize:11.5,animation:`fi 0.25s ease ${Math.min(i*0.015,0.4)}s both`,cursor:"pointer",transition:"background 0.1s"}} onMouseEnter={e=>e.currentTarget.style.background="#F0F9FF"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
               <div style={{fontFamily:"monospace",fontSize:10.5,color:"#6B7280",lineHeight:1.4}}>
                 <div style={{color:"#111827",fontWeight:600}}>{r.date?r.date.slice(5):"—"}{r.date&&`(${dow(r.date)})`}</div>
                 <div style={{fontSize:9.5,color:"#9CA3AF"}}>{r.startMin&&r.endMin?`${r.startMin}–${r.endMin}`:"—"}</div>
@@ -1527,7 +1528,39 @@ function SearchPage({page,setPage,
         </div>
       </>}
     </div>
+    {modalResult&&<AnnotationResultModal result={modalResult} onClose={()=>setModalResult(null)}/>}
   </>;
+}
+
+function AnnotationResultModal({result,onClose}){
+  const videoRef=useRef(null);
+  const st=ST.find(s=>s.id===result.stId);
+  const dow=ds=>["日","月","火","水","木","金","土"][new Date(ds).getDay()];
+  const chMatch=result.object_key.match(/^CH(\d+)_/i);
+  const yyyymmdd=result.date?result.date.replaceAll("-",""):null;
+  const videoUrl=(chMatch&&yyyymmdd)
+    ?`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/movie/ch${chMatch[1]}/${yyyymmdd}/${result.object_key}`
+    :null;
+
+  return <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+    <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:12,maxWidth:720,width:"100%",maxHeight:"88vh",overflowY:"auto",padding:24}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+          {st&&<span style={{background:st.c,color:"#fff",fontSize:11,fontWeight:800,padding:"3px 8px",borderRadius:4,fontFamily:"monospace"}}>{result.stId}</span>}
+          <span style={{fontSize:12,color:"#6B7280",fontFamily:"monospace"}}>
+            {result.date}{result.date&&`(${dow(result.date)})`} {result.startMin&&result.endMin?`${result.startMin}–${result.endMin}`:""}
+          </span>
+        </div>
+        <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,color:"#9CA3AF",cursor:"pointer",lineHeight:1,padding:0}}>×</button>
+      </div>
+      <div style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:10}}>{result.title}</div>
+      {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls autoPlay
+        onLoadedMetadata={()=>{if(videoRef.current)videoRef.current.currentTime=result.start_sec;}}
+        style={{width:"100%",borderRadius:8,background:"#000",maxHeight:400,marginBottom:14}}/>}
+      <div style={{fontSize:13.5,color:"#374151",lineHeight:1.7,marginBottom:12,whiteSpace:"pre-wrap"}}>{result.summary}</div>
+      {result.tags.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:5}}>{result.tags.map(t=><span key={t} style={{padding:"2px 8px",borderRadius:9999,fontSize:11,border:"1px solid #E5E7EB",color:"#6B7280",background:"#F9FAFB"}}>#{t}</span>)}</div>}
+    </div>
+  </div>;
 }
 
 // ============================================================
