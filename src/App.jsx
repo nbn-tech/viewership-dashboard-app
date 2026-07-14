@@ -1437,6 +1437,36 @@ function SearchPage({page,setPage,
   const[loading,setLoading]=useState(false);
   const[error,setError]=useState(null);
   const[modalResult,setModalResult]=useState(null);
+  const[epgCache,setEpgCache]=useState({}); // date -> programs[] (番組表, epg-all由来)
+
+  // 検索結果に含まれる日付のぶんだけ番組表(epg-all)を取得し、番組名の突き合わせに使う
+  useEffect(()=>{
+    if(!athenaResults)return;
+    const dates=[...new Set(athenaResults.map(r=>r.date).filter(Boolean))];
+    const missing=dates.filter(d=>!(d in epgCache));
+    if(missing.length===0)return;
+    missing.forEach(d=>{
+      setEpgCache(prev=>d in prev?prev:{...prev,[d]:null});
+      const yyyymmdd=d.replace(/-/g,'');
+      const isJson=parseInt(yyyymmdd)>=20260616;
+      const url=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/epg-all/bangumi_${yyyymmdd}.${isJson?'json':'csv'}`;
+      fetch(url)
+        .then(r=>r.ok?(isJson?r.json():r.text()):Promise.reject())
+        .then(data=>setEpgCache(prev=>({...prev,[d]:isJson?parseGuideJSON(data):parseGuideCSV(data)})))
+        .catch(()=>setEpgCache(prev=>({...prev,[d]:[]})));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[athenaResults]);
+
+  // 検索結果(コーナー)の日時から、それを含む番組表エントリの番組名を引く
+  const lookupProgName=r=>{
+    if(!r.date||!r.startMin)return null;
+    const programs=epgCache[r.date];
+    if(!programs)return null;
+    const cornerMin=tvt2m(r.startMin);
+    const p=programs.find(p=>p.stId===r.stId&&p.startMin<=cornerMin&&cornerMin<p.endMin);
+    return p?p.title:null;
+  };
 
   const togStation=id=>setSelStations(p=>p.includes(id)?p.filter(s=>s!==id):[...p,id]);
 
@@ -1478,9 +1508,9 @@ function SearchPage({page,setPage,
     <div style={{padding:"10px 18px",background:"#fff",borderBottom:"1px solid #F3F4F6",display:"flex",flexWrap:"wrap",gap:14,alignItems:"center"}}>
       <div style={{display:"flex",alignItems:"center",gap:5}}>
         <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace",fontWeight:600}}>期間</span>
-        <select value={dateFrom} onChange={e=>setDateFrom(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"3px 6px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none"}}>{REAL_DATES.map(d=><option key={d} value={d}>{d.slice(5)} ({dow(d)})</option>)}</select>
+        <input type="date" value={dateFrom} min={REAL_DATES[0]} max={REAL_DATES[REAL_DATES.length-1]} onChange={e=>setDateFrom(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"3px 6px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none",colorScheme:"light"}}/>
         <span style={{color:"#9CA3AF",fontSize:11}}>〜</span>
-        <select value={dateTo} onChange={e=>setDateTo(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"3px 6px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none"}}>{REAL_DATES.map(d=><option key={d} value={d}>{d.slice(5)} ({dow(d)})</option>)}</select>
+        <input type="date" value={dateTo} min={REAL_DATES[0]} max={REAL_DATES[REAL_DATES.length-1]} onChange={e=>setDateTo(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"3px 6px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none",colorScheme:"light"}}/>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
         <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace",fontWeight:600}}>局</span>
@@ -1519,6 +1549,7 @@ function SearchPage({page,setPage,
               </div>
               <div>{st?<span style={{background:st.c,color:"#fff",fontSize:9,fontWeight:800,padding:"2px 5px",borderRadius:3,fontFamily:"monospace"}}>{r.stId}</span>:<span style={{color:"#9CA3AF",fontSize:9.5,fontFamily:"monospace"}}>{r.object_key}</span>}</div>
               <div style={{minWidth:0}}>
+                {lookupProgName(r)&&<div style={{fontSize:9.5,color:"#0066cc",fontWeight:600,marginBottom:2}}>{lookupProgName(r)}</div>}
                 <div style={{fontSize:12,fontWeight:700,color:"#111827",marginBottom:3}}>{r.title}</div>
                 <div style={{fontSize:10.5,color:"#6B7280",lineHeight:1.5,marginBottom:3,overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{r.summary}</div>
                 {r.tags.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:3}}>{r.tags.map(t=><span key={t} style={{padding:"0.5px 5px",borderRadius:2,fontSize:9,border:"1px solid #E5E7EB",color:"#6B7280",background:"#F9FAFB"}}>#{t}</span>)}</div>}
@@ -1528,11 +1559,11 @@ function SearchPage({page,setPage,
         </div>
       </>}
     </div>
-    {modalResult&&<AnnotationResultModal result={modalResult} onClose={()=>setModalResult(null)}/>}
+    {modalResult&&<AnnotationResultModal result={modalResult} progName={lookupProgName(modalResult)} onClose={()=>setModalResult(null)}/>}
   </>;
 }
 
-function AnnotationResultModal({result,onClose}){
+function AnnotationResultModal({result,progName,onClose}){
   const videoRef=useRef(null);
   const st=ST.find(s=>s.id===result.stId);
   const dow=ds=>["日","月","火","水","木","金","土"][new Date(ds).getDay()];
@@ -1553,6 +1584,7 @@ function AnnotationResultModal({result,onClose}){
         </div>
         <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,color:"#9CA3AF",cursor:"pointer",lineHeight:1,padding:0}}>×</button>
       </div>
+      {progName&&<div style={{fontSize:12,color:"#0066cc",fontWeight:600,marginBottom:3}}>{progName}</div>}
       <div style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:10}}>{result.title}</div>
       {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls autoPlay
         onLoadedMetadata={()=>{if(videoRef.current)videoRef.current.currentTime=result.start_sec;}}
