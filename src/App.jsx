@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from "react";
 import REAL_RATINGS_IMPORT from './data/ratings_data.json';
 import PROFILES_IMPORT from './data/profiles.json';
 
@@ -29,6 +29,8 @@ const SEG_ORDER = ["news","weather","sports","feature","ent","live","opening","e
 
 const t2m = t => { const [h,m] = t.split(":").map(Number); return h*60+m; };
 const m2t = m => `${String(Math.floor(m/60)).padStart(2,"0")}:${String(m%60).padStart(2,"0")}`;
+// 日付文字列(YYYY-MM-DD)をローカル暦日基準でdelta日ぶんずらす(UTC変換を経由しないタイムゾーン安全な実装)
+const shiftDateStr=(d,delta)=>{const[y,m,day]=d.split("-").map(Number);const dt=new Date(y,m-1,day+delta);return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;};
 
 // 共通セグメントトグルのスタイル（選択=アクションブルー #0066cc 塗り・DESIGN.md準拠）
 // 容器側に {borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"} を付ける
@@ -43,9 +45,32 @@ const ZOOM_HALF=[5,10,15,20,30,45,60,90,120,180]; // 各ズームレベルの片
 // 深夜 0:00〜4:59 は翌日扱い（分 + 1440）にして連続した時系列に変換
 function tvt2m(t){const m=t2m(t);return m<300?m+1440:m;}
 
-// S3 CSV をパース: station,title,description,...,start_time,end_time
-function parseGuideCSV(text){
-  const lines=text.split('\n');const programs=[];
+// YYYYMMDDHHMM文字列 → ローカル基準の絶対分(エポック分)。タイムゾーンに依存せず往復変換できる
+function ymdhmToAbsMin(s){
+  const y=+s.slice(0,4),mo=+s.slice(4,6)-1,d=+s.slice(6,8),h=+s.slice(8,10),mi=+s.slice(10,12);
+  return Math.round(new Date(y,mo,d,h,mi).getTime()/60000);
+}
+// YYYY-MM-DD → その暦日のローカル0時の絶対分
+function localMidnightAbsMin(dateStr){
+  const[y,m,d]=dateStr.split("-").map(Number);
+  return Math.round(new Date(y,m-1,d,0,0).getTime()/60000);
+}
+
+// 番組表(epg-all)をパースし、番組表ページの連続タイムライン用に絶対分(startAbs/endAbs)で返す。
+// JSON(20260616以降)はSeIdを、CSV(それ以前)はstId+絶対時刻+タイトルの合成キーをdedup用keyにする
+// (放送日ファイル同士が概ね5時前後の境界で同じ番組を重複して含むため、複数日をまたいで結合する際に必要)
+function parseEpgTimeline(raw,isJson,fileDate){
+  if(isJson){
+    const programs=[];
+    for(const p of raw.programs){
+      const stId=CHANNEL_ID_MAP[p.ChannelId];if(!stId)continue;
+      programs.push({stId,title:p.ProgramTitle,startAbs:ymdhmToAbsMin(p.StartTime),endAbs:ymdhmToAbsMin(p.EndTime),key:p.SeId});
+    }
+    return programs;
+  }
+  // CSVは時刻(HH:MM)のみで日付情報を持たないため、ファイルの日付(fileDate)基準+tvt2mオフセットで絶対分に変換
+  const dayMidnight=localMidnightAbsMin(fileDate);
+  const lines=raw.split('\n');const programs=[];
   for(let i=1;i<lines.length;i++){
     const line=lines[i].trim();if(!line)continue;
     const cols=line.split(',');if(cols.length<5)continue;
@@ -57,21 +82,8 @@ function parseGuideCSV(text){
     if(!/^\d{2}:\d{2}$/.test(start_time)||!/^\d{2}:\d{2}$/.test(end_time))continue;
     const startMin=tvt2m(start_time);let endMin=tvt2m(end_time);
     if(endMin<=startMin)endMin+=1440;
-    programs.push({stId,title,startMin,endMin,start_time,end_time});
-  }
-  return programs;
-}
-
-// S3 JSON をパース: bangumi_YYYYMMDD.json (20260616以降)
-function parseGuideJSON(data){
-  const programs=[];
-  for(const p of data.programs){
-    const stId=CHANNEL_ID_MAP[p.ChannelId];if(!stId)continue;
-    const start_time=p.StartTime.slice(8,10)+":"+p.StartTime.slice(10,12);
-    const end_time=p.EndTime.slice(8,10)+":"+p.EndTime.slice(10,12);
-    const startMin=tvt2m(start_time);let endMin=tvt2m(end_time);
-    if(endMin<=startMin)endMin+=1440;
-    programs.push({stId,title:p.ProgramTitle,startMin,endMin,start_time,end_time});
+    const startAbs=dayMidnight+startMin,endAbs=dayMidnight+endMin;
+    programs.push({stId,title,startAbs,endAbs,key:`${stId}|${startAbs}|${title}`});
   }
   return programs;
 }
@@ -1452,7 +1464,7 @@ function SearchPage({page,setPage,
   const[modalResult,setModalResult]=useState(null);
   const[epgCache,setEpgCache]=useState({}); // date(YYYY-MM-DD) -> 絶対時刻付き番組[]
 
-  const prevDate=d=>{const[y,m,day]=d.split("-").map(Number);const dt=new Date(y,m-1,day-1);return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;};
+  const prevDate=d=>shiftDateStr(d,-1);
 
   // 検索結果に含まれる日付のぶんだけ番組表(epg-all)を取得し、番組名の突き合わせに使う。
   // epg-allは放送日区切り(概ね5時前後〜翌5時前後)、daily_corners側は暦日区切り(0時始まり)なので、
@@ -2252,37 +2264,118 @@ const PM_SLOT=_UP.get('slot')||(PM_START>=960?'evening':'morning');
 const GUIDE_PPM_STEPS=[2,3,4,6,8,12,16];
 
 function ProgramGuidePage({metric="rating"}){
-  const[guideDate,setGuideDate]=useState(GUIDE_DATE_MAX);
-  const[programs,setPrograms]=useState(null);
-  const[loading,setLoading]=useState(false);
+  const[guideDate,setGuideDate]=useState(GUIDE_DATE_MAX); // カレンダー表示・ハイライト用の「現在地」
+  const[loadedDates,setLoadedDates]=useState([]); // 連続タイムラインに結合済みの日付(YYYY-MM-DD)昇順
+  const[epgCache,setEpgCache]=useState({}); // date -> programs[](絶対分)|null(読み込み中)
   const[error,setError]=useState(null);
   const[ppmIdx,setPpmIdx]=useState(3); // index3=6px/分(約2時間)
   const[tooltip,setTooltip]=useState(null); // {title,avg,stId,x,y}
   const[guideModal,setGuideModal]=useState(null); // {corner, navList, idx}
 
-  const mornR=useMemo(()=>getRatings(guideDate,'morning'),[guideDate]);
-  const eveR=useMemo(()=>getRatings(guideDate,'evening'),[guideDate]);
+  const scrollElRef=useRef(null);
+  const fetchingRef=useRef(new Set()); // 取得中の日付(重複fetch防止)
+  const pendingJumpRef=useRef(guideDate); // ジャンプ先日付の0時位置へスクロールが未完了なら日付が入る
+  const prevStartRef=useRef(null); // 直前のstartOfRange(前方=過去日追加時のスクロール位置補正用)
 
-  // S3 から番組表を取得 (20260616以降はJSON、それ以前はCSV)
-  useEffect(()=>{
-    const yyyymmdd=guideDate.replace(/-/g,'');
+  // 指定日のepg-allを取得(未取得/未取得中の場合のみ)
+  const ensureFetched=d=>{
+    if(d in epgCache||fetchingRef.current.has(d))return;
+    fetchingRef.current.add(d);
+    setEpgCache(prev=>d in prev?prev:{...prev,[d]:null});
+    const yyyymmdd=d.replace(/-/g,'');
     const isJson=parseInt(yyyymmdd)>=20260616;
     const url=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/epg-all/bangumi_${yyyymmdd}.${isJson?'json':'csv'}`;
-    setLoading(true);setError(null);setPrograms(null);setGuideModal(null);
     fetch(url)
       .then(r=>{if(!r.ok)throw new Error(`データ取得エラー (HTTP ${r.status})`);return isJson?r.json():r.text();})
-      .then(data=>{const p=isJson?parseGuideJSON(data):parseGuideCSV(data);setPrograms(p);})
-      .catch(e=>setError(e.message))
-      .finally(()=>setLoading(false));
-  },[guideDate]);
+      .then(raw=>setEpgCache(prev=>({...prev,[d]:parseEpgTimeline(raw,isJson,d)})))
+      .catch(e=>{setError(e.message);setEpgCache(prev=>({...prev,[d]:[]}));})
+      .finally(()=>fetchingRef.current.delete(d));
+  };
 
-  // 番組の平均視聴率 or 占拠率を計算 (朝・夕方帯のみ)
-  const calcAvg=(stId,startMin,endMin)=>{
-    const adj=m=>m>1440?m-1440:m;
-    const aS=adj(startMin),aE=adj(endMin);
+  // カレンダーから日付を選んだ時: 前後1日を含む3日分を読み込み直し、選択日の0時位置へスクロールする
+  const jumpTo=d=>{
+    const win=[...new Set([shiftDateStr(d,-1),d,shiftDateStr(d,1)].filter(x=>x>=GUIDE_DATE_MIN&&x<=GUIDE_DATE_MAX))].sort();
+    setGuideDate(d);
+    setLoadedDates(win);
+    setGuideModal(null);
+    pendingJumpRef.current=d;
+    win.forEach(ensureFetched);
+  };
+
+  useEffect(()=>{ jumpTo(GUIDE_DATE_MAX);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+
+  const loadPrev=()=>{
+    if(loadedDates.length===0)return;
+    const prev=shiftDateStr(loadedDates[0],-1);
+    if(prev<GUIDE_DATE_MIN||loadedDates.includes(prev))return;
+    setLoadedDates(ds=>ds.includes(prev)?ds:[prev,...ds]);
+    ensureFetched(prev);
+  };
+  const loadNext=()=>{
+    if(loadedDates.length===0)return;
+    const next=shiftDateStr(loadedDates[loadedDates.length-1],1);
+    if(next>GUIDE_DATE_MAX||loadedDates.includes(next))return;
+    setLoadedDates(ds=>ds.includes(next)?ds:[...ds,next]);
+    ensureFetched(next);
+  };
+
+  // 読み込み済み日付ぶんの番組を1本のタイムラインに結合(放送日ファイル同士が重複して含む境界の番組はkeyで排除)
+  const mergedPrograms=useMemo(()=>{
+    const seen=new Map();
+    loadedDates.forEach(d=>{(epgCache[d]||[]).forEach(p=>{if(!seen.has(p.key))seen.set(p.key,p);});});
+    return[...seen.values()];
+  },[loadedDates,epgCache]);
+
+  const{startOfRange,endOfRange}=useMemo(()=>{
+    if(!mergedPrograms.length)return{startOfRange:0,endOfRange:0};
+    let s=Infinity,e=-Infinity;
+    mergedPrograms.forEach(p=>{if(p.startAbs<s)s=p.startAbs;if(p.endAbs>e)e=p.endAbs;});
+    return{startOfRange:s,endOfRange:e};
+  },[mergedPrograms]);
+
+  const PPM=GUIDE_PPM_STEPS[ppmIdx];
+  const totalH=(endOfRange-startOfRange)*PPM;
+  const timeMarks=useMemo(()=>{
+    if(endOfRange<=startOfRange)return[];
+    const marks=[];
+    for(let m=Math.ceil(startOfRange/60)*60;m<=endOfRange;m+=60)marks.push(m);
+    return marks;
+  },[startOfRange,endOfRange]);
+
+  // 過去日を前方に追加した時、見た目の位置がズレないようスクロール位置を補正する
+  useLayoutEffect(()=>{
+    const el=scrollElRef.current;
+    if(prevStartRef.current!=null&&el&&prevStartRef.current!==startOfRange){
+      const delta=(prevStartRef.current-startOfRange)*PPM;
+      if(delta>0)el.scrollTop+=delta;
+    }
+    prevStartRef.current=startOfRange;
+  },[startOfRange,PPM]);
+
+  // ジャンプ先日付の実データが揃ったら、その日の0時位置へスクロールする
+  // (epgCache[target]は取得中の間null、実データ到着でArrayになる。nullのうちはまだ動かさない)
+  useLayoutEffect(()=>{
+    const target=pendingJumpRef.current;
+    if(target==null||!Array.isArray(epgCache[target]))return;
+    const el=scrollElRef.current;
+    if(el&&endOfRange>startOfRange){
+      el.scrollTop=Math.max(0,(localMidnightAbsMin(target)-startOfRange)*PPM);
+      pendingJumpRef.current=null;
+    }
+  },[epgCache,startOfRange,endOfRange,PPM]);
+
+  // 番組の平均視聴率 or 占拠率を計算(朝・夕方帯のみ)。番組自身の実時刻の暦日を基準に、その日の視聴率データを引く
+  // (epg-allの放送日区切り(概ね5時前後)とdaily_corners等の暦日区切りがズレるため、常に実絶対時刻から暦日を計算し直す)
+  const calcAvg=(stId,p)=>{
+    const dt=new Date(p.startAbs*60000);
+    const dateStr=`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+    const dayStartAbs=localMidnightAbsMin(dateStr);
+    const aS=p.startAbs-dayStartAbs,aE=p.endAbs-dayStartAbs;
     let raw=null,winS,winE;
-    if(aS<510&&aE>330){raw=mornR;winS=330;winE=510;}
-    else if(aS<1170&&aE>960){raw=eveR;winS=960;winE=1170;}
+    if(aS<510&&aE>330){raw=getRatings(dateStr,'morning');winS=330;winE=510;}
+    else if(aS<1170&&aE>960){raw=getRatings(dateStr,'evening');winS=960;winE=1170;}
     if(!raw||!raw.length)return null;
     const iS=Math.max(aS,winS)-winS, iE=Math.min(aE,winE)-winS;
     if(iS>=iE)return null;
@@ -2300,14 +2393,16 @@ function ProgramGuidePage({metric="rating"}){
   // 局ごとに番組を整理
   const byStation=useMemo(()=>{
     const r={};GUIDE_ST_ORDER.forEach(sid=>r[sid]=[]);
-    (programs||[]).forEach(p=>{if(r[p.stId])r[p.stId].push(p);});
+    mergedPrograms.forEach(p=>{if(r[p.stId])r[p.stId].push(p);});
     return r;
-  },[programs]);
+  },[mergedPrograms]);
 
-  // 番組→コーナー風オブジェクトに変換（クリック時に呼ぶ）
-  const makeGuideCorner=(p,stId,date)=>{
-    const adj=m=>m>1440?m-1440:m;
-    const aS=adj(p.startMin),aE=adj(p.endMin);
+  // 番組→コーナー風オブジェクトに変換（クリック時に呼ぶ）。日付は番組自身の実時刻から求める
+  const makeGuideCorner=(p,stId)=>{
+    const dt=new Date(p.startAbs*60000);
+    const date=`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+    const dayStartAbs=localMidnightAbsMin(date);
+    const aS=p.startAbs-dayStartAbs,aE=p.endAbs-dayStartAbs;
     const mid=(aS+aE)/2;
     const slot=mid>=960&&mid<1170?'evening':'morning';
     const params=new URLSearchParams({mode:'program',station:stId,date,start:aS,end:aE,name:encodeURIComponent(p.title),slot});
@@ -2315,26 +2410,37 @@ function ProgramGuidePage({metric="rating"}){
   };
 
   const openGuideModal=(p,stId)=>{
-    const c=makeGuideCorner(p,stId,guideDate);
-    const navList=(programs||[]).filter(pr=>pr.stId===stId).map(pr=>makeGuideCorner(pr,stId,guideDate)).sort((a,b)=>t2m(a.startMin)-t2m(b.startMin));
-    const idx=navList.findIndex(item=>item.title===c.title&&item.startMin===c.startMin);
+    const c=makeGuideCorner(p,stId);
+    const navList=mergedPrograms.filter(pr=>pr.stId===stId).sort((a,b)=>a.startAbs-b.startAbs).map(pr=>makeGuideCorner(pr,stId));
+    const idx=navList.findIndex(item=>item.date===c.date&&item.title===c.title&&item.startMin===c.startMin);
     setGuideModal({corner:c,navList,idx});
   };
 
-  const G_START=300,G_END=1740;
-  const PPM=GUIDE_PPM_STEPS[ppmIdx];
-  const totalH=(G_END-G_START)*PPM;
-  const timeMarks=[];for(let m=G_START;m<=G_END;m+=60)timeMarks.push(m);
+  // スクロールに応じて: (1)前後端に近づいたら隣接日を追加読み込み (2)左上カレンダーの選択日を同期
+  const handleScroll=e=>{
+    const{scrollTop,scrollHeight,clientHeight}=e.currentTarget;
+    if(scrollTop<clientHeight*0.8)loadPrev();
+    if(scrollHeight-scrollTop-clientHeight<clientHeight*0.8)loadNext();
+    if(endOfRange>startOfRange){
+      const centerAbs=startOfRange+(scrollTop+clientHeight/2)/PPM;
+      const dt=new Date(centerAbs*60000);
+      if(dt.getHours()<5)dt.setDate(dt.getDate()-1); // 0〜5時は前日の続き(放送日)として扱う
+      const cd=`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+      if(cd!==guideDate&&cd>=GUIDE_DATE_MIN&&cd<=GUIDE_DATE_MAX)setGuideDate(cd);
+    }
+  };
+
+  const hasAnyData=mergedPrograms.length>0;
+  const loading=!hasAnyData&&loadedDates.some(d=>epgCache[d]===null||epgCache[d]===undefined);
 
   return <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 88px)",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif"}}>
     {/* 番組表ヘッダー */}
     <div style={{padding:"10px 18px",borderBottom:"1px solid #E5E7EB",background:"#fff",display:"flex",alignItems:"center",gap:12,flexShrink:0,flexWrap:"wrap"}}>
       <span style={{fontSize:13,fontWeight:700,color:"#111827"}}>番組表</span>
-      <CalendarPicker value={guideDate} onChange={setGuideDate} dates={DASHBOARD_DATES}/>
+      <CalendarPicker value={guideDate} onChange={jumpTo} dates={DASHBOARD_DATES}/>
       {loading&&<span style={{fontSize:11,color:"#9CA3AF"}}>⏳ 読み込み中...</span>}
       {error&&<span style={{fontSize:11,color:"#DC2626"}}>⚠ {error} (S3 CORSの設定をご確認ください)</span>}
-      {!loading&&!error&&programs&&<span style={{fontSize:11,color:"#6B7280"}}>視聴率は朝(5:30–8:30)・夕方(16:00–19:30)帯のみ表示</span>}
-      {!loading&&!error&&!programs&&<span style={{fontSize:11,color:"#9CA3AF"}}>日付を選択すると番組表を読み込みます</span>}
+      {!loading&&!error&&hasAnyData&&<span style={{fontSize:11,color:"#6B7280"}}>視聴率は朝(5:30–8:30)・夕方(16:00–19:30)帯のみ表示。スクロールで前後の日付に移動できます</span>}
       <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:4,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"2px 4px"}}>
         <span style={{fontSize:10,color:"#6B7280",fontWeight:600,paddingLeft:4}}>縦ズーム</span>
         <button onClick={()=>setPpmIdx(i=>Math.max(0,i-1))} disabled={ppmIdx===0} style={{width:24,height:24,border:"none",background:"transparent",cursor:ppmIdx===0?"default":"pointer",fontSize:16,color:ppmIdx===0?"#D1D5DB":"#374151",borderRadius:4,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
@@ -2346,19 +2452,21 @@ function ProgramGuidePage({metric="rating"}){
       <div style={{fontWeight:600,marginBottom:tooltip.avg!==null?4:0,wordBreak:"break-all",letterSpacing:"-0.224px"}}>{tooltip.title}</div>
       {tooltip.avg!==null&&<div style={{fontFamily:"monospace",color:(ST.find(s=>s.id===tooltip.stId)||{c:"#0066cc"}).c,fontWeight:700,fontSize:13}}>平均 {tooltip.avg.toFixed(1)}%</div>}
     </div>}
-    {guideModal&&<CornerModal corner={guideModal.corner} cache={rCache} onClose={()=>setGuideModal(null)} navList={guideModal.navList} navIdx={guideModal.idx} onNavigate={c=>{const idx=guideModal.navList.findIndex(item=>item.title===c.title&&item.startMin===c.startMin);setGuideModal({...guideModal,corner:c,idx});}} dashboardUrl={guideModal.corner._dashUrl} guideMode={true}/>}
-    {!programs&&!loading&&!error&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>日付を選択してください</div>}
-    {loading&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>読み込み中...</div>}
-    {programs&&<div style={{flex:1,overflow:"auto"}}>
+    {guideModal&&<CornerModal corner={guideModal.corner} cache={rCache} onClose={()=>setGuideModal(null)} navList={guideModal.navList} navIdx={guideModal.idx} onNavigate={c=>{const idx=guideModal.navList.findIndex(item=>item.date===c.date&&item.title===c.title&&item.startMin===c.startMin);setGuideModal({...guideModal,corner:c,idx});}} dashboardUrl={guideModal.corner._dashUrl} guideMode={true}/>}
+    {!hasAnyData&&loading&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>読み込み中...</div>}
+    {!hasAnyData&&!loading&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>日付を選択してください</div>}
+    {hasAnyData&&<div ref={scrollElRef} onScroll={handleScroll} style={{flex:1,overflow:"auto"}}>
       <div style={{display:"flex",minWidth:52+GUIDE_ST_ORDER.length*220}}>
         {/* 時刻列 */}
         <div style={{width:52,flexShrink:0,position:"sticky",left:0,background:"#F9FAFB",borderRight:"1px solid #E5E7EB",zIndex:4}}>
           <div style={{height:44,position:"sticky",top:0,background:"#F3F4F6",borderBottom:"1px solid #E5E7EB",zIndex:5,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9.5,color:"#6B7280",fontWeight:700,fontFamily:"monospace"}}>TIME</div>
           <div style={{position:"relative",height:totalH}}>
             {timeMarks.map(m=>{
-              const disp=m>1439?m-1440:m;
-              return <div key={m} style={{position:"absolute",top:(m-G_START)*PPM,left:0,right:0,borderTop:`1px solid ${m%360===300?"#D1D5DB":"#E5E7EB"}`,paddingLeft:5,paddingTop:2,fontSize:10,color:m%360===300?"#374151":"#9CA3AF",fontFamily:"monospace",fontWeight:m%360===300?700:400}}>
-                {m2t(disp)}
+              const dt=new Date(m*60000);
+              const isMidnight=dt.getHours()===0;
+              return <div key={m} style={{position:"absolute",top:(m-startOfRange)*PPM,left:0,right:0,borderTop:`1px solid ${isMidnight?"#9CA3AF":"#E5E7EB"}`,paddingLeft:5,paddingTop:2,fontSize:10,color:isMidnight?"#111827":"#9CA3AF",fontFamily:"monospace",fontWeight:isMidnight?700:400}}>
+                {String(dt.getHours()).padStart(2,"0")}:{String(dt.getMinutes()).padStart(2,"0")}
+                {isMidnight&&<div style={{fontSize:8,color:"#6B7280",fontWeight:700}}>{dt.getMonth()+1}/{dt.getDate()}</div>}
               </div>;
             })}
           </div>
@@ -2366,27 +2474,32 @@ function ProgramGuidePage({metric="rating"}){
         {/* 各局列 */}
         {GUIDE_ST_ORDER.map(sid=>{
           const st=ST.find(s=>s.id===sid);
-          const progs=(byStation[sid]||[]).slice().sort((a,b)=>a.startMin-b.startMin);
+          const progs=(byStation[sid]||[]).slice().sort((a,b)=>a.startAbs-b.startAbs);
           return <div key={sid} style={{width:220,flexShrink:0,borderRight:"1px solid #E5E7EB",position:"relative"}}>
             <div style={{height:44,position:"sticky",top:0,background:"#F3F4F6",borderBottom:"1px solid #E5E7EB",zIndex:3,display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
               <span style={{background:st.c,color:"#fff",fontSize:9,fontWeight:800,padding:"2px 5px",borderRadius:3,fontFamily:"monospace"}}>{sid}</span>
               <span style={{fontSize:10.5,color:"#374151",fontWeight:600}}>{st.nm}</span>
             </div>
             <div style={{position:"relative",height:totalH}}>
-              {timeMarks.map(m=><div key={m} style={{position:"absolute",top:(m-G_START)*PPM,left:0,right:0,borderTop:"1px dashed #F3F4F6"}}/>)}
+              {timeMarks.map(m=>{
+                const isMidnight=new Date(m*60000).getHours()===0;
+                return <div key={m} style={{position:"absolute",top:(m-startOfRange)*PPM,left:0,right:0,borderTop:isMidnight?"1px solid #D1D5DB":"1px dashed #F3F4F6"}}/>;
+              })}
               {progs.map((p,i)=>{
-                const nextStart=i<progs.length-1?progs[i+1].startMin:null;
-                const visEnd=nextStart!==null&&nextStart<p.endMin?nextStart:p.endMin;
-                const top=Math.max(0,(p.startMin-G_START)*PPM);
-                const bot=Math.min(totalH,(visEnd-G_START)*PPM);
+                const nextStart=i<progs.length-1?progs[i+1].startAbs:null;
+                const visEnd=nextStart!==null&&nextStart<p.endAbs?nextStart:p.endAbs;
+                const top=Math.max(0,(p.startAbs-startOfRange)*PPM);
+                const bot=Math.min(totalH,(visEnd-startOfRange)*PPM);
                 const h=Math.max(22,bot-top-1);
-                const avg=calcAvg(sid,p.startMin,p.endMin);
+                const avg=calcAvg(sid,p);
                 const compact=h<46;
-                return <div key={i} onClick={()=>openGuideModal(p,sid)}
+                const stDt=new Date(p.startAbs*60000);
+                const stLabel=`${String(stDt.getHours()).padStart(2,"0")}:${String(stDt.getMinutes()).padStart(2,"0")}`;
+                return <div key={p.key} onClick={()=>openGuideModal(p,sid)}
                   style={{position:"absolute",top,left:2,right:2,height:h,background:"#fff",border:"1px solid #E5E7EB",borderLeft:`3px solid ${st.c}`,borderRadius:3,padding:"3px 5px",overflow:"hidden",cursor:"pointer",fontSize:10,display:"flex",flexDirection:"column",gap:1,transition:"background 0.1s"}}
                   onMouseMove={e=>{e.currentTarget.style.background="#EFF6FF";e.currentTarget.style.borderColor="#BFDBFE";setTooltip({title:p.title,avg,stId:sid,x:e.clientX,y:e.clientY});}}
                   onMouseLeave={e=>{e.currentTarget.style.background="#fff";e.currentTarget.style.borderColor="#E5E7EB";setTooltip(null);}}>
-                  <div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",flexShrink:0}}>{p.start_time}</div>
+                  <div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",flexShrink:0}}>{stLabel}</div>
                   <div style={{fontSize:compact?9.5:11,fontWeight:600,color:"#111827",lineHeight:1.25,overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:compact?1:2,WebkitBoxOrient:"vertical",flex:1}}>{p.title}</div>
                   {avg!==null&&<div style={{fontSize:h<46?10:15,fontWeight:700,color:st.c,fontFamily:"monospace",flexShrink:0,marginTop:"auto"}}>{avg.toFixed(1)}%<span style={{fontSize:8,opacity:0.7,marginLeft:1}}>{metric==="share"?"占拠":"視聴"}</span></div>}
                 </div>;
