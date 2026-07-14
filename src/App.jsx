@@ -2330,9 +2330,7 @@ function ProgramGuidePage({metric="rating"}){
     {/* 番組表ヘッダー */}
     <div style={{padding:"10px 18px",borderBottom:"1px solid #E5E7EB",background:"#fff",display:"flex",alignItems:"center",gap:12,flexShrink:0,flexWrap:"wrap"}}>
       <span style={{fontSize:13,fontWeight:700,color:"#111827"}}>番組表</span>
-      <input type="date" value={guideDate} onChange={e=>setGuideDate(e.target.value)}
-        min={GUIDE_DATE_MIN} max={GUIDE_DATE_MAX}
-        style={{border:"1px solid #E5E7EB",borderRadius:5,padding:"4px 8px",fontSize:12,fontFamily:"monospace",outline:"none",cursor:"pointer"}}/>
+      <CalendarPicker value={guideDate} onChange={setGuideDate} dates={DASHBOARD_DATES}/>
       {loading&&<span style={{fontSize:11,color:"#9CA3AF"}}>⏳ 読み込み中...</span>}
       {error&&<span style={{fontSize:11,color:"#DC2626"}}>⚠ {error} (S3 CORSの設定をご確認ください)</span>}
       {!loading&&!error&&programs&&<span style={{fontSize:11,color:"#6B7280"}}>視聴率は朝(5:30–8:30)・夕方(16:00–19:30)帯のみ表示</span>}
