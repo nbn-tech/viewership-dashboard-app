@@ -1525,9 +1525,9 @@ function SearchPage({page,setPage,
     <div style={{padding:"10px 18px",background:"#fff",borderBottom:"1px solid #F3F4F6",display:"flex",flexWrap:"wrap",gap:14,alignItems:"center"}}>
       <div style={{display:"flex",alignItems:"center",gap:5}}>
         <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace",fontWeight:600}}>期間</span>
-        <input type="date" value={dateFrom} min={REAL_DATES[0]} max={REAL_DATES[REAL_DATES.length-1]} onChange={e=>setDateFrom(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"3px 6px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none",colorScheme:"light"}}/>
+        <CalendarPicker value={dateFrom} onChange={setDateFrom} dates={REAL_DATES}/>
         <span style={{color:"#9CA3AF",fontSize:11}}>〜</span>
-        <input type="date" value={dateTo} min={REAL_DATES[0]} max={REAL_DATES[REAL_DATES.length-1]} onChange={e=>setDateTo(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"3px 6px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none",colorScheme:"light"}}/>
+        <CalendarPicker value={dateTo} onChange={setDateTo} dates={REAL_DATES}/>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
         <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace",fontWeight:600}}>局</span>
