@@ -87,8 +87,7 @@ def _validate_yyyymmdd(value):
     return None
 
 
-def _build_query(search_term: str, limit: int, date_from=None, date_to=None) -> str:
-    term = _escape_like_literal(search_term)
+def _build_query(terms, limit: int, date_from=None, date_to=None) -> str:
     channels = ",".join(f"'{c}'" for c in KNOWN_CHANNELS)
 
     date_conditions = ""
@@ -98,6 +97,16 @@ def _build_query(search_term: str, limit: int, date_from=None, date_to=None) -> 
         date_conditions += f"  AND broadcast_date >= '{date_from}'\n"
     if date_to:
         date_conditions += f"  AND broadcast_date <= '{date_to}'\n"
+
+    term_clauses = []
+    for raw_term in terms:
+        term = _escape_like_literal(raw_term)
+        term_clauses.append(
+            f"(title LIKE '%{term}%' ESCAPE '\\' "
+            f"OR summary LIKE '%{term}%' ESCAPE '\\' "
+            f"OR tags LIKE '%{term}%' ESCAPE '\\')"
+        )
+    terms_clause = " OR ".join(term_clauses)
 
     return f"""
 SELECT
@@ -112,11 +121,7 @@ SELECT
     tags
 FROM {ATHENA_TABLE}
 WHERE channel IN ({channels})
-{date_conditions}  AND (
-    title LIKE '%{term}%' ESCAPE '\\'
-    OR summary LIKE '%{term}%' ESCAPE '\\'
-    OR tags LIKE '%{term}%' ESCAPE '\\'
-  )
+{date_conditions}  AND ({terms_clause})
 ORDER BY broadcast_date, channel, filename, start_sec
 LIMIT {limit}
 """
@@ -226,11 +231,12 @@ def _row_to_result(row):
     return result
 
 
-def search_annotations(query_text: str, limit: int = DEFAULT_LIMIT, date_from=None, date_to=None):
-    if not query_text or not query_text.strip():
+def search_annotations(terms, limit: int = DEFAULT_LIMIT, date_from=None, date_to=None):
+    terms = [t.strip() for t in (terms or []) if t and t.strip()]
+    if not terms:
         return []
     limit = max(1, min(int(limit), MAX_LIMIT))
-    sql = _build_query(query_text.strip(), limit, date_from, date_to)
+    sql = _build_query(terms, limit, date_from, date_to)
     query_execution_id = _run_athena_query(sql)
     _wait_for_query(query_execution_id)
     rows = _fetch_all_rows(query_execution_id)
@@ -243,13 +249,15 @@ def lambda_handler(event, context):
     except (TypeError, json.JSONDecodeError):
         body = {}
 
-    query_text = body.get("query", "")
+    # keywords (AI意味検索によるキーワード群) があればOR検索、なければqueryを単独で使う
+    keywords = body.get("keywords") or []
+    terms = keywords if keywords else [body.get("query", "")]
     limit = body.get("limit", DEFAULT_LIMIT)
     date_from = body.get("date_from")
     date_to = body.get("date_to")
 
     try:
-        results = search_annotations(query_text, limit, date_from, date_to)
+        results = search_annotations(terms, limit, date_from, date_to)
     except (RuntimeError, TimeoutError) as exc:
         return {
             "statusCode": 502,
@@ -268,4 +276,4 @@ if __name__ == "__main__":
     import sys
 
     q = sys.argv[1] if len(sys.argv) > 1 else "大谷"
-    print(json.dumps(search_annotations(q), ensure_ascii=False, indent=2))
+    print(json.dumps(search_annotations([q]), ensure_ascii=False, indent=2))
