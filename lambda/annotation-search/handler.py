@@ -87,8 +87,9 @@ def _validate_yyyymmdd(value):
     return None
 
 
-def _build_query(terms, limit: int, date_from=None, date_to=None) -> str:
-    channels = ",".join(f"'{c}'" for c in KNOWN_CHANNELS)
+def _build_query(terms, limit: int, date_from=None, date_to=None, channels=None) -> str:
+    channel_list = channels if channels else KNOWN_CHANNELS
+    channels_sql = ",".join(f"'{c}'" for c in channel_list)
 
     date_conditions = ""
     date_from = _validate_yyyymmdd(date_from)
@@ -98,15 +99,19 @@ def _build_query(terms, limit: int, date_from=None, date_to=None) -> str:
     if date_to:
         date_conditions += f"  AND broadcast_date <= '{date_to}'\n"
 
-    term_clauses = []
-    for raw_term in terms:
-        term = _escape_like_literal(raw_term)
-        term_clauses.append(
-            f"(title LIKE '%{term}%' ESCAPE '\\' "
-            f"OR summary LIKE '%{term}%' ESCAPE '\\' "
-            f"OR tags LIKE '%{term}%' ESCAPE '\\')"
-        )
-    terms_clause = " OR ".join(term_clauses)
+    # termsが空の場合はキーワード条件なし(= 局・期間だけで絞った全件取得モード。
+    # Dashboardの番組表〜コーナー別〜表示で、特定局・特定日の実分析結果を丸ごと取得するのに使う)
+    terms_condition = ""
+    if terms:
+        term_clauses = []
+        for raw_term in terms:
+            term = _escape_like_literal(raw_term)
+            term_clauses.append(
+                f"(title LIKE '%{term}%' ESCAPE '\\' "
+                f"OR summary LIKE '%{term}%' ESCAPE '\\' "
+                f"OR tags LIKE '%{term}%' ESCAPE '\\')"
+            )
+        terms_condition = f"  AND ({' OR '.join(term_clauses)})\n"
 
     return f"""
 SELECT
@@ -120,9 +125,8 @@ SELECT
     summary,
     tags
 FROM {ATHENA_TABLE}
-WHERE channel IN ({channels})
-{date_conditions}  AND ({terms_clause})
-ORDER BY broadcast_date, channel, filename, start_sec
+WHERE channel IN ({channels_sql})
+{date_conditions}{terms_condition}ORDER BY broadcast_date, channel, filename, start_sec
 LIMIT {limit}
 """
 
@@ -231,12 +235,12 @@ def _row_to_result(row):
     return result
 
 
-def search_annotations(terms, limit: int = DEFAULT_LIMIT, date_from=None, date_to=None):
+def search_annotations(terms, limit: int = DEFAULT_LIMIT, date_from=None, date_to=None, channels=None):
     terms = [t.strip() for t in (terms or []) if t and t.strip()]
-    if not terms:
-        return []
+    # termsが空でも、channels/date_from/date_toによる絞り込み全件取得として続行する
+    # (以前はここで空リストを返して打ち切っていたが、Dashboardの実データ表示用に全件取得モードを追加)
     limit = max(1, min(int(limit), MAX_LIMIT))
-    sql = _build_query(terms, limit, date_from, date_to)
+    sql = _build_query(terms, limit, date_from, date_to, channels)
     query_execution_id = _run_athena_query(sql)
     _wait_for_query(query_execution_id)
     rows = _fetch_all_rows(query_execution_id)
@@ -249,15 +253,19 @@ def lambda_handler(event, context):
     except (TypeError, json.JSONDecodeError):
         body = {}
 
-    # keywords (AI意味検索によるキーワード群) があればOR検索、なければqueryを単独で使う
+    # keywords (AI意味検索によるキーワード群) があればOR検索、query単独指定でもOR検索、
+    # どちらも無ければキーワード条件なし(局・期間で絞った全件取得モード)
     keywords = body.get("keywords") or []
-    terms = keywords if keywords else [body.get("query", "")]
+    query = body.get("query") or ""
+    terms = keywords if keywords else ([query] if query.strip() else [])
     limit = body.get("limit", DEFAULT_LIMIT)
     date_from = body.get("date_from")
     date_to = body.get("date_to")
+    # channels: 例 ["ch6"]。未指定なら全局。既知チャンネルのみ許可(SQLに直接埋め込むためのホワイトリスト)
+    channels = [c for c in (body.get("channels") or []) if c in KNOWN_CHANNELS] or None
 
     try:
-        results = search_annotations(terms, limit, date_from, date_to)
+        results = search_annotations(terms, limit, date_from, date_to, channels)
     except (RuntimeError, TimeoutError) as exc:
         return {
             "statusCode": 502,

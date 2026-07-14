@@ -743,8 +743,32 @@ function getAllCorners(slot,stId,date){
   return out;
 }
 
-function SegmentBand({slot,stId,startMin,endMin,height=14,onHover,date}){
-  const corners=useMemo(()=>getAllCorners(slot,stId,date),[slot,stId,date]);
+// tpl形式({[stId]:[[progName,startHHMM,endHHMM,corners[]],...]})から局の全コーナーを平坦化する
+function tplAllCorners(tpl,stId){
+  const out=[];
+  (tpl[stId]||[]).forEach(([progName,,,corners])=>{
+    corners.forEach(([title,cs,ce,segment,tags,summary])=>out.push({progName,title,startMin:cs,endMin:ce,segment,tags,summary}));
+  });
+  return out;
+}
+// tpl形式から、指定分(min)を含む番組とコーナーを取得する(getProgのtpl版)
+function tplProgAt(tpl,stId,min){
+  const progs=tpl[stId]||[];
+  for(const[n,s,e,corners] of progs){
+    if(min>=t2m(s)&&min<t2m(e)){
+      let c=null;
+      for(const cn of corners){
+        const[title,cs,ce,segment,tags,summary]=cn;
+        if(min>=t2m(cs)&&min<t2m(ce)){c={title,startMin:cs,endMin:ce,segment,tags,summary};break;}
+      }
+      return{prog:{name:n,start:s,end:e,corners},corner:c};
+    }
+  }
+  return{prog:null,corner:null};
+}
+
+function SegmentBand({stId,startMin,endMin,height=14,onHover,tpl}){
+  const corners=useMemo(()=>tplAllCorners(tpl,stId),[tpl,stId]);
   const total=endMin-startMin;
   return <div style={{position:"relative",display:"flex",height,background:"#F3F4F6",borderRadius:3,overflow:"hidden",border:"1px solid #E5E7EB"}}>
     {corners.map((c,i)=>{
@@ -827,7 +851,7 @@ function SegmentLegend(){
   </div>;
 }
 
-function SegmentBands({slot,sel,selMin,onClickMinute,date,customStart,customEnd}){
+function SegmentBands({slot,sel,selMin,onClickMinute,tpl,customStart,customEnd}){
   const[hoverC,setHoverC]=useState(null);
   const startMin=customStart!==undefined?customStart:(slot==="morning"?330:960), endMin=customEnd!==undefined?customEnd:(slot==="morning"?510:1170);
   const total=endMin-startMin;
@@ -849,7 +873,7 @@ function SegmentBands({slot,sel,selMin,onClickMinute,date,customStart,customEnd}
       {sel.map(sid=>{const st=ST.find(s=>s.id===sid);return <div key={sid} style={{display:"flex",alignItems:"center",marginBottom:4}}>
         <span style={{width:34,fontSize:9.5,fontWeight:700,color:st.c,fontFamily:"monospace",textAlign:"right",paddingRight:4,flexShrink:0}}>{sid}</span>
         <div style={{flex:1,marginRight:16}} onClick={e=>click(e,sid)}>
-          <SegmentBand slot={slot} stId={sid} startMin={startMin} endMin={endMin} onHover={setHoverC} date={date}/>
+          <SegmentBand stId={sid} startMin={startMin} endMin={endMin} onHover={setHoverC} tpl={tpl}/>
         </div>
       </div>;})}
       {nowLeft>=0&&<div style={{position:"absolute",top:0,bottom:0,left:`calc(34px + (100% - 34px - 16px) * ${nowLeft/100})`,width:1,background:"rgba(220,38,38,0.6)",pointerEvents:"none"}}/>}
@@ -857,7 +881,7 @@ function SegmentBands({slot,sel,selMin,onClickMinute,date,customStart,customEnd}
   </div>;
 }
 
-function TimetableView({slot,sel,allR,allS,metric,date,onCornerClick}){
+function TimetableView({slot,sel,allR,allS,metric,date,tpl,loading,onCornerClick}){
   const startMin=slot==="morning"?330:960, endMin=slot==="morning"?510:1170;
   const fmt=v=>v!=null?(v.toFixed(1))+"%":"—";
   const getVal=(src,sid,min)=>{const e=src?.find(d=>d.minute===min);return e?e[sid]:null;};
@@ -866,6 +890,9 @@ function TimetableView({slot,sel,allR,allS,metric,date,onCornerClick}){
   const totalMin=endMin-startMin;
   const totalH=totalMin*pxPerMin;
   const timeMarks=[];for(let m=startMin;m<=endMin;m+=10)timeMarks.push(m);
+  const hasAnyCorner=sel.some(sid=>(tpl[sid]||[]).length>0);
+  if(loading)return <div style={{padding:60,textAlign:"center",color:"#9CA3AF",fontSize:13}}>読み込み中...</div>;
+  if(!hasAnyCorner)return <div style={{padding:60,textAlign:"center",color:"#9CA3AF",fontSize:13}}>この日時に実分析結果はありません</div>;
   return <div style={{background:"#fff",border:"1px solid #E5E7EB",borderRadius:8,overflow:"auto",maxHeight:"calc(100vh - 220px)"}}>
     <div style={{display:"flex",minWidth:60+sel.length*colWidth}}>
       <div style={{width:60,flexShrink:0,position:"sticky",left:0,background:"#F9FAFB",borderRight:"1px solid #E5E7EB",zIndex:2}}>
@@ -876,10 +903,7 @@ function TimetableView({slot,sel,allR,allS,metric,date,onCornerClick}){
       </div>
       {sel.map(sid=>{
         const st=ST.find(s=>s.id===sid);
-        const tpl=slot==="morning"?getDailyMorn(date):getDailyEve(date);
-        const progs=tpl[sid]||[];
-        const corners=[];
-        for(const[n,s,e,cs] of progs){for(const c of cs)corners.push({progName:n,title:c[0],startMin:c[1],endMin:c[2],segment:c[3],tags:c[4],summary:c[5]});}
+        const corners=tplAllCorners(tpl,sid);
         return <div key={sid} style={{width:colWidth,flexShrink:0,borderRight:"1px solid #E5E7EB",position:"relative"}}>
           <div style={{height:42,borderBottom:"1px solid #E5E7EB",display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:"#F3F4F6",position:"sticky",top:0,zIndex:3}}>
             <span style={{background:st.c,color:"#fff",fontSize:9.5,fontWeight:800,padding:"2px 6px",borderRadius:3,fontFamily:"monospace"}}>{sid}</span>
@@ -887,6 +911,7 @@ function TimetableView({slot,sel,allR,allS,metric,date,onCornerClick}){
           </div>
           <div style={{position:"relative",height:totalH}}>
             {timeMarks.map(m=><div key={m} style={{position:"absolute",top:(m-startMin)*pxPerMin,left:0,right:0,borderTop:"1px dashed #F3F4F6",height:0}}/>)}
+            {corners.length===0&&<div style={{position:"absolute",top:0,left:0,right:0,padding:"16px 8px",textAlign:"center",fontSize:10.5,color:"#D1D5DB"}}>分析結果なし</div>}
             {corners.map((c,i)=>{
               const cS=Math.max(t2m(c.startMin),startMin),cE=Math.min(t2m(c.endMin),endMin);
               if(cE<=cS)return null;
@@ -899,7 +924,8 @@ function TimetableView({slot,sel,allR,allS,metric,date,onCornerClick}){
               const df=(iV!=null&&oV!=null)?oV-iV:null;
               const isCM=c.segment==="cm";
               const compact=height<40;
-              return <div key={i} onClick={()=>onCornerClick&&onCornerClick({...c,stId:sid,date,slot})}
+              const navList=corners.map(cc=>({...cc,stId:sid,date,slot}));
+              return <div key={i} onClick={()=>onCornerClick&&onCornerClick({...c,stId:sid,date,slot},navList,i)}
                 style={{position:"absolute",top,left:4,right:4,height:height-2,background:isCM?"#FAFAFA":"#fff",border:`1px solid #E5E7EB`,borderLeft:`3px solid ${sg.c}`,borderRadius:4,padding:"4px 6px",overflow:"hidden",cursor:"pointer",fontSize:10,display:"flex",flexDirection:"column",gap:2}}
                 onMouseEnter={e=>e.currentTarget.style.background=isCM?"#F3F4F6":"#F9FAFB"} onMouseLeave={e=>e.currentTarget.style.background=isCM?"#FAFAFA":"#fff"}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:4}}>
@@ -1060,10 +1086,34 @@ async function _annotationSearchRequest({ query, keywords, dateFrom, dateTo }) {
   }));
 }
 
+// キーワードなしで局・日付だけに絞った実分析コーナーの全件取得（Dashboardの実データ表示用）
+async function _annotationListRequest({ dateFrom, dateTo, limit = 1000 }) {
+  const res = await fetch(ANNOTATION_SEARCH_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      limit,
+      date_from: dateFrom ? dateFrom.replaceAll("-", "") : undefined,
+      date_to: dateTo ? dateTo.replaceAll("-", "") : undefined,
+    }),
+  });
+  if (!res.ok) throw new Error(`アノテーション取得API error: ${res.status}`);
+  const { results = [] } = await res.json();
+  return results.map(r => ({
+    ...r,
+    tags: r.tags ? r.tags.split("|").filter(Boolean) : [],
+  }));
+}
+
 const apiClient = {
   // 部分一致検索（実データ、Athena経由）
   async annotationSearch(query, dateFrom, dateTo) {
     return _annotationSearchRequest({ query, dateFrom, dateTo });
+  },
+
+  // 指定日の実分析コーナーを全局ぶん全件取得（キーワードなし。Dashboardの実データ表示用）
+  async annotationListByDate(date) {
+    return _annotationListRequest({ dateFrom: date, dateTo: date });
   },
 
   // AI意味検索（実データ）：キーワード抽出→複数キーワードでAthena OR検索
@@ -2193,13 +2243,12 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
   </>;
 }
 
-function Panel({selMin,rData,allR,allS,sel,onHL,metric,date}){
+function Panel({selMin,rData,allR,allS,sel,onHL,metric,tpl}){
   const[exp,setExp]=useState(null);
   if(selMin===null)return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"#9CA3AF",fontSize:12.5,textAlign:"center",padding:24,lineHeight:1.8}}>グラフまたはセグメントバーを<br/>クリックすると<br/>各局の放送番組情報を表示します</div>;
-  const slot=selMin<720?"morning":"evening";
   const ap=sel.map(sid=>{
     const st=ST.find(s=>s.id===sid);
-    const{prog,corner}=getProg(slot,sid,selMin,date);
+    const{prog,corner}=tplProgAt(tpl,sid,selMin);
     const cR=rData?.rating?.[sid],cS=rData?.share?.[sid],dv=metric==="share"?cS:cR,ds=dv!=null?(dv.toFixed(1)):"—";
     let iV=null,oV=null,df=null;
     if(corner){const src=metric==="share"?allS:allR;if(src){const iE=src.find(d=>d.minute===t2m(corner.startMin)),oE=src.find(d=>d.minute===Math.min(t2m(corner.endMin),src[src.length-1].minute));if(iE)iV=iE[sid];if(oE)oV=oE[sid];if(iV!=null&&oV!=null)df=oV-iV;}}
@@ -2214,6 +2263,7 @@ function Panel({selMin,rData,allR,allS,sel,onHL,metric,date}){
         <span style={{color:"#9CA3AF",fontSize:9.5,fontFamily:"monospace"}}>SORTED BY {metric==="share"?"SHARE":"RATING"}</span>
       </div>
     </div>
+    {ap.length===0&&<div style={{padding:"32px 16px",textAlign:"center",color:"#9CA3AF",fontSize:12}}>この時刻に実分析結果はありません</div>}
     {ap.map(({st,prog,corner,ds,iV,oV,df},idx)=>{
       const cid=`${st.id}-${corner?.title}`;const isE=exp===cid;
       const sg=corner?SEG[corner.segment]:null;
@@ -2632,6 +2682,56 @@ export default function App(){
   const rData=useMemo(()=>getRatings(date,slot),[date,slot]);
   const sData=useMemo(()=>rData.map(e=>{const t=ST.reduce((s,st)=>s+(e[st.id]||0),0);const o={time:e.time,minute:e.minute};ST.forEach(s=>{o[s.id]=t>0?(e[s.id]/t)*100:0;});return o;}),[rData]);
   const dData=metric==="share"?sData:rData;
+
+  // Dashboard実データ: 選択中の日付の番組表(epg-all)と実分析コーナー(daily_corners)を取得
+  const[dashEpgCache,setDashEpgCache]=useState({}); // date -> programs[](絶対分)|null(読み込み中)
+  const[dashCornerCache,setDashCornerCache]=useState({}); // date -> corners[]|null(読み込み中)
+  useEffect(()=>{
+    if(date in dashEpgCache)return;
+    setDashEpgCache(prev=>({...prev,[date]:null}));
+    const yyyymmdd=date.replace(/-/g,'');
+    const isJson=parseInt(yyyymmdd)>=20260616;
+    fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/epg-all/bangumi_${yyyymmdd}.${isJson?'json':'csv'}`)
+      .then(r=>r.ok?(isJson?r.json():r.text()):Promise.reject())
+      .then(raw=>setDashEpgCache(prev=>({...prev,[date]:parseEpgTimeline(raw,isJson,date)})))
+      .catch(()=>setDashEpgCache(prev=>({...prev,[date]:[]})));
+  },[date]);
+  useEffect(()=>{
+    if(date in dashCornerCache)return;
+    setDashCornerCache(prev=>({...prev,[date]:null}));
+    apiClient.annotationListByDate(date)
+      .then(results=>setDashCornerCache(prev=>({...prev,[date]:results})))
+      .catch(()=>setDashCornerCache(prev=>({...prev,[date]:[]})));
+  },[date]);
+
+  // 実番組(epg-all)×実分析コーナー(daily_corners)を、選択中のslot窓(朝5:30-8:30/夕方16:00-19:30)で
+  // 突き合わせてtpl形式({[stId]:[[progName,startHHMM,endHHMM,corners[]],...]})に組み立てる。
+  // 分析結果が無い番組はそもそも配列に含めない(=表示されない。分析が無ければ何も出さない仕様)
+  const dashTpl=useMemo(()=>{
+    const result={};ST.forEach(s=>result[s.id]=[]);
+    const programs=dashEpgCache[date],corners=dashCornerCache[date];
+    if(!programs||!corners)return result;
+    const dayMid=localMidnightAbsMin(date);
+    const slotStartAbs=dayMid+(slot==="morning"?330:960),slotEndAbs=dayMid+(slot==="morning"?510:1170);
+    const cornersByStation={};
+    corners.forEach(c=>{if(!c.date||!c.startMin)return;(cornersByStation[c.stId]=cornersByStation[c.stId]||[]).push(c);});
+    const fmtT=d=>`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+    programs.forEach(p=>{
+      if(!result[p.stId])return; // NHKE等、実分析対象外の局はそもそもcornersByStationに無い
+      if(p.endAbs<=slotStartAbs||p.startAbs>=slotEndAbs)return;
+      const stCorners=(cornersByStation[p.stId]||[]).filter(c=>{
+        const cStartAbs=localMidnightAbsMin(c.date)+t2m(c.startMin);
+        const cEndAbs=Math.max(cStartAbs+1,localMidnightAbsMin(c.date)+t2m(c.endMin||c.startMin));
+        return cStartAbs<p.endAbs&&cEndAbs>p.startAbs;
+      }).sort((a,b)=>t2m(a.startMin)-t2m(b.startMin))
+        .map(c=>[c.title,c.startMin,c.endMin,"other",c.tags,c.summary]);
+      if(stCorners.length===0)return; // 分析結果が無い番組は表示しない
+      result[p.stId].push([p.title,fmtT(new Date(p.startAbs*60000)),fmtT(new Date(p.endAbs*60000)),stCorners]);
+    });
+    Object.keys(result).forEach(sid=>result[sid].sort((a,b)=>t2m(a[1])-t2m(b[1])));
+    return result;
+  },[dashEpgCache,dashCornerCache,date,slot]);
+  const dashDataLoading=dashEpgCache[date]==null||dashCornerCache[date]==null;
   const zoomHalf=ZOOM_HALF[zoomLevel];
   const progCenter=programContext?.center??null;
   const slotStart=slot==='morning'?330:960,slotEnd=slot==='morning'?510:1170;
@@ -2712,7 +2812,7 @@ export default function App(){
         <span>データについて</span>
         <span style={{fontSize:8}}>{bannerOpen?"▲":"▼"}</span>
       </button>
-      {bannerOpen&&<div style={{marginTop:5,lineHeight:1.6,maxWidth:920}}>視聴率は4/1〜4/14・4/17が実データ（名古屋地区・世帯視聴率）、それ以外はデモデータです。番組表・天気は実データ、番組内容・コーナー情報はデモ用のダミーデータです。ただし、4/17のドデスカ！（6:00〜8:00）のコーナー情報は実際の放送内容を開発途中のシステムで分析した結果です。</div>}
+      {bannerOpen&&<div style={{marginTop:5,lineHeight:1.6,maxWidth:920}}>視聴率は4/1〜4/14・4/17が実データ（名古屋地区・世帯視聴率）、それ以外はデモデータです。番組表・天気は実データです。番組内容・コーナー情報は、実際の放送内容を分析した結果がある部分のみ実データを表示し（現状は主に2026年7月分）、分析結果が無い部分は表示されません。</div>}
     </div>
   </div>;
 
@@ -2804,18 +2904,18 @@ export default function App(){
           {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls onLoadedMetadata={()=>{if(videoRef.current&&pendingSeekRef.current!==null){videoRef.current.currentTime=pendingSeekRef.current;pendingSeekRef.current=null;}}} onEnded={()=>{if(!videoFiles)return;const idx=videoFiles.findIndex(f=>`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${f.key}`===videoUrl);if(idx===-1||idx===videoFiles.length-1)return;const nxt=videoFiles[idx+1];const nxtUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}} style={{width:"100%",borderRadius:8,background:"#000",maxHeight:400}}/>}
         </div>}
         <div style={{padding:"0 18px"}}>
-          <SegmentBands slot={slot} sel={sel} selMin={selMin} onClickMinute={click} date={date} customStart={programContext?winStart:undefined} customEnd={programContext?winEnd:undefined}/>
+          <SegmentBands slot={slot} sel={sel} selMin={selMin} onClickMinute={click} tpl={dashTpl} customStart={programContext?winStart:undefined} customEnd={programContext?winEnd:undefined}/>
         </div>
         <div style={{padding:"0 18px 16px"}}><SegmentLegend/></div>
       </div>
       <div style={{width:340,minWidth:290,flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column"}}>
-        <Panel selMin={selMin} rData={selData} allR={rData} allS={sData} sel={sel} onHL={setHL} metric={metric} date={date}/>
+        <Panel selMin={selMin} rData={selData} allR={rData} allS={sData} sel={sel} onHL={setHL} metric={metric} tpl={dashTpl}/>
       </div>
     </div>:<div style={{padding:"8px 18px 16px"}}>
       <div style={{marginBottom:8}}><Toggle sel={sel} onT={tog}/></div>
       <div style={{marginBottom:10}}><SegmentLegend/></div>
-      <TimetableView slot={slot} sel={sel} allR={rData} allS={sData} metric={metric} date={date} onCornerClick={setTimetableModal}/>
+      <TimetableView slot={slot} sel={sel} allR={rData} allS={sData} metric={metric} date={date} tpl={dashTpl} loading={dashDataLoading} onCornerClick={(corner,navList,idx)=>setTimetableModal({corner,navList,idx})}/>
     </div>}
-    {timetableModal&&<CornerModal corner={timetableModal} cache={ratingsCache} onClose={()=>setTimetableModal(null)} onNavigate={setTimetableModal}/>}
+    {timetableModal&&<CornerModal corner={timetableModal.corner} cache={ratingsCache} onClose={()=>setTimetableModal(null)} navList={timetableModal.navList} navIdx={timetableModal.idx} onNavigate={c=>{const idx=timetableModal.navList.findIndex(item=>item.title===c.title&&item.startMin===c.startMin);setTimetableModal({...timetableModal,corner:c,idx});}} guideMode={true}/>}
   </div>;
 }
