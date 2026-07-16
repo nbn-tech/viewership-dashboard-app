@@ -1661,6 +1661,15 @@ function AnnotationResultModal({result,progName,onClose}){
   const videoUrl=(chMatch&&yyyymmdd)
     ?`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/movie/ch${chMatch[1]}/${yyyymmdd}/${result.object_key}`
     :null;
+  // 視聴率IN/OUT/DIFF (視聴率オーバーレイがあるのは朝帯5:30-8:30・夕方帯16:00-19:30のみ)
+  const stats=useMemo(()=>{
+    if(!result.date||!result.startMin||!result.endMin||!result.stId)return null;
+    const m=t2m(result.startMin);
+    const slot=(m>=330&&m<510)?"morning":(m>=960&&m<1170)?"evening":null;
+    if(!slot)return null;
+    return computeCornerStats({date:result.date,slot,startMin:result.startMin,endMin:result.endMin,stId:result.stId},rCache,"rating");
+  },[result]);
+  const fmt=v=>v!=null?v.toFixed(1)+"%":"—";
 
   return <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
     <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:12,maxWidth:720,width:"100%",maxHeight:"88vh",overflowY:"auto",padding:24}}>
@@ -1675,6 +1684,20 @@ function AnnotationResultModal({result,progName,onClose}){
       </div>
       {progName&&<div style={{fontSize:12,color:"#0066cc",fontWeight:600,marginBottom:3}}>{progName}</div>}
       <div style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:10}}>{result.title}</div>
+      {stats&&(stats.iV!=null||stats.oV!=null)&&<div style={{display:"flex",gap:8,marginBottom:14}}>
+        <div style={{flex:1,background:"#F9FAFB",borderRadius:8,padding:"8px 12px",border:"1px solid #F3F4F6"}}>
+          <div style={{fontSize:9,color:"#9CA3AF",fontFamily:"monospace",marginBottom:3}}>IN（{result.startMin}）</div>
+          <div style={{fontSize:16,fontWeight:700,color:st?.c||"#111827",fontFamily:"monospace"}}>{fmt(stats.iV)}</div>
+        </div>
+        <div style={{flex:1,background:"#F9FAFB",borderRadius:8,padding:"8px 12px",border:"1px solid #F3F4F6"}}>
+          <div style={{fontSize:9,color:"#9CA3AF",fontFamily:"monospace",marginBottom:3}}>OUT（{result.endMin}）</div>
+          <div style={{fontSize:16,fontWeight:700,color:st?.c||"#111827",fontFamily:"monospace"}}>{fmt(stats.oV)}</div>
+        </div>
+        <div style={{flex:1,background:stats.df!=null?(stats.df>=0?"#F0FDF4":"#FEF2F2"):"#F9FAFB",borderRadius:8,padding:"8px 12px",border:`1px solid ${stats.df!=null?(stats.df>=0?"#DCFCE7":"#FEE2E2"):"#F3F4F6"}`}}>
+          <div style={{fontSize:9,color:"#9CA3AF",fontFamily:"monospace",marginBottom:3}}>DIFF</div>
+          <div style={{fontSize:16,fontWeight:700,fontFamily:"monospace",color:stats.df!=null?(stats.df>=0?"#16A34A":"#DC2626"):"#9CA3AF"}}>{stats.df!=null?`${stats.df>=0?"+":""}${stats.df.toFixed(1)}%`:"—"}</div>
+        </div>
+      </div>}
       {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls autoPlay
         onLoadedMetadata={()=>{if(videoRef.current)videoRef.current.currentTime=result.start_sec;}}
         style={{width:"100%",borderRadius:8,background:"#000",maxHeight:400,marginBottom:14}}/>}
