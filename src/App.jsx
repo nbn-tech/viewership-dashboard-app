@@ -60,6 +60,9 @@ const seg = active => ({ padding:"4px 13px", border:"none", background:active?"#
 const STATION_MAP={"1":"THK","2":"NHKE","3":"NHK","4":"CTV","5":"CBC","6":"NBN","10":"TVA"};
 const CHANNEL_ID_MAP={"0x0C08":"NHKE","0x0C10":"THK","0x0C18":"CBC","0x0C20":"NBN","0x0C28":"CTV","0x8400":"NHK","0x8430":"TVA"};
 const GUIDE_ST_ORDER=["NBN","THK","CTV","CBC","NHK","NHKE","TVA"];
+// 録画パイプラインのチャンネル番号(movie/ch{N}/配下のフォルダ)→局コード。NHKEは録画対象外
+const VIDEO_CH_TO_STATION={ch1:"THK",ch2:"TVA",ch3:"NHK",ch4:"CTV",ch5:"CBC",ch6:"NBN"};
+const VIDEO_CHANNELS=Object.keys(VIDEO_CH_TO_STATION);
 const ZOOM_HALF=[5,10,15,20,30,45,60,90,120,180]; // 各ズームレベルの片側分数
 
 // 深夜 0:00〜4:59 は翌日扱い（分 + 1440）にして連続した時系列に変換
@@ -2653,6 +2656,7 @@ export default function App(){
   const[videoFiles,setVideoFiles]=useState(null);
   const[videoUrl,setVideoUrl]=useState(null);
   const[noVideoForTime,setNoVideoForTime]=useState(false);
+  const[videoCh,setVideoCh]=useState("ch6");
   const prevVideoUrlRef=useRef(null);
   const pendingSeekRef=useRef(null);
   const[page,setPage]=useState(PROGRAM_MODE?"dashboard":"guide");
@@ -2794,7 +2798,7 @@ export default function App(){
     if(date==="2026-04-17"||date<"2026-06-17"){setVideoFiles(null);setVideoUrl(null);setNoVideoForTime(false);prevVideoUrlRef.current=null;return;}
     const yyyymmdd=date.replace(/-/g,'');
     setVideoFiles(null);setVideoUrl(null);setNoVideoForTime(false);prevVideoUrlRef.current=null;
-    fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/?prefix=movie/ch1/${yyyymmdd}/&list-type=2`)
+    fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/?prefix=movie/${videoCh}/${yyyymmdd}/&list-type=2`)
       .then(r=>r.ok?r.text():Promise.reject())
       .then(text=>{
         const xml=new DOMParser().parseFromString(text,'text/xml');
@@ -2806,7 +2810,7 @@ export default function App(){
         setVideoFiles(files);
       })
       .catch(()=>setVideoFiles([]));
-  },[date]);
+  },[date,videoCh]);
   const dates=DASHBOARD_DATES;
   const dow=ds=>["日","月","火","水","木","金","土"][new Date(ds).getDay()];
   const isWd=ds=>{const d=new Date(ds).getDay();return d!==0&&d!==6;};
@@ -2914,9 +2918,12 @@ export default function App(){
           <video ref={videoRef} src="https://dodesca-video.s3.ap-northeast-1.amazonaws.com/0417.mp4" controls style={{width:"100%",borderRadius:8,background:"#000",maxHeight:400}}/>
         </div>}
         {date>="2026-06-17"&&videoFiles!==null&&<div style={{padding:"0 18px 12px"}}>
-          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
-            <span style={{fontSize:11,fontWeight:700,color:"#374151"}}>放送動画（NBN）</span>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,flexWrap:"wrap"}}>
+            <span style={{fontSize:11,fontWeight:700,color:"#374151"}}>放送動画（{VIDEO_CH_TO_STATION[videoCh]}）</span>
             {videoUrl&&selMin!==null&&<span style={{fontSize:10,color:"#6B7280",fontFamily:"monospace"}}>→ {m2t(selMin)} にシーク済み</span>}
+            <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0",marginLeft:"auto"}}>
+              {VIDEO_CHANNELS.map(ch=><button key={ch} onClick={()=>setVideoCh(ch)} style={{padding:"3px 10px",border:"none",background:videoCh===ch?"#0066cc":"transparent",color:videoCh===ch?"#fff":"#7a7a7a",cursor:"pointer",fontSize:10.5,fontWeight:600,fontFamily:"monospace"}}>{ch}</button>)}
+            </div>
           </div>
           {videoFiles.length===0&&<div style={{padding:"20px 0",textAlign:"center",fontSize:12,color:"#9CA3AF"}}>この日の動画データはありません</div>}
           {videoFiles.length>0&&!videoUrl&&!noVideoForTime&&<div style={{padding:"20px 0",textAlign:"center",fontSize:12,color:"#9CA3AF"}}>グラフの時刻をクリックすると動画を表示します</div>}
