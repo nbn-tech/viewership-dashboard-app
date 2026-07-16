@@ -737,34 +737,6 @@ const MORN_PROFILE = PROFILES_IMPORT.mornProfile;
 const EVE_PROFILE = PROFILES_IMPORT.eveProfile;
 
 
-function getProg(slot,stId,min,date){
-  const tpl=slot==="morning"?(date?getDailyMorn(date):buildDaily(MORN_TPL,"2026-04-01")):(date?getDailyEve(date):buildDaily(EVE_TPL,"2026-04-01"));
-  const progs=tpl[stId]||[];
-  for(const[n,s,e,corners] of progs){
-    if(min>=t2m(s)&&min<t2m(e)){
-      let c=null;
-      for(const cn of corners){
-        const[title,cs,ce,segment,tags,summary]=cn;
-        if(min>=t2m(cs)&&min<t2m(ce)){c={title,startMin:cs,endMin:ce,segment,tags,summary};break;}
-      }
-      return {prog:{name:n,start:s,end:e,corners},corner:c};
-    }
-  }
-  return{prog:null,corner:null};
-}
-
-function getAllCorners(slot,stId,date){
-  const tpl=slot==="morning"?(date?getDailyMorn(date):buildDaily(MORN_TPL,"2026-04-01")):(date?getDailyEve(date):buildDaily(EVE_TPL,"2026-04-01"));
-  const progs=tpl[stId]||[];
-  const out=[];
-  for(const[n,s,e,corners] of progs){
-    for(const cn of corners){
-      const[title,cs,ce,segment,tags,summary]=cn;
-      out.push({title,startMin:cs,endMin:ce,segment,tags,summary,progName:n});
-    }
-  }
-  return out;
-}
 
 // tpl形式({[stId]:[[progName,startHHMM,endHHMM,corners[]],...]})から局の全コーナーを平坦化する
 function tplAllCorners(tpl,stId){
@@ -788,6 +760,33 @@ function tplProgAt(tpl,stId,min){
     }
   }
   return{prog:null,corner:null};
+}
+
+// 実番組(epg-all)×実分析コーナー(daily_corners)を、指定slot窓(朝5:30-8:30/夕方16:00-19:30)で
+// 突き合わせてtpl形式({[stId]:[[progName,startHHMM,endHHMM,corners[]],...]})に組み立てる。
+// 分析結果が無い番組はそもそも配列に含めない(=表示されない。分析が無ければ何も出さない仕様)
+function buildDayTpl(programs,corners,date,slot){
+  const result={};ST.forEach(s=>result[s.id]=[]);
+  if(!programs||!corners)return result;
+  const dayMid=localMidnightAbsMin(date);
+  const slotStartAbs=dayMid+(slot==="morning"?330:960),slotEndAbs=dayMid+(slot==="morning"?510:1170);
+  const cornersByStation={};
+  corners.forEach(c=>{if(!c.date||!c.startMin)return;(cornersByStation[c.stId]=cornersByStation[c.stId]||[]).push(c);});
+  const fmtT=d=>`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+  programs.forEach(p=>{
+    if(!result[p.stId])return; // NHKE等、実分析対象外の局はそもそもcornersByStationに無い
+    if(p.endAbs<=slotStartAbs||p.startAbs>=slotEndAbs)return;
+    const stCorners=(cornersByStation[p.stId]||[]).filter(c=>{
+      const cStartAbs=localMidnightAbsMin(c.date)+t2m(c.startMin);
+      const cEndAbs=Math.max(cStartAbs+1,localMidnightAbsMin(c.date)+t2m(c.endMin||c.startMin));
+      return cStartAbs<p.endAbs&&cEndAbs>p.startAbs;
+    }).sort((a,b)=>t2m(a.startMin)-t2m(b.startMin))
+      .map(c=>[c.title,c.startMin,c.endMin,(c.segment&&SEG[c.segment])?c.segment:classifySegment(c.title,c.tags),c.tags,c.summary]);
+    if(stCorners.length===0)return; // 分析結果が無い番組は表示しない
+    result[p.stId].push([p.title,fmtT(new Date(p.startAbs*60000)),fmtT(new Date(p.endAbs*60000)),stCorners]);
+  });
+  Object.keys(result).forEach(sid=>result[sid].sort((a,b)=>t2m(a[1])-t2m(b[1])));
+  return result;
 }
 
 function SegmentBand({stId,startMin,endMin,height=14,onHover,tpl}){
@@ -993,6 +992,25 @@ const DASHBOARD_DATES=(()=>{
   return d;
 })();
 
+// 指定日を含む月曜始まりの週(月〜日)を返す
+function mondayOf(dateStr){
+  const[y,m,d]=dateStr.split("-").map(Number);
+  const dt=new Date(y,m-1,d);
+  const dow=dt.getDay(); // 0=日,1=月,...6=土
+  dt.setDate(dt.getDate()+(dow===0?-6:1-dow));
+  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+}
+// 指定日を含む週の日付一覧(月〜日)。有効期間(GUIDE_DATE_MIN〜GUIDE_DATE_MAX)外の日は除く
+function weekDatesContaining(dateStr){
+  const start=mondayOf(dateStr);
+  const dates=[];
+  for(let i=0;i<7;i++){
+    const d=shiftDateStr(start,i);
+    if(d>=GUIDE_DATE_MIN&&d<=GUIDE_DATE_MAX)dates.push(d);
+  }
+  return dates;
+}
+
 // 視聴率遅延キャッシュ
 // TODO: AWS移行時は genRatings → S3/DynamoDB APIへの差し替えポイント
 const rCache={};
@@ -1004,29 +1022,9 @@ function getRatings(date,slot){
 // ALL_DATES分を初期ロード（Search/Analysisで使用）
 (()=>{for(const d of ALL_DATES)for(const s of ALL_SLOTS)getRatings(d,s);})();
 
-function buildCornerIndex(){
-  const idx=[];
-  for(const date of ALL_DATES){
-    for(const slot of ALL_SLOTS){
-      const tpl=slot==="morning"?getDailyMorn(date):getDailyEve(date);
-      for(const stId of ST.map(s=>s.id)){
-        const progs=tpl[stId]||[];
-        for(const[progName,pStart,pEnd,corners] of progs){
-          for(const cn of corners){
-            const[title,cs,ce,segment,tags,summary]=cn;
-            idx.push({date,slot,stId,progName,title,startMin:cs,endMin:ce,segment,tags,summary,id:`${date}|${slot}|${stId}|${cs}|${title}`});
-          }
-        }
-      }
-    }
-  }
-  return idx;
-}
-
 function computeCornerStats(corner,cache,metric){
-  const key=`${corner.date}|${corner.slot}`;
-  const rData=cache[key];
-  if(!rData)return{iV:null,oV:null,avg:null,df:null};
+  // cache(=rCache)に無くても getRatings が実データ／デモ生成のどちらかを必ず返す(内部でcacheにも書き込む)
+  const rData=cache[`${corner.date}|${corner.slot}`]||getRatings(corner.date,corner.slot);
   let src=rData;
   if(metric==="share"){
     src=rData.map(e=>{const t=ST.reduce((s,st)=>s+(e[st.id]||0),0);const o={time:e.time,minute:e.minute};ST.forEach(s=>{o[s.id]=t>0?(e[s.id]/t)*100:0;});return o;});
@@ -1196,14 +1194,6 @@ const apiClient = {
 }
 
 
-function keywordMatch(corner,query){
-  if(!query.trim())return true;
-  const q=query.trim().toLowerCase();
-  const stName=ST.find(s=>s.id===corner.stId)?.nm||"";
-  const hay=[corner.title,corner.summary,corner.progName,stName,...corner.tags].join(" ").toLowerCase();
-  return q.split(/\s+/).every(t=>hay.includes(t));
-}
-
 // ---- CornerModal ----
 // Multi-line chart: main corner + selected rivals, X-axis fixed to main corner's window [sM,eM]
 function ModalChart({rData,sData,mainStId,mainStColor,sM,eM,activeRivals,rivals}){
@@ -1306,7 +1296,7 @@ function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,
   const navBtn=(c,label)=><button onClick={()=>c&&onNavigate&&onNavigate(c)} disabled={!c} style={{background:c?"#F3F4F6":"#FAFAFA",border:"1px solid #E5E7EB",borderRadius:6,width:28,height:28,cursor:c?"pointer":"default",fontSize:13,color:c?"#374151":"#D1D5DB",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{label}</button>;
   const sg=SEG[corner.segment]||SEG.other;
   const sM=t2m(corner.startMin),eM=t2m(corner.endMin);
-  const rData=cache[`${corner.date}|${corner.slot}`]||[];
+  const rData=cache[`${corner.date}|${corner.slot}`]||getRatings(corner.date,corner.slot);
   const sData=useMemo(()=>rData.map(e=>{const t=ST.reduce((s,st2)=>s+(e[st2.id]||0),0);const o={time:e.time,minute:e.minute};ST.forEach(s=>{o[s.id]=t>0?(e[s.id]/t)*100:0;});return o;}),[rData]);
   const sliceR=rData.filter(d=>d.minute>=sM&&d.minute<=eM);
   const sliceS=sData.filter(d=>d.minute>=sM&&d.minute<=eM);
@@ -1697,14 +1687,6 @@ function AnnotationResultModal({result,progName,onClose}){
 // ============================================================
 // Analysis Page
 // ============================================================
-const WEEK_RANGES=(()=>{
-  // 4/1-4/5, 4/7-4/11, 4/14(単日)をweekとしてグループ化
-  const weeks=[
-    {id:"w1",label:"第1週 (4/1〜4/5)",dates:["2026-04-01","2026-04-02","2026-04-03","2026-04-04","2026-04-07"]},
-    {id:"w2",label:"第2週 (4/7〜4/14)",dates:["2026-04-07","2026-04-08","2026-04-09","2026-04-10","2026-04-11","2026-04-14"]},
-  ];
-  return weeks;
-})();
 
 // コーナーのサマリーテキストをAI分析用に整形
 // 裏番組の流入・流出（何を放送中で視聴率がどう動いたか）も含める
@@ -1713,8 +1695,8 @@ function toShare(rData){
 }
 
 // 占拠率ベースで裏番組の流入・流出を計算
-function computeRivalFlow(sid,sM,eM,slot,sData,date){
-  // sData: 占拠率データ（toShare済み）
+function computeRivalFlow(sid,sM,eM,sData,tpl){
+  // sData: 占拠率データ（toShare済み）、tpl: buildDayTplで組み立てた実データ
   const rivals=[];
   for(const rid of ST.map(s=>s.id)){
     if(rid===sid)continue;
@@ -1722,25 +1704,30 @@ function computeRivalFlow(sid,sM,eM,slot,sData,date){
     if(!sl.length)continue;
     const iV=sl[0][rid],oV=sl[sl.length-1][rid],df=oV-iV;
     const midMin=Math.floor((sM+eM)/2);
-    const{corner}=getProg(slot,rid,midMin,date);
+    const{corner}=tplProgAt(tpl,rid,midMin);
     rivals.push({rid,iV,oV,df,cornerTitle:corner?corner.title:null});
   }
   return rivals;
 }
 
-function buildAnalysisContext(dates,slot,ratingsCache){
+function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
   const SKIP_SEG=new Set(["cm","sponsor","opening","ending","other","kids"]);
   const MAX_CHARS=18000;
   const lines=[];
   for(const date of dates){
     const key=`${date}|${slot}`;
-    const rData=ratingsCache[key]||[];
+    // cache(=rCache)に無くても getRatings が実データ／デモ生成のどちらかを必ず返す(内部でcacheにも書き込む)
+    const rData=ratingsCache[key]||getRatings(date,slot);
     const sData=toShare(rData);
     const dow=["日","月","火","水","木","金","土"][new Date(date).getDay()];
     lines.push(`\n=== ${date}(${dow}) ${slot==="morning"?"朝帯":"夕方帯"} ===`);
-    const tpl=slot==="morning"?getDailyMorn(date):getDailyEve(date);
+    const tpl=tplByDate[date];
+    if(!tpl||ST.every(s=>(tpl[s.id]||[]).length===0)){
+      lines.push("(この日時は実分析結果がありません)");
+      continue;
+    }
 
-    // NBN 詳細（番組ごと → コーナーごと + 裏局の有意な動き）
+    // NBN 詳細（番組ごと → コーナーごと・要約 + 裏局の有意な動き）
     const nbnProgs=tpl["NBN"]||[];
     for(const[progName,progStart,progEnd,corners] of nbnProgs){
       const psM=t2m(progStart),peM=t2m(progEnd);
@@ -1751,7 +1738,7 @@ function buildAnalysisContext(dates,slot,ratingsCache){
       const plow=Math.min(...ps.map(d=>d["NBN"]));
       lines.push(`\n■ NBN「${progName}」(${progStart}–${progEnd}) AVG${pavg.toFixed(1)}% 最高${ppeak.toFixed(1)}% 最低${plow.toFixed(1)}%`);
       for(const cn of corners){
-        const[title,cs,ce,seg]=cn;
+        const[title,cs,ce,seg,,summary]=cn;
         if(SKIP_SEG.has(seg))continue;
         const sM=t2m(cs),eM=t2m(ce);
         if(eM-sM<5)continue;
@@ -1760,7 +1747,8 @@ function buildAnalysisContext(dates,slot,ratingsCache){
         const avg=slice.reduce((s,d)=>s+d["NBN"],0)/slice.length;
         const iV=slice[0]["NBN"],oV=slice[slice.length-1]["NBN"],df=oV-iV;
         lines.push(`  ・「${title}」(${cs}–${ce}) IN${iV.toFixed(1)}% AVG${avg.toFixed(1)}% OUT${oV.toFixed(1)}% ${df>=0?"+":""}${df.toFixed(1)}pt`);
-        const rivals=computeRivalFlow("NBN",sM,eM,slot,sData,date);
+        if(summary)lines.push(`    内容: ${summary}`);
+        const rivals=computeRivalFlow("NBN",sM,eM,sData,tpl);
         rivals
           .filter(r=>Math.abs(r.df)>=1.0)
           .forEach(r=>{
@@ -1771,7 +1759,7 @@ function buildAnalysisContext(dates,slot,ratingsCache){
       }
     }
 
-    // 競合各局（番組サマリー＋上位2コーナー）
+    // 競合各局（番組サマリー＋上位2コーナー、要約付き）
     lines.push(`\n【競合各局の概況】`);
     for(const sid of ST.map(s=>s.id)){
       if(sid==="NBN")continue;
@@ -1784,17 +1772,17 @@ function buildAnalysisContext(dates,slot,ratingsCache){
         const ppeak=Math.max(...ps.map(d=>d[sid]));
         const topC=[];
         for(const cn of corners){
-          const[title,cs,ce,seg]=cn;
+          const[title,cs,ce,seg,,summary]=cn;
           if(SKIP_SEG.has(seg))continue;
           const sM=t2m(cs),eM=t2m(ce);
           if(eM-sM<5)continue;
           const sl=sData.filter(d=>d.minute>=sM&&d.minute<eM);
           if(!sl.length)continue;
           const a=sl.reduce((s,d)=>s+d[sid],0)/sl.length;
-          topC.push({title,cs,ce,avg:a});
+          topC.push({title,cs,ce,avg:a,summary});
         }
         topC.sort((a,b)=>b.avg-a.avg);
-        const top2=topC.slice(0,2).map(c=>`「${c.title}」(${c.cs}–${c.ce})${c.avg.toFixed(1)}%`).join(" / ");
+        const top2=topC.slice(0,2).map(c=>`「${c.title}」(${c.cs}–${c.ce})${c.avg.toFixed(1)}%${c.summary?` — ${c.summary}`:""}`).join(" / ");
         lines.push(`  ${sid}「${progName}」(${progStart}–${progEnd}) AVG${pavg.toFixed(1)}% 最高${ppeak.toFixed(1)}%${top2?` 主要:${top2}`:""}`);
       }
     }
@@ -1805,40 +1793,8 @@ function buildAnalysisContext(dates,slot,ratingsCache){
 }
 
 // トピック分析: 局別サマリー集計
-function computeTopicSummary(query,ratingsCache){
-  const index=buildCornerIndex();
-  const matched=index.filter(c=>keywordMatch(c,query)&&c.segment!=="cm"&&c.segment!=="sponsor");
-  const byStation={};
-  for(const c of matched){
-    const stats=computeCornerStats(c,ratingsCache,"rating");
-    const statsS=computeCornerStats(c,ratingsCache,"share");
-    if(stats.avg==null)continue;
-    if(!byStation[c.stId])byStation[c.stId]={count:0,sumIN:0,sumOUT:0,sumAVG:0,sumDIFF:0,sumAVGS:0,corners:[]};
-    const s=byStation[c.stId];
-    s.count++;s.sumIN+=stats.iV||0;s.sumOUT+=stats.oV||0;s.sumAVG+=stats.avg;
-    s.sumDIFF+=stats.df||0;s.sumAVGS+=statsS.avg||0;
-    s.corners.push(c);
-  }
-  // 裏番組平均: 該当コーナー放送中の他局平均
-  for(const sid of Object.keys(byStation)){
-    let rivalSum=0,rivalCount=0;
-    for(const c of byStation[sid].corners){
-      const key=`${c.date}|${c.slot}`;
-      const rData=ratingsCache[key]||[];
-      const sM=t2m(c.startMin),eM=t2m(c.endMin);
-      for(const rid of ST.map(s=>s.id)){
-        if(rid===sid)continue;
-        const sl=rData.filter(d=>d.minute>=sM&&d.minute<eM);
-        if(sl.length){rivalSum+=sl.reduce((s,d)=>s+d[rid],0)/sl.length;rivalCount++;}
-      }
-    }
-    byStation[sid].rivalAvg=rivalCount?rivalSum/rivalCount:null;
-  }
-  return{byStation,totalCount:matched.length};
-}
-
 function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
-  mode,setMode,selDate,setSelDate,selWeek,setSelWeek,slot,setSlot,
+  mode,setMode,selDate,setSelDate,slot,setSlot,
   tab,setTab,overviewText,setOverviewText,highlightText,setHighlightText,
   conclusionText,setConclusionText,
   topicQuery,setTopicQuery,topicResult,setTopicResult,analysisLabel,setAnalysisLabel,
@@ -1851,9 +1807,42 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
   const[showEvidence,setShowEvidence]=useState(false);
 
   const dow=ds=>["日","月","火","水","木","金","土"][new Date(ds).getDay()];
-  const activeDates=mode==="daily"?[selDate]:(WEEK_RANGES.find(w=>w.id===selWeek)?.dates||[]);
-  const label=mode==="daily"?`${selDate}(${dow(selDate)}) ${slot==="morning"?"朝帯":"夕方帯"}`:`${WEEK_RANGES.find(w=>w.id===selWeek)?.label} ${slot==="morning"?"朝帯":"夕方帯"}`;
+  const activeDates=mode==="daily"?[selDate]:weekDatesContaining(selDate);
+  const weekLabel=activeDates.length?(activeDates.length>1?`${activeDates[0]}〜${activeDates[activeDates.length-1]}`:activeDates[0]):selDate;
+  const label=mode==="daily"?`${selDate}(${dow(selDate)}) ${slot==="morning"?"朝帯":"夕方帯"}`:`${weekLabel} ${slot==="morning"?"朝帯":"夕方帯"}`;
   const cacheKey=`nbndash_analysis|${activeDates.join(",")}|${slot}`;
+
+  // 実データ: activeDatesぶんの番組表(epg-all)と実分析コーナー(daily_corners)を取得
+  const[epgCache,setEpgCache]=useState({}); // date -> programs[]|null(読み込み中)
+  const[cornerCache,setCornerCache]=useState({}); // date -> corners[]|null(読み込み中)
+  const activeDatesKey=activeDates.join(",");
+  useEffect(()=>{
+    activeDates.forEach(date=>{
+      if(!(date in epgCache)){
+        setEpgCache(prev=>date in prev?prev:{...prev,[date]:null});
+        const yyyymmdd=date.replace(/-/g,'');
+        const isJson=parseInt(yyyymmdd)>=20260616;
+        fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/epg-all/bangumi_${yyyymmdd}.${isJson?'json':'csv'}`)
+          .then(r=>r.ok?(isJson?r.json():r.text()):Promise.reject())
+          .then(raw=>setEpgCache(prev=>({...prev,[date]:parseEpgTimeline(raw,isJson,date)})))
+          .catch(()=>setEpgCache(prev=>({...prev,[date]:[]})));
+      }
+      if(!(date in cornerCache)){
+        setCornerCache(prev=>date in prev?prev:{...prev,[date]:null});
+        apiClient.annotationListByDate(date)
+          .then(results=>setCornerCache(prev=>({...prev,[date]:results})))
+          .catch(()=>setCornerCache(prev=>({...prev,[date]:[]})));
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[activeDatesKey]);
+  const tplByDate=useMemo(()=>{
+    const m={};
+    activeDates.forEach(date=>{m[date]=buildDayTpl(epgCache[date],cornerCache[date],date,slot);});
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[activeDatesKey,epgCache,cornerCache,slot]);
+  const dataLoading=activeDates.some(date=>epgCache[date]==null||cornerCache[date]==null);
 
   // 選択条件が変わったときキャッシュを自動ロード
   useEffect(()=>{
@@ -1888,10 +1877,11 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
         }
       }catch{}
     }
+    if(dataLoading){setError("データ読み込み中です。しばらくしてからもう一度お試しください");return;}
     setError(null);setLoading(true);setStreaming(true);
     setOverviewText("");setHighlightText("");setConclusionText("");setCachedAt(null);
     setAnalysisLabel(label);
-    const ctx=buildAnalysisContext(activeDates,slot,ratingsCache);
+    const ctx=buildAnalysisContext(activeDates,slot,ratingsCache,tplByDate);
     const slotLabel=slot==="morning"?"朝帯（6:00-8:00）":"夕方帯（16:40-19:00）";
     const periodLabel=mode==="daily"?`${activeDates[0]} ${slotLabel}`:`${label}`;
 
@@ -1914,22 +1904,80 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
     }finally{setLoading(false);setStreaming(false);}
   };
 
-  // Step1→Step2: キーワードで候補コーナーを検索して一覧表示
-  const searchTopicCandidates=()=>{
-    if(!topicQuery.trim())return;
-    const index=buildCornerIndex();
-    const matched=index.filter(c=>keywordMatch(c,topicQuery)&&c.segment!=="cm"&&c.segment!=="sponsor");
-    setTopicCandidates(matched);
-    setTopicSelected(new Set([...new Set(matched.map(c=>`${c.stId}|${c.progName}`))])); // デフォルト全番組選択
-    setTopicStep(2);
-    setTopicResult(null);
+  // 実データ: トピック分析用に取得した番組表・実分析コーナーのキャッシュ(日付単位)
+  const[topicEpgByDate,setTopicEpgByDate]=useState({});
+  const[topicCornersByDate,setTopicCornersByDate]=useState({});
+  const fetchEpgForDate=async date=>{
+    const yyyymmdd=date.replace(/-/g,'');
+    const isJson=parseInt(yyyymmdd)>=20260616;
+    try{
+      const res=await fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/epg-all/bangumi_${yyyymmdd}.${isJson?'json':'csv'}`);
+      const raw=res.ok?(isJson?await res.json():await res.text()):null;
+      return raw?parseEpgTimeline(raw,isJson,date):[];
+    }catch{return[];}
   };
+
+  // Step1→Step2: Athenaの実分析結果をキーワード全件検索し、番組表と突き合わせて候補一覧を作る
+  const searchTopicCandidates=async()=>{
+    if(!topicQuery.trim())return;
+    setTopicLoading(true);setError(null);
+    try{
+      const results=await apiClient.annotationSearch(topicQuery,GUIDE_DATE_MIN,GUIDE_DATE_MAX);
+      // 視聴率オーバーレイがあるのは朝帯(5:30-8:30)・夕方帯(16:00-19:30)のみなのでそれ以外は除外
+      const inSlot=r=>{
+        if(!r.startMin)return false;
+        const m=t2m(r.startMin);
+        return(m>=330&&m<510)||(m>=960&&m<1170);
+      };
+      const filtered=results.filter(r=>r.date&&inSlot(r)&&r.segment!=="cm"&&r.segment!=="sponsor");
+      const dates=[...new Set(filtered.map(r=>r.date))];
+      const epgMap={...topicEpgByDate};
+      await Promise.all(dates.map(async date=>{
+        if(!(date in epgMap))epgMap[date]=await fetchEpgForDate(date);
+      }));
+      setTopicEpgByDate(epgMap);
+      const matched=filtered.map(r=>{
+        const slotOf=t2m(r.startMin)<510?"morning":"evening";
+        const cAbs=localMidnightAbsMin(r.date)+t2m(r.startMin);
+        const prog=(epgMap[r.date]||[]).find(p=>p.stId===r.stId&&p.startAbs<=cAbs&&cAbs<p.endAbs);
+        return{...r,slot:slotOf,progName:prog?prog.title:r.title,
+          segment:(r.segment&&SEG[r.segment])?r.segment:classifySegment(r.title,r.tags)};
+      });
+      setTopicCandidates(matched);
+      setTopicSelected(new Set([...new Set(matched.map(c=>`${c.stId}|${c.progName}`))])); // デフォルト全番組選択
+      setTopicStep(2);
+      setTopicResult(null);
+    }catch(e){
+      setError("トピック検索エラー: "+e.message);
+    }finally{setTopicLoading(false);}
+  };
+
+  // Search画面から遷移した直後(topicStep===1で自動検索する時)にも使うため、tab切り替えのuseEffectはそのまま利用
 
   // Step2→Step3: 選択されたコーナーだけで集計→AI評価
   const runTopicAnalysis=async()=>{
     if(!topicQuery.trim()||topicSelected.size===0)return;
     setTopicLoading(true);setTopicStep(3);setTopicResult(null);
     const selectedCorners=topicCandidates.filter(c=>topicSelected.has(`${c.stId}|${c.progName}`));
+
+    // 裏番組の突き合わせに必要な日付ぶんの番組表・実分析コーナー全件をまとめて取得(重複日付は1回だけ)
+    const neededDates=[...new Set(selectedCorners.map(c=>c.date))];
+    const epgMap={...topicEpgByDate},cornerMap={...topicCornersByDate};
+    await Promise.all(neededDates.map(async date=>{
+      if(!(date in epgMap))epgMap[date]=await fetchEpgForDate(date);
+      if(!(date in cornerMap)){
+        try{cornerMap[date]=await apiClient.annotationListByDate(date);}
+        catch{cornerMap[date]=[];}
+      }
+    }));
+    setTopicEpgByDate(epgMap);setTopicCornersByDate(cornerMap);
+    const tplCache={};
+    const tplFor=(date,slotKey)=>{
+      const key=`${date}|${slotKey}`;
+      if(!tplCache[key])tplCache[key]=buildDayTpl(epgMap[date],cornerMap[date],date,slotKey);
+      return tplCache[key];
+    };
+
     // 局別集計（選択コーナーのみ、占拠率ベース）
     const byStation={};
     for(const c of selectedCorners){
@@ -1946,10 +1994,10 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
       const rivalFlowMap={};
       for(const c of byStation[sid].corners){
         const key=`${c.date}|${c.slot}`;
-        const rData2=ratingsCache[key]||[];
+        const rData2=ratingsCache[key]||getRatings(c.date,c.slot);
         const sData2=toShare(rData2); // 占拠率に変換
         const sM=t2m(c.startMin),eM=t2m(c.endMin);
-        const flows=computeRivalFlow(sid,sM,eM,c.slot,sData2,c.date);
+        const flows=computeRivalFlow(sid,sM,eM,sData2,tplFor(c.date,c.slot));
         for(const f of flows){
           if(!rivalFlowMap[f.rid])rivalFlowMap[f.rid]={sumIN:0,sumOUT:0,sumDIFF:0,count:0,titles:[]};
           const m=rivalFlowMap[f.rid];
@@ -2013,18 +2061,15 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
       <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
         {[{id:"daily",l:"Daily"},{id:"weekly",l:"Weekly"}].map(m=><button key={m.id} onClick={()=>setMode(m.id)} style={seg(mode===m.id)}>{m.l}</button>)}
       </div>
+      <CalendarPicker value={selDate} onChange={setSelDate} dates={DASHBOARD_DATES}/>
       {mode==="daily"
-        ?<><select value={selDate} onChange={e=>setSelDate(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"4px 8px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none"}}>
-          {DASHBOARD_DATES.map(d=><option key={d} value={d}>{d} ({dow(d)})</option>)}
-        </select><WeatherBadge weather={weatherData?.[selDate]}/></>
-        :<select value={selWeek} onChange={e=>setSelWeek(e.target.value)} style={{background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:5,padding:"4px 8px",fontSize:11,fontFamily:"monospace",cursor:"pointer",outline:"none"}}>
-          {WEEK_RANGES.map(w=><option key={w.id} value={w.id}>{w.label}</option>)}
-        </select>}
+        ?<WeatherBadge weather={weatherData?.[selDate]}/>
+        :<span style={{fontSize:10.5,color:"#6B7280",fontFamily:"monospace"}}>週: {weekLabel}</span>}
       <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
         {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 16:00–19:30"}].map(s=><button key={s.id} onClick={()=>setSlot(s.id)} style={seg(slot===s.id)}>{s.l}</button>)}
       </div>
-      <button onClick={()=>runAnalysis(false)} disabled={loading} style={{padding:"11px 22px",borderRadius:9999,border:"none",background:loading?"#f5f5f7":"#0066cc",color:loading?"#7a7a7a":"#fff",cursor:loading?"wait":"pointer",fontSize:17,fontWeight:400,letterSpacing:"-0.374px",display:"flex",alignItems:"center",gap:6}}>
-        {loading?<><div style={{width:13,height:13,border:"2px solid #e0e0e0",borderTopColor:"#7a7a7a",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/> 分析中…</>:<>{cachedAt?"キャッシュ表示":"分析する"}</>}
+      <button onClick={()=>runAnalysis(false)} disabled={loading||dataLoading} style={{padding:"11px 22px",borderRadius:9999,border:"none",background:(loading||dataLoading)?"#f5f5f7":"#0066cc",color:(loading||dataLoading)?"#7a7a7a":"#fff",cursor:loading?"wait":dataLoading?"default":"pointer",fontSize:17,fontWeight:400,letterSpacing:"-0.374px",display:"flex",alignItems:"center",gap:6}}>
+        {loading?<><div style={{width:13,height:13,border:"2px solid #e0e0e0",borderTopColor:"#7a7a7a",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/> 分析中…</>:dataLoading?"データ読み込み中…":<>{cachedAt?"キャッシュ表示":"分析する"}</>}
       </button>
       {cachedAt&&!loading&&<button onClick={()=>runAnalysis(true)} style={{padding:"5px 12px",borderRadius:7,border:"1px solid #E5E7EB",background:"#F9FAFB",color:"#6B7280",cursor:"pointer",fontSize:11,fontWeight:600}}>🔄 再分析</button>}
       {cachedAt&&!loading&&<span style={{fontSize:10,color:"#9CA3AF"}}>保存済 {cachedAt}</span>}
@@ -2111,12 +2156,14 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
 
       {/* Step 1: 入力 */}
       {topicStep===1&&<div>
-        <div style={{fontSize:12,color:"#6B7280",marginBottom:8}}>トピックを入力すると、全期間の関連コーナーを検索します。</div>
+        <div style={{fontSize:12,color:"#6B7280",marginBottom:8}}>トピックを入力すると、実分析結果がある全期間から関連コーナーを検索します（朝帯・夕方帯のみ対象）。</div>
         <div style={{display:"flex",gap:8}}>
           <input value={topicQuery} onChange={e=>setTopicQuery(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")searchTopicCandidates();}}
             placeholder="例: 大谷翔平、中東情勢、グルメ、名古屋城…"
             style={{flex:1,padding:"9px 14px",border:"1px solid #E5E7EB",borderRadius:8,fontSize:13,outline:"none"}}/>
-          <button onClick={searchTopicCandidates} style={{padding:"0 20px",borderRadius:9999,border:"none",background:"#0066cc",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:600}}>検索</button>
+          <button onClick={searchTopicCandidates} disabled={topicLoading} style={{padding:"0 20px",borderRadius:9999,border:"none",background:"#0066cc",color:"#fff",cursor:topicLoading?"wait":"pointer",fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:6}}>
+            {topicLoading?<><div style={{width:12,height:12,border:"2px solid rgba(255,255,255,0.4)",borderTopColor:"#fff",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>検索中…</>:"検索"}
+          </button>
         </div>
       </div>}
 
@@ -2200,7 +2247,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
             <div>
               <div style={{fontSize:11,color:"#9CA3AF",fontFamily:"monospace"}}>「{topicQuery}」— {topicResult.totalCount}コーナーを分析</div>
-              <div style={{fontSize:10,color:"#9CA3AF",marginTop:2}}>対象: 全期間（4/1〜4/14平日）× 朝帯・夕方帯 ／ 指標: <b style={{color:"#0066cc"}}>占拠率</b></div>
+              <div style={{fontSize:10,color:"#9CA3AF",marginTop:2}}>対象: 実分析結果がある全期間 × 朝帯・夕方帯 ／ 指標: <b style={{color:"#0066cc"}}>占拠率</b></div>
             </div>
             <button onClick={()=>{setTopicStep(2);setTopicResult(null);}} style={{padding:"4px 10px",borderRadius:6,border:"1px solid #E5E7EB",background:"#F9FAFB",fontSize:10.5,cursor:"pointer",color:"#374151"}}>← 選択に戻る</button>
           </div>
@@ -2674,7 +2721,6 @@ export default function App(){
   // Analysis persistent state (kept across page switches)
   const[aMode,setAMode]=useState("daily");
   const[aDate,setADate]=useState(GUIDE_DATE_MAX);
-  const[aWeek,setAWeek]=useState(WEEK_RANGES[0].id);
   const[aSlot,setASlot]=useState("morning");
   const[aTab,setATab]=useState("overview");
   const[aOverview,setAOverview]=useState("");
@@ -2728,30 +2774,7 @@ export default function App(){
   // 実番組(epg-all)×実分析コーナー(daily_corners)を、選択中のslot窓(朝5:30-8:30/夕方16:00-19:30)で
   // 突き合わせてtpl形式({[stId]:[[progName,startHHMM,endHHMM,corners[]],...]})に組み立てる。
   // 分析結果が無い番組はそもそも配列に含めない(=表示されない。分析が無ければ何も出さない仕様)
-  const dashTpl=useMemo(()=>{
-    const result={};ST.forEach(s=>result[s.id]=[]);
-    const programs=dashEpgCache[date],corners=dashCornerCache[date];
-    if(!programs||!corners)return result;
-    const dayMid=localMidnightAbsMin(date);
-    const slotStartAbs=dayMid+(slot==="morning"?330:960),slotEndAbs=dayMid+(slot==="morning"?510:1170);
-    const cornersByStation={};
-    corners.forEach(c=>{if(!c.date||!c.startMin)return;(cornersByStation[c.stId]=cornersByStation[c.stId]||[]).push(c);});
-    const fmtT=d=>`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
-    programs.forEach(p=>{
-      if(!result[p.stId])return; // NHKE等、実分析対象外の局はそもそもcornersByStationに無い
-      if(p.endAbs<=slotStartAbs||p.startAbs>=slotEndAbs)return;
-      const stCorners=(cornersByStation[p.stId]||[]).filter(c=>{
-        const cStartAbs=localMidnightAbsMin(c.date)+t2m(c.startMin);
-        const cEndAbs=Math.max(cStartAbs+1,localMidnightAbsMin(c.date)+t2m(c.endMin||c.startMin));
-        return cStartAbs<p.endAbs&&cEndAbs>p.startAbs;
-      }).sort((a,b)=>t2m(a.startMin)-t2m(b.startMin))
-        .map(c=>[c.title,c.startMin,c.endMin,(c.segment&&SEG[c.segment])?c.segment:classifySegment(c.title,c.tags),c.tags,c.summary]);
-      if(stCorners.length===0)return; // 分析結果が無い番組は表示しない
-      result[p.stId].push([p.title,fmtT(new Date(p.startAbs*60000)),fmtT(new Date(p.endAbs*60000)),stCorners]);
-    });
-    Object.keys(result).forEach(sid=>result[sid].sort((a,b)=>t2m(a[1])-t2m(b[1])));
-    return result;
-  },[dashEpgCache,dashCornerCache,date,slot]);
+  const dashTpl=useMemo(()=>buildDayTpl(dashEpgCache[date],dashCornerCache[date],date,slot),[dashEpgCache,dashCornerCache,date,slot]);
   const dashDataLoading=dashEpgCache[date]==null||dashCornerCache[date]==null;
   const zoomHalf=ZOOM_HALF[zoomLevel];
   const progCenter=programContext?.center??null;
@@ -2865,7 +2888,7 @@ export default function App(){
       <NavBar/>
       <AnalysisPage page={page} setPage={setPage} metric={metric} setMetric={setMetric} ratingsCache={ratingsCache} weatherData={weatherData}
         mode={aMode} setMode={setAMode} selDate={aDate} setSelDate={setADate}
-        selWeek={aWeek} setSelWeek={setAWeek} slot={aSlot} setSlot={setASlot}
+        slot={aSlot} setSlot={setASlot}
         tab={aTab} setTab={setATab} overviewText={aOverview} setOverviewText={setAOverview}
         highlightText={aHighlight} setHighlightText={setAHighlight}
         conclusionText={aConclusion} setConclusionText={setAConclusion}
