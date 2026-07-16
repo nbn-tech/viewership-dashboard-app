@@ -47,7 +47,7 @@ ATHENA_OUTPUT_LOCATION = os.environ.get(
 POLL_INTERVAL_SECONDS = 1
 MAX_POLL_ATTEMPTS = 30
 DEFAULT_LIMIT = 200
-MAX_LIMIT = 1000
+MAX_LIMIT = 5000
 
 # channel列 (例: "ch6") → 局コード（録画対象の6chのみ。NHKE は録画対象外）
 CH_TO_STATION = {

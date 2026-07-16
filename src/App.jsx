@@ -1113,7 +1113,7 @@ const apiClient = {
 
   // 指定日の実分析コーナーを全局ぶん全件取得（キーワードなし。Dashboardの実データ表示用）
   async annotationListByDate(date) {
-    return _annotationListRequest({ dateFrom: date, dateTo: date });
+    return _annotationListRequest({ dateFrom: date, dateTo: date, limit: 5000 });
   },
 
   // AI意味検索（実データ）：キーワード抽出→複数キーワードでAthena OR検索
