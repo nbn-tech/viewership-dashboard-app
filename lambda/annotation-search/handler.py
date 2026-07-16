@@ -123,7 +123,8 @@ SELECT
     end_sec,
     title,
     summary,
-    tags
+    tags,
+    segment
 FROM {ATHENA_TABLE}
 WHERE channel IN ({channels_sql})
 {date_conditions}{terms_condition}ORDER BY broadcast_date, channel, filename, start_sec
@@ -214,9 +215,9 @@ def _derive_schedule_fields(broadcast_date: str, channel: str,
 
 
 def _row_to_result(row):
-    padded = (row + [""] * 9)[:9]
+    padded = (row + [""] * 10)[:10]
     (channel, broadcast_date, filename, program_start_sec_str,
-     start_sec_str, end_sec_str, title, summary, tags) = padded
+     start_sec_str, end_sec_str, title, summary, tags, segment) = padded
     program_start_sec = _to_int(program_start_sec_str)
     start_sec = _to_float(start_sec_str)
     end_sec = _to_float(end_sec_str, default=start_sec)
@@ -228,6 +229,8 @@ def _row_to_result(row):
         "title": title,
         "summary": summary,
         "tags": tags,
+        # 古いデータ(segment列が無い分析結果)はNULL→空文字列になる。フロント側でclassifySegmentへのフォールバックに使う
+        "segment": segment or None,
     }
     schedule = _derive_schedule_fields(broadcast_date, channel, program_start_sec, start_sec, end_sec)
     if schedule:

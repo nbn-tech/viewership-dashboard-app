@@ -2748,7 +2748,7 @@ export default function App(){
         const cEndAbs=Math.max(cStartAbs+1,localMidnightAbsMin(c.date)+t2m(c.endMin||c.startMin));
         return cStartAbs<p.endAbs&&cEndAbs>p.startAbs;
       }).sort((a,b)=>t2m(a.startMin)-t2m(b.startMin))
-        .map(c=>[c.title,c.startMin,c.endMin,classifySegment(c.title,c.tags),c.tags,c.summary]);
+        .map(c=>[c.title,c.startMin,c.endMin,(c.segment&&SEG[c.segment])?c.segment:classifySegment(c.title,c.tags),c.tags,c.summary]);
       if(stCorners.length===0)return; // 分析結果が無い番組は表示しない
       result[p.stId].push([p.title,fmtT(new Date(p.startAbs*60000)),fmtT(new Date(p.endAbs*60000)),stCorners]);
     });
