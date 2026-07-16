@@ -27,6 +27,26 @@ const SEG = {
 };
 const SEG_ORDER = ["news","weather","sports","feature","ent","live","opening","ending","cm","sponsor","other"];
 
+// 実分析結果(タイトル・タグ)からセグメント種別をキーワードルールで推定する(AI不使用)。
+// タグの優先順位は「同時に複数該当しうる時、より具体的なものを優先」の順で並べている
+const SEGMENT_RULES = [
+  ["cm",      t=>t.title==="CM"||t.tags.includes("CM")],
+  ["sponsor", t=>t.tags.includes("提供")],
+  ["opening", t=>t.tags.includes("オープニング")],
+  ["ending",  t=>t.tags.includes("エンディング")],
+  ["weather", t=>t.tags.some(x=>x.includes("天気"))],
+  ["news",    t=>t.tags.includes("ニュース")],
+  ["sports",  t=>t.tags.includes("スポーツ")],
+  ["live",    t=>t.tags.includes("中継")],
+  ["feature", t=>t.tags.includes("特集")],
+  ["ent",     t=>["エンタメ","バラエティ","芸能","ドラマ","アニメ","音楽","映画"].some(k=>t.tags.includes(k))],
+];
+function classifySegment(title,tags){
+  const ctx={title,tags};
+  for(const[seg,test] of SEGMENT_RULES)if(test(ctx))return seg;
+  return "other";
+}
+
 const t2m = t => { const [h,m] = t.split(":").map(Number); return h*60+m; };
 const m2t = m => `${String(Math.floor(m/60)).padStart(2,"0")}:${String(m%60).padStart(2,"0")}`;
 // 日付文字列(YYYY-MM-DD)をローカル暦日基準でdelta日ぶんずらす(UTC変換を経由しないタイムゾーン安全な実装)
@@ -2724,7 +2744,7 @@ export default function App(){
         const cEndAbs=Math.max(cStartAbs+1,localMidnightAbsMin(c.date)+t2m(c.endMin||c.startMin));
         return cStartAbs<p.endAbs&&cEndAbs>p.startAbs;
       }).sort((a,b)=>t2m(a.startMin)-t2m(b.startMin))
-        .map(c=>[c.title,c.startMin,c.endMin,"other",c.tags,c.summary]);
+        .map(c=>[c.title,c.startMin,c.endMin,classifySegment(c.title,c.tags),c.tags,c.summary]);
       if(stCorners.length===0)return; // 分析結果が無い番組は表示しない
       result[p.stId].push([p.title,fmtT(new Date(p.startAbs*60000)),fmtT(new Date(p.endAbs*60000)),stCorners]);
     });
