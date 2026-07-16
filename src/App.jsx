@@ -976,9 +976,6 @@ function TimetableView({slot,sel,allR,allS,metric,date,tpl,loading,onCornerClick
 // Search / Analysis で使う実データ対象日（視聴率の実データがある日）
 const ALL_DATES=(()=>{const d=[];for(let i=1;i<=14;i++){d.push(`2026-04-${String(i).padStart(2,"0")}`);}d.push("2026-04-17");return d;})();
 const ALL_SLOTS=["morning","evening"];
-// 実データ検索（Athena）対象期間
-const REAL_DATES=(()=>{const d=[];for(let i=1;i<=14;i++){d.push(`2026-07-${String(i).padStart(2,"0")}`);}return d;})();
-
 // 番組表・Dashboard 共通の日付範囲定数
 const GUIDE_DATE_MIN="2025-06-25";
 const GUIDE_DATE_MAX=(()=>{
@@ -1583,8 +1580,8 @@ function SearchPage({page,setPage,
     setError(null);setLoading(true);setSearchMode(mode);
     try{
       let df=dateFrom,dt=dateTo;
-      if(df<REAL_DATES[0]||df>REAL_DATES[REAL_DATES.length-1]){df=REAL_DATES[0];setDateFrom(df);}
-      if(dt<REAL_DATES[0]||dt>REAL_DATES[REAL_DATES.length-1]){dt=REAL_DATES[REAL_DATES.length-1];setDateTo(dt);}
+      if(df<GUIDE_DATE_MIN||df>GUIDE_DATE_MAX){df=GUIDE_DATE_MIN;setDateFrom(df);}
+      if(dt<GUIDE_DATE_MIN||dt>GUIDE_DATE_MAX){dt=GUIDE_DATE_MAX;setDateTo(dt);}
       const results=mode==="semantic"
         ?await apiClient.annotationSemanticSearch(query,df,dt)
         :await apiClient.annotationSearch(query,df,dt);
@@ -1610,9 +1607,9 @@ function SearchPage({page,setPage,
     <div style={{padding:"10px 18px",background:"#fff",borderBottom:"1px solid #F3F4F6",display:"flex",flexWrap:"wrap",gap:14,alignItems:"center"}}>
       <div style={{display:"flex",alignItems:"center",gap:5}}>
         <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace",fontWeight:600}}>期間</span>
-        <CalendarPicker value={dateFrom} onChange={setDateFrom} dates={REAL_DATES}/>
+        <CalendarPicker value={dateFrom} onChange={setDateFrom} dates={DASHBOARD_DATES}/>
         <span style={{color:"#9CA3AF",fontSize:11}}>〜</span>
-        <CalendarPicker value={dateTo} onChange={setDateTo} dates={REAL_DATES}/>
+        <CalendarPicker value={dateTo} onChange={setDateTo} dates={DASHBOARD_DATES}/>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
         <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace",fontWeight:600}}>局</span>
@@ -1626,7 +1623,7 @@ function SearchPage({page,setPage,
         <div style={{width:18,height:18,border:"2px solid #E5E7EB",borderTopColor:"#0891B2",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
         {searchMode==="semantic"?"AIが意味検索中…":"検索中…"}
       </div>}
-      {!loading&&displayResults===null&&<div style={{padding:60,textAlign:"center",color:"#9CA3AF",fontSize:12.5,lineHeight:1.8}}>検索ワードを入力して、「部分一致」または「AI意味検索」を実行してください<br/><span style={{fontSize:10.5}}>対象: アノテーション済みの実際の放送内容（2026/7/1〜7/14）</span></div>}
+      {!loading&&displayResults===null&&<div style={{padding:60,textAlign:"center",color:"#9CA3AF",fontSize:12.5,lineHeight:1.8}}>検索ワードを入力して、「部分一致」または「AI意味検索」を実行してください<br/><span style={{fontSize:10.5}}>対象: アノテーション済みの実際の放送内容（分析結果がある日のみ検索対象）</span></div>}
       {!loading&&displayResults!==null&&displayResults.length===0&&<div style={{padding:60,textAlign:"center",color:"#9CA3AF",fontSize:13}}>該当するコーナーが見つかりませんでした</div>}
       {!loading&&displayResults&&displayResults.length>0&&<>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -2672,8 +2669,8 @@ export default function App(){
   const[sMode,setSMode]=useState(null);
   const[sAthenaResults,setSAthenaResults]=useState(null);
   const[sStations,setSStations]=useState(ST.map(s=>s.id));
-  const[sDateFrom,setSDateFrom]=useState(REAL_DATES[0]);
-  const[sDateTo,setSDateTo]=useState(REAL_DATES[REAL_DATES.length-1]);
+  const[sDateFrom,setSDateFrom]=useState(shiftDateStr(GUIDE_DATE_MAX,-7));
+  const[sDateTo,setSDateTo]=useState(GUIDE_DATE_MAX);
   // Analysis persistent state (kept across page switches)
   const[aMode,setAMode]=useState("daily");
   const[aDate,setADate]=useState(GUIDE_DATE_MAX);
