@@ -1346,7 +1346,7 @@ function ModalChart({rData,sData,mainStId,mainStColor,sM,eM,activeRivals,rivals}
   </svg>;
 }
 
-function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,weatherData,dashboardUrl,guideMode}){
+function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,weatherData,dashboardUrl,guideMode,fullDayRatings}){
   const[activeRivals,setActiveRivals]=useState(new Set());
   const st=ST.find(s=>s.id===corner.stId);
   // navList が渡されていれば検索結果順ナビ、なければ同局同日の時間順ナビ
@@ -1365,7 +1365,8 @@ function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,
   const navBtn=(c,label)=><button onClick={()=>c&&onNavigate&&onNavigate(c)} disabled={!c} style={{background:c?"#F3F4F6":"#FAFAFA",border:"1px solid #E5E7EB",borderRadius:6,width:28,height:28,cursor:c?"pointer":"default",fontSize:13,color:c?"#374151":"#D1D5DB",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{label}</button>;
   const sg=SEG[corner.segment]||SEG.other;
   const sM=t2m(corner.startMin),eM=t2m(corner.endMin);
-  const rData=cache[`${corner.date}|${corner.slot}`]||getRatings(corner.date,corner.slot);
+  // 番組表(guideMode)は朝・夕方に限らない終日データを使う。Dashboard等は従来通り朝/夕方の2枠キャッシュを使う
+  const rData=guideMode?(fullDayRatings||[]):(cache[`${corner.date}|${corner.slot}`]||getRatings(corner.date,corner.slot));
   const sData=useMemo(()=>rData.map(e=>{const t=ST.reduce((s,st2)=>s+(e[st2.id]||0),0);const o={time:e.time,minute:e.minute};ST.forEach(s=>{o[s.id]=t>0?(e[s.id]/t)*100:0;});return o;}),[rData]);
   const sliceR=rData.filter(d=>d.minute>=sM&&d.minute<=eM);
   const sliceS=sData.filter(d=>d.minute>=sM&&d.minute<=eM);
@@ -1423,7 +1424,7 @@ function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,
           <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:4}}>
             <span style={{background:st.c,color:"#fff",fontSize:10,fontWeight:800,padding:"2px 7px",borderRadius:4,fontFamily:"monospace"}}>{corner.stId}</span>
             <span style={{background:sg.c,color:"#fff",fontSize:9,fontWeight:700,padding:"1.5px 6px",borderRadius:3}}>{sg.lb}</span>
-            <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace"}}>{corner.date} ({dow}) {corner.startMin}–{corner.endMin} {corner.slot==="morning"?"朝":"夕方"}</span>
+            <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace"}}>{corner.date} ({dow}) {corner.startMin}–{corner.endMin}{!guideMode&&` ${corner.slot==="morning"?"朝":"夕方"}`}</span>
             {weatherData?.[corner.date]&&<span style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:10,color:"#0369A1",fontFamily:"monospace",background:"#F0F9FF",border:"1px solid #BAE6FD",borderRadius:4,padding:"0px 6px"}}><span style={{fontSize:12}}>{weatherData[corner.date].label}</span>{weatherData[corner.date].max.toFixed(1)}℃ | {weatherData[corner.date].min.toFixed(1)}℃</span>}
           </div>
           <div style={{fontSize:9,color:"#9CA3AF",marginBottom:1}}>📺 {corner.progName}</div>
@@ -2629,9 +2630,10 @@ function ProgramGuidePage({metric="rating"}){
     const dayStartAbs=localMidnightAbsMin(date);
     const aS=p.startAbs-dayStartAbs,aE=p.endAbs-dayStartAbs;
     const mid=(aS+aE)/2;
+    // Dashboardへのディープリンク用(朝/夕方トグルしか無いため便宜上の分類。表示時刻のクランプには使わない)
     const slot=mid>=930&&mid<1140?'evening':'morning';
     const params=new URLSearchParams({mode:'program',station:stId,date,start:aS,end:aE,name:encodeURIComponent(p.title),slot});
-    return{stId,date,slot,startMin:m2t(aS),endMin:m2t(Math.min(aE,slot==='morning'?509:1139)),title:p.title,progName:p.title,segment:"other",tags:[],summary:"",_dashUrl:`${window.location.origin}${window.location.pathname}?${params}`};
+    return{stId,date,slot,startMin:m2t(aS),endMin:m2t(aE),title:p.title,progName:p.title,segment:"other",tags:[],summary:"",_dashUrl:`${window.location.origin}${window.location.pathname}?${params}`};
   };
 
   const openGuideModal=(p,stId)=>{
@@ -2677,7 +2679,7 @@ function ProgramGuidePage({metric="rating"}){
       <div style={{fontWeight:600,marginBottom:tooltip.avg!==null?4:0,wordBreak:"break-all",letterSpacing:"-0.224px"}}>{tooltip.title}</div>
       {tooltip.avg!==null&&<div style={{fontFamily:"monospace",color:(ST.find(s=>s.id===tooltip.stId)||{c:"#0066cc"}).c,fontWeight:700,fontSize:13}}>平均 {tooltip.avg.toFixed(1)}%</div>}
     </div>}
-    {guideModal&&<CornerModal corner={guideModal.corner} cache={rCache} onClose={()=>setGuideModal(null)} navList={guideModal.navList} navIdx={guideModal.idx} onNavigate={c=>{const idx=guideModal.navList.findIndex(item=>item.date===c.date&&item.title===c.title&&item.startMin===c.startMin);setGuideModal({...guideModal,corner:c,idx});}} dashboardUrl={guideModal.corner._dashUrl} guideMode={true}/>}
+    {guideModal&&<CornerModal corner={guideModal.corner} cache={rCache} fullDayRatings={ratingCache[guideModal.corner.date]} onClose={()=>setGuideModal(null)} navList={guideModal.navList} navIdx={guideModal.idx} onNavigate={c=>{const idx=guideModal.navList.findIndex(item=>item.date===c.date&&item.title===c.title&&item.startMin===c.startMin);setGuideModal({...guideModal,corner:c,idx});}} dashboardUrl={guideModal.corner._dashUrl} guideMode={true}/>}
     {!hasAnyData&&loading&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>読み込み中...</div>}
     {!hasAnyData&&!loading&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>日付を選択してください</div>}
     {hasAnyData&&<div ref={scrollElRef} onScroll={handleScroll} style={{flex:1,overflow:"auto"}}>
