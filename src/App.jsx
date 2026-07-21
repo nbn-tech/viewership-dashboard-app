@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from "react";
+import * as XLSX from "xlsx";
 import REAL_RATINGS_IMPORT from './data/ratings_data.json';
 import PROFILES_IMPORT from './data/profiles.json';
 
@@ -728,7 +729,62 @@ function genRatings(date,slot){
   for(let i=1;i<data.length-1;i++)stIds.forEach(sid=>{
     data[i][sid]=(data[i-1][sid]+data[i][sid]*2+data[i+1][sid])/4;
   });
+  data._demo=true; // 実データが後からS3で見つかった時にrCacheを上書きするための目印
   return data;
+}
+
+// S3の視聴率エクセル(rating/{yyyymmdd}_consolidated.xlsx)を実行時に取得し、
+// ビルド時にratings_data.jsonへ埋め込んだ日付以降に新しく上がったファイルを自動的に反映する
+const RATING_HEADER_STATION={NBN:"NBN",THK:"THK",CTV:"CTV",CBC:"CBC",NHK:"NHK",NHKE:"ETV",TVA:"TVA"};
+async function fetchAndParseRatingXlsx(date){
+  const yyyymmdd=date.replace(/-/g,'');
+  const res=await fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/rating/${yyyymmdd}_consolidated.xlsx`);
+  if(!res.ok)throw new Error(`HTTP ${res.status}`);
+  const buf=await res.arrayBuffer();
+  const wb=XLSX.read(buf,{type:"array"});
+  const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:null});
+  const header=rows[0];
+  const colIdx={};
+  REAL_RATINGS_COLS.forEach(sid=>{colIdx[sid]=header.indexOf(`${RATING_HEADER_STATION[sid]}_ALL`);});
+  if(Object.values(colIdx).some(i=>i===-1))throw new Error("ALL列が見つかりません");
+  const[h0,m0]=rows[1][0].split(':').map(Number);
+  const startMin=h0*60+m0; // 通常は300(05:00)始まり
+  const buildSlot=(sm,em)=>{
+    const out=[];
+    for(let min=sm;min<=em;min++){
+      const rowIdx=1+(min-startMin);
+      const row=rows[rowIdx];
+      if(!row)return null;
+      out.push(REAL_RATINGS_COLS.map(sid=>{
+        const v=row[colIdx[sid]];
+        return typeof v==="number"?Math.round(v*10)/10:0;
+      }));
+    }
+    return out;
+  };
+  return{morning:buildSlot(330,509),evening:buildSlot(960,1169)};
+}
+
+// S3バケットはrating/配下のListBucket(一覧取得)を許可していない(403)ため、
+// ビルド時データの最新日以降を直接GETで日付ごとに探りを入れる(存在しない日は404/403で単にスキップ)。
+// 戻り値: 新たに反映した日付一覧(0件ならUIの再描画は不要)
+async function syncNewRatingsFromS3(){
+  const knownDates=Object.keys(REAL_RATINGS).map(k=>k.split('|')[0]).sort();
+  const lastKnown=knownDates.length?knownDates[knownDates.length-1]:shiftDateStr(GUIDE_DATE_MAX,-30);
+  // 先の日付に前もってアップロードされているケースがあるため、今日より少し先まで探る
+  const probeEnd=shiftDateStr(GUIDE_DATE_MAX,14);
+  const candidates=[];
+  for(let d=shiftDateStr(lastKnown,1);d<=probeEnd;d=shiftDateStr(d,1))candidates.push(d);
+  const updated=[];
+  await Promise.all(candidates.map(async date=>{
+    try{
+      const slots=await fetchAndParseRatingXlsx(date);
+      if(slots.morning)REAL_RATINGS[`${date}|morning`]=slots.morning;
+      if(slots.evening)REAL_RATINGS[`${date}|evening`]=slots.evening;
+      if(slots.morning||slots.evening)updated.push(date);
+    }catch{/* まだファイルが無い日はスキップ */}
+  }));
+  return updated;
 }
 
 // 実データ2日分の平均プロファイル: 各分の [NBN,THK,CTV,CBC,NHK,NHKE,TVA]
@@ -1012,11 +1068,11 @@ function weekDatesContaining(dateStr){
 }
 
 // 視聴率遅延キャッシュ
-// TODO: AWS移行時は genRatings → S3/DynamoDB APIへの差し替えポイント
 const rCache={};
 function getRatings(date,slot){
   const key=`${date}|${slot}`;
-  if(!rCache[key])rCache[key]=genRatings(date,slot);
+  // 実データがREAL_RATINGSに後から追加された場合(S3同期)、デモ生成でキャッシュ済みの値を実データで上書きする
+  if(!rCache[key]||(rCache[key]._demo&&REAL_RATINGS[key]))rCache[key]=genRatings(date,slot);
   return rCache[key];
 }
 // ALL_DATES分を初期ロード（Search/Analysisで使用）
@@ -2769,7 +2825,13 @@ export default function App(){
       })
       .catch(()=>{});
   },[]);
-  const rData=useMemo(()=>getRatings(date,slot),[date,slot]);
+  // S3に新しい視聴率エクセル(rating/*_consolidated.xlsx)が上がっていないか起動時に確認し、
+  // ビルド時データに無い日付があれば取り込む(リビルド不要で反映される)
+  const[ratingsVersion,setRatingsVersion]=useState(0);
+  useEffect(()=>{
+    syncNewRatingsFromS3().then(updated=>{if(updated.length)setRatingsVersion(v=>v+1);}).catch(()=>{});
+  },[]);
+  const rData=useMemo(()=>getRatings(date,slot),[date,slot,ratingsVersion]);
   const sData=useMemo(()=>rData.map(e=>{const t=ST.reduce((s,st)=>s+(e[st.id]||0),0);const o={time:e.time,minute:e.minute};ST.forEach(s=>{o[s.id]=t>0?(e[s.id]/t)*100:0;});return o;}),[rData]);
   const dData=metric==="share"?sData:rData;
 
