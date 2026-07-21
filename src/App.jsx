@@ -685,7 +685,7 @@ const REAL_RATINGS_COLS = ["NBN","THK","CTV","CBC","NHK","NHKE","TVA"];
 const REAL_RATINGS = REAL_RATINGS_IMPORT;
 
 function genRatings(date,slot){
-  const sm=slot==="morning"?330:960, em=slot==="morning"?509:1169;
+  const sm=slot==="morning"?330:930, em=slot==="morning"?509:1139;
   const realKey=`${date}|${slot}`;
   // ----- 実データがあればそれを使用 -----
   if(REAL_RATINGS[realKey]){
@@ -762,7 +762,7 @@ async function fetchAndParseRatingXlsx(date){
     }
     return out;
   };
-  return{morning:buildSlot(330,509),evening:buildSlot(960,1169)};
+  return{morning:buildSlot(330,509),evening:buildSlot(930,1139)};
 }
 
 // S3バケットはrating/配下のListBucket(一覧取得)を許可していない(403)ため、
@@ -818,14 +818,14 @@ function tplProgAt(tpl,stId,min){
   return{prog:null,corner:null};
 }
 
-// 実番組(epg-all)×実分析コーナー(daily_corners)を、指定slot窓(朝5:30-8:30/夕方16:00-19:30)で
+// 実番組(epg-all)×実分析コーナー(daily_corners)を、指定slot窓(朝5:30-8:30/夕方15:30-19:00)で
 // 突き合わせてtpl形式({[stId]:[[progName,startHHMM,endHHMM,corners[]],...]})に組み立てる。
 // 分析結果が無い番組はそもそも配列に含めない(=表示されない。分析が無ければ何も出さない仕様)
 function buildDayTpl(programs,corners,date,slot){
   const result={};ST.forEach(s=>result[s.id]=[]);
   if(!programs||!corners)return result;
   const dayMid=localMidnightAbsMin(date);
-  const slotStartAbs=dayMid+(slot==="morning"?330:960),slotEndAbs=dayMid+(slot==="morning"?510:1170);
+  const slotStartAbs=dayMid+(slot==="morning"?330:930),slotEndAbs=dayMid+(slot==="morning"?510:1140);
   const cornersByStation={};
   corners.forEach(c=>{if(!c.date||!c.startMin)return;(cornersByStation[c.stId]=cornersByStation[c.stId]||[]).push(c);});
   const fmtT=d=>`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
@@ -931,7 +931,7 @@ function SegmentLegend(){
 
 function SegmentBands({slot,sel,selMin,onClickMinute,tpl,customStart,customEnd}){
   const[hoverC,setHoverC]=useState(null);
-  const startMin=customStart!==undefined?customStart:(slot==="morning"?330:960), endMin=customEnd!==undefined?customEnd:(slot==="morning"?510:1170);
+  const startMin=customStart!==undefined?customStart:(slot==="morning"?330:930), endMin=customEnd!==undefined?customEnd:(slot==="morning"?510:1140);
   const total=endMin-startMin;
   const nowLeft=selMin!=null?((selMin-startMin)/total)*100:-1;
   const containerRef=useRef(null);
@@ -960,7 +960,7 @@ function SegmentBands({slot,sel,selMin,onClickMinute,tpl,customStart,customEnd})
 }
 
 function TimetableView({slot,sel,allR,allS,metric,date,tpl,loading,onCornerClick}){
-  const startMin=slot==="morning"?330:960, endMin=slot==="morning"?510:1170;
+  const startMin=slot==="morning"?330:930, endMin=slot==="morning"?510:1140;
   const fmt=v=>v!=null?(v.toFixed(1))+"%":"—";
   const getVal=(src,sid,min)=>{const e=src?.find(d=>d.minute===min);return e?e[sid]:null;};
   const colWidth=220;
@@ -1717,11 +1717,11 @@ function AnnotationResultModal({result,progName,onClose}){
   const videoUrl=(chMatch&&yyyymmdd)
     ?`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/movie/ch${chMatch[1]}/${yyyymmdd}/${result.object_key}`
     :null;
-  // 視聴率IN/OUT/DIFF (視聴率オーバーレイがあるのは朝帯5:30-8:30・夕方帯16:00-19:30のみ)
+  // 視聴率IN/OUT/DIFF (視聴率オーバーレイがあるのは朝帯5:30-8:30・夕方帯15:30-19:00のみ)
   const stats=useMemo(()=>{
     if(!result.date||!result.startMin||!result.endMin||!result.stId)return null;
     const m=t2m(result.startMin);
-    const slot=(m>=330&&m<510)?"morning":(m>=960&&m<1170)?"evening":null;
+    const slot=(m>=330&&m<510)?"morning":(m>=930&&m<1140)?"evening":null;
     if(!slot)return null;
     return computeCornerStats({date:result.date,slot,startMin:result.startMin,endMin:result.endMin,stId:result.stId},rCache,"rating");
   },[result]);
@@ -1961,7 +1961,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
     setOverviewText("");setHighlightText("");setConclusionText("");setCachedAt(null);
     setAnalysisLabel(label);
     const ctx=buildAnalysisContext(activeDates,slot,ratingsCache,tplByDate);
-    const slotLabel=slot==="morning"?"朝帯（6:00-8:00）":"夕方帯（16:40-19:00）";
+    const slotLabel=slot==="morning"?"朝帯（5:30-8:30）":"夕方帯（15:30-19:00）";
     const periodLabel=mode==="daily"?`${activeDates[0]} ${slotLabel}`:`${label}`;
 
     try{
@@ -2002,11 +2002,11 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
     setTopicLoading(true);setError(null);
     try{
       const results=await apiClient.annotationSearch(topicQuery,GUIDE_DATE_MIN,GUIDE_DATE_MAX);
-      // 視聴率オーバーレイがあるのは朝帯(5:30-8:30)・夕方帯(16:00-19:30)のみなのでそれ以外は除外
+      // 視聴率オーバーレイがあるのは朝帯(5:30-8:30)・夕方帯(15:30-19:00)のみなのでそれ以外は除外
       const inSlot=r=>{
         if(!r.startMin)return false;
         const m=t2m(r.startMin);
-        return(m>=330&&m<510)||(m>=960&&m<1170);
+        return(m>=330&&m<510)||(m>=930&&m<1140);
       };
       const filtered=results.filter(r=>r.date&&inSlot(r)&&r.segment!=="cm"&&r.segment!=="sponsor");
       const dates=[...new Set(filtered.map(r=>r.date))];
@@ -2145,7 +2145,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
         ?<WeatherBadge weather={weatherData?.[selDate]}/>
         :<span style={{fontSize:10.5,color:"#6B7280",fontFamily:"monospace"}}>週: {weekLabel}</span>}
       <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
-        {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 16:00–19:30"}].map(s=><button key={s.id} onClick={()=>setSlot(s.id)} style={seg(slot===s.id)}>{s.l}</button>)}
+        {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 15:30–19:00"}].map(s=><button key={s.id} onClick={()=>setSlot(s.id)} style={seg(slot===s.id)}>{s.l}</button>)}
       </div>
       <button onClick={()=>runAnalysis(false)} disabled={loading||dataLoading} style={{padding:"11px 22px",borderRadius:9999,border:"none",background:(loading||dataLoading)?"#f5f5f7":"#0066cc",color:(loading||dataLoading)?"#7a7a7a":"#fff",cursor:loading?"wait":dataLoading?"default":"pointer",fontSize:17,fontWeight:400,letterSpacing:"-0.374px",display:"flex",alignItems:"center",gap:6}}>
         {loading?<><div style={{width:13,height:13,border:"2px solid #e0e0e0",borderTopColor:"#7a7a7a",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/> 分析中…</>:dataLoading?"データ読み込み中…":<>{cachedAt?"キャッシュ表示":"分析する"}</>}
@@ -2452,7 +2452,7 @@ const PM_DATE=_UP.get('date')||'2026-04-01';
 const PM_START=parseInt(_UP.get('start')||'330');
 const PM_END=parseInt(_UP.get('end')||'510');
 const PM_NAME=_UP.get('name')?decodeURIComponent(_UP.get('name')):'';
-const PM_SLOT=_UP.get('slot')||(PM_START>=960?'evening':'morning');
+const PM_SLOT=_UP.get('slot')||(PM_START>=930?'evening':'morning');
 
 // ============================================================
 // 番組表ページ (ランディング)
@@ -2571,7 +2571,7 @@ function ProgramGuidePage({metric="rating"}){
     const aS=p.startAbs-dayStartAbs,aE=p.endAbs-dayStartAbs;
     let raw=null,winS,winE;
     if(aS<510&&aE>330){raw=getRatings(dateStr,'morning');winS=330;winE=510;}
-    else if(aS<1170&&aE>960){raw=getRatings(dateStr,'evening');winS=960;winE=1170;}
+    else if(aS<1140&&aE>930){raw=getRatings(dateStr,'evening');winS=930;winE=1140;}
     if(!raw||!raw.length)return null;
     const iS=Math.max(aS,winS)-winS, iE=Math.min(aE,winE)-winS;
     if(iS>=iE)return null;
@@ -2600,9 +2600,9 @@ function ProgramGuidePage({metric="rating"}){
     const dayStartAbs=localMidnightAbsMin(date);
     const aS=p.startAbs-dayStartAbs,aE=p.endAbs-dayStartAbs;
     const mid=(aS+aE)/2;
-    const slot=mid>=960&&mid<1170?'evening':'morning';
+    const slot=mid>=930&&mid<1140?'evening':'morning';
     const params=new URLSearchParams({mode:'program',station:stId,date,start:aS,end:aE,name:encodeURIComponent(p.title),slot});
-    return{stId,date,slot,startMin:m2t(aS),endMin:m2t(Math.min(aE,slot==='morning'?509:1169)),title:p.title,progName:p.title,segment:"other",tags:[],summary:"",_dashUrl:`${window.location.origin}${window.location.pathname}?${params}`};
+    return{stId,date,slot,startMin:m2t(aS),endMin:m2t(Math.min(aE,slot==='morning'?509:1139)),title:p.title,progName:p.title,segment:"other",tags:[],summary:"",_dashUrl:`${window.location.origin}${window.location.pathname}?${params}`};
   };
 
   const openGuideModal=(p,stId)=>{
@@ -2636,7 +2636,7 @@ function ProgramGuidePage({metric="rating"}){
       <CalendarPicker value={guideDate} onChange={jumpTo} dates={DASHBOARD_DATES}/>
       {loading&&<span style={{fontSize:11,color:"#9CA3AF"}}>⏳ 読み込み中...</span>}
       {error&&<span style={{fontSize:11,color:"#DC2626"}}>⚠ {error} (S3 CORSの設定をご確認ください)</span>}
-      {!loading&&!error&&hasAnyData&&<span style={{fontSize:11,color:"#6B7280"}}>視聴率は朝(5:30–8:30)・夕方(16:00–19:30)帯のみ表示。スクロールで前後の日付に移動できます</span>}
+      {!loading&&!error&&hasAnyData&&<span style={{fontSize:11,color:"#6B7280"}}>視聴率は朝(5:30–8:30)・夕方(15:30–19:00)帯のみ表示。スクロールで前後の日付に移動できます</span>}
       <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:4,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"2px 4px"}}>
         <span style={{fontSize:10,color:"#6B7280",fontWeight:600,paddingLeft:4}}>縦ズーム</span>
         <button onClick={()=>setPpmIdx(i=>Math.max(0,i-1))} disabled={ppmIdx===0} style={{width:24,height:24,border:"none",background:"transparent",cursor:ppmIdx===0?"default":"pointer",fontSize:16,color:ppmIdx===0?"#D1D5DB":"#374151",borderRadius:4,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
@@ -2856,14 +2856,14 @@ export default function App(){
       .catch(()=>setDashCornerCache(prev=>({...prev,[date]:[]})));
   },[date]);
 
-  // 実番組(epg-all)×実分析コーナー(daily_corners)を、選択中のslot窓(朝5:30-8:30/夕方16:00-19:30)で
+  // 実番組(epg-all)×実分析コーナー(daily_corners)を、選択中のslot窓(朝5:30-8:30/夕方15:30-19:00)で
   // 突き合わせてtpl形式({[stId]:[[progName,startHHMM,endHHMM,corners[]],...]})に組み立てる。
   // 分析結果が無い番組はそもそも配列に含めない(=表示されない。分析が無ければ何も出さない仕様)
   const dashTpl=useMemo(()=>buildDayTpl(dashEpgCache[date],dashCornerCache[date],date,slot),[dashEpgCache,dashCornerCache,date,slot]);
   const dashDataLoading=dashEpgCache[date]==null||dashCornerCache[date]==null;
   const zoomHalf=ZOOM_HALF[zoomLevel];
   const progCenter=programContext?.center??null;
-  const slotStart=slot==='morning'?330:960,slotEnd=slot==='morning'?510:1170;
+  const slotStart=slot==='morning'?330:930,slotEnd=slot==='morning'?510:1140;
   const effectiveCenter=panCenter??progCenter;
   const winStart=effectiveCenter!==null?Math.max(slotStart,effectiveCenter-zoomHalf):slotStart;
   const winEnd=effectiveCenter!==null?Math.min(slotEnd,effectiveCenter+zoomHalf):slotEnd;
@@ -2993,7 +2993,7 @@ export default function App(){
       <CalendarPicker value={date} onChange={d=>{setDate(d);setSelMin(null);setHL(null);}} dates={dates}/>
       <WeatherBadge weather={weatherData[date]}/>
       <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
-        {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 16:00–19:30"}].map(s=><button key={s.id} onClick={()=>{setSlot(s.id);setSelMin(null);setHL(null);}} style={seg(slot===s.id)}>{s.l}</button>)}
+        {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 15:30–19:00"}].map(s=><button key={s.id} onClick={()=>{setSlot(s.id);setSelMin(null);setHL(null);}} style={seg(slot===s.id)}>{s.l}</button>)}
       </div>
       <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
         {[{id:"chart",l:"グラフ表示"},{id:"timetable",l:"番組表〜コーナー別〜"}].map(m=><button key={m.id} onClick={()=>{setDashMode(m.id);setSelMin(null);setHL(null);}} style={seg(dashMode===m.id)}>{m.l}</button>)}
