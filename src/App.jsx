@@ -684,21 +684,24 @@ function WeatherBadge({ weather }) {
 const REAL_RATINGS_COLS = ["NBN","THK","CTV","CBC","NHK","NHKE","TVA"];
 const REAL_RATINGS = REAL_RATINGS_IMPORT;
 
+// 局別の生配列(1行=[NBN,THK,CTV,CBC,NHK,NHKE,TVA])を{time,minute,局:値}オブジェクト配列に変換する
+function rawRowsToRatingObjects(rawRows,startMin){
+  const data=[];
+  for(let i=0;i<rawRows.length;i++){
+    const m=startMin+i;
+    const e={time:m2t(m),minute:m};
+    REAL_RATINGS_COLS.forEach((sid,j)=>{e[sid]=rawRows[i][j];});
+    data.push(e);
+  }
+  return data;
+}
+
 function genRatings(date,slot){
   const sm=slot==="morning"?330:930, em=slot==="morning"?509:1139;
   const realKey=`${date}|${slot}`;
   // ----- 実データがあればそれを使用 -----
   if(REAL_RATINGS[realKey]){
-    const raw=REAL_RATINGS[realKey];
-    const data=[];
-    for(let i=0;i<raw.length;i++){
-      const m=sm+i;
-      const row=raw[i];
-      const e={time:m2t(m),minute:m};
-      REAL_RATINGS_COLS.forEach((sid,j)=>{e[sid]=row[j];});
-      data.push(e);
-    }
-    return data;
+    return rawRowsToRatingObjects(REAL_RATINGS[realKey],sm);
   }
   // ----- 実データがない日は実データ2日分の平均プロファイルを基にシード乱数で揺らぎを加える -----
   const profile=slot==="morning"?MORN_PROFILE:EVE_PROFILE;
@@ -762,7 +765,17 @@ async function fetchAndParseRatingXlsx(date){
     }
     return out;
   };
-  return{morning:buildSlot(330,509),evening:buildSlot(930,1139)};
+  // 1日分(05:00〜翌05:00, 300〜1739分)を一度だけ取り出し、朝・夕方はそこから切り出す(番組表の終日表示にも使う)
+  const allday=buildSlot(300,1739);
+  const morning=allday?allday.slice(30,210):buildSlot(330,509);
+  const evening=allday?allday.slice(630,840):buildSlot(930,1139);
+  return{morning,evening,allday};
+}
+
+// 指定日の終日(05:00〜翌05:00)視聴率を{time,minute,局:値}オブジェクト配列で取得する(番組表用)
+async function fetchFullDayRatingObjects(date){
+  const{allday}=await fetchAndParseRatingXlsx(date);
+  return allday?rawRowsToRatingObjects(allday,300):null;
 }
 
 // S3バケットはrating/配下のListBucket(一覧取得)を許可していない(403)ため、
@@ -2463,6 +2476,7 @@ function ProgramGuidePage({metric="rating"}){
   const[guideDate,setGuideDate]=useState(GUIDE_DATE_MAX); // カレンダー表示・ハイライト用の「現在地」
   const[loadedDates,setLoadedDates]=useState([]); // 連続タイムラインに結合済みの日付(YYYY-MM-DD)昇順
   const[epgCache,setEpgCache]=useState({}); // date -> programs[](絶対分)|null(読み込み中)
+  const[ratingCache,setRatingCache]=useState({}); // date -> 終日視聴率{time,minute,局:値}[]|null(読み込み中)|[](データなし)
   const[error,setError]=useState(null);
   const[ppmIdx,setPpmIdx]=useState(3); // index3=6px/分(約2時間)
   const[tooltip,setTooltip]=useState(null); // {title,avg,stId,x,y}
@@ -2470,6 +2484,7 @@ function ProgramGuidePage({metric="rating"}){
 
   const scrollElRef=useRef(null);
   const fetchingRef=useRef(new Set()); // 取得中の日付(重複fetch防止)
+  const ratingFetchingRef=useRef(new Set());
   const pendingJumpRef=useRef(guideDate); // ジャンプ先日付の0時位置へスクロールが未完了なら日付が入る
   const prevStartRef=useRef(null); // 直前のstartOfRange(前方=過去日追加時のスクロール位置補正用)
 
@@ -2487,6 +2502,16 @@ function ProgramGuidePage({metric="rating"}){
       .catch(e=>{setError(e.message);setEpgCache(prev=>({...prev,[d]:[]}));})
       .finally(()=>fetchingRef.current.delete(d));
   };
+  // 指定日の終日視聴率を取得(未取得/未取得中の場合のみ)。無い日は[](オーバーレイなし)にする
+  const ensureRatingsFetched=d=>{
+    if(d in ratingCache||ratingFetchingRef.current.has(d))return;
+    ratingFetchingRef.current.add(d);
+    setRatingCache(prev=>d in prev?prev:{...prev,[d]:null});
+    fetchFullDayRatingObjects(d)
+      .then(data=>setRatingCache(prev=>({...prev,[d]:data||[]})))
+      .catch(()=>setRatingCache(prev=>({...prev,[d]:[]})))
+      .finally(()=>ratingFetchingRef.current.delete(d));
+  };
 
   // カレンダーから日付を選んだ時: 前後1日を含む3日分を読み込み直し、選択日の0時位置へスクロールする
   const jumpTo=d=>{
@@ -2496,6 +2521,7 @@ function ProgramGuidePage({metric="rating"}){
     setGuideModal(null);
     pendingJumpRef.current=d;
     win.forEach(ensureFetched);
+    win.forEach(ensureRatingsFetched);
   };
 
   useEffect(()=>{ jumpTo(GUIDE_DATE_MAX);
@@ -2508,6 +2534,7 @@ function ProgramGuidePage({metric="rating"}){
     if(prev<GUIDE_DATE_MIN||loadedDates.includes(prev))return;
     setLoadedDates(ds=>ds.includes(prev)?ds:[prev,...ds]);
     ensureFetched(prev);
+    ensureRatingsFetched(prev);
   };
   const loadNext=()=>{
     if(loadedDates.length===0)return;
@@ -2515,6 +2542,7 @@ function ProgramGuidePage({metric="rating"}){
     if(next>GUIDE_DATE_MAX||loadedDates.includes(next))return;
     setLoadedDates(ds=>ds.includes(next)?ds:[...ds,next]);
     ensureFetched(next);
+    ensureRatingsFetched(next);
   };
 
   // 読み込み済み日付ぶんの番組を1本のタイムラインに結合(放送日ファイル同士が重複して含む境界の番組はkeyで排除)
@@ -2562,17 +2590,18 @@ function ProgramGuidePage({metric="rating"}){
     }
   },[epgCache,startOfRange,endOfRange,PPM]);
 
-  // 番組の平均視聴率 or 占拠率を計算(朝・夕方帯のみ)。番組自身の実時刻の暦日を基準に、その日の視聴率データを引く
-  // (epg-allの放送日区切り(概ね5時前後)とdaily_corners等の暦日区切りがズレるため、常に実絶対時刻から暦日を計算し直す)
+  // 番組の平均視聴率 or 占拠率を計算(終日)。番組自身の実時刻の暦日を基準に、その日の終日視聴率データを引く
+  // (ratingファイルは05:00始まりの放送日区切りのため、0〜5時台の番組は前日ファイルの続きとして扱う)
   const calcAvg=(stId,p)=>{
     const dt=new Date(p.startAbs*60000);
+    if(dt.getHours()<5)dt.setDate(dt.getDate()-1);
     const dateStr=`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+    const raw=ratingCache[dateStr];
+    if(!raw||!raw.length)return null;
     const dayStartAbs=localMidnightAbsMin(dateStr);
     const aS=p.startAbs-dayStartAbs,aE=p.endAbs-dayStartAbs;
-    let raw=null,winS,winE;
-    if(aS<510&&aE>330){raw=getRatings(dateStr,'morning');winS=330;winE=510;}
-    else if(aS<1140&&aE>930){raw=getRatings(dateStr,'evening');winS=930;winE=1140;}
-    if(!raw||!raw.length)return null;
+    const winS=300,winE=1740; // 実データがある範囲(05:00〜翌05:00)
+    if(aE<=winS||aS>=winE)return null;
     const iS=Math.max(aS,winS)-winS, iE=Math.min(aE,winE)-winS;
     if(iS>=iE)return null;
     const slice=raw.slice(iS,iE);
@@ -2636,7 +2665,7 @@ function ProgramGuidePage({metric="rating"}){
       <CalendarPicker value={guideDate} onChange={jumpTo} dates={DASHBOARD_DATES}/>
       {loading&&<span style={{fontSize:11,color:"#9CA3AF"}}>⏳ 読み込み中...</span>}
       {error&&<span style={{fontSize:11,color:"#DC2626"}}>⚠ {error} (S3 CORSの設定をご確認ください)</span>}
-      {!loading&&!error&&hasAnyData&&<span style={{fontSize:11,color:"#6B7280"}}>視聴率は朝(5:30–8:30)・夕方(15:30–19:00)帯のみ表示。スクロールで前後の日付に移動できます</span>}
+      {!loading&&!error&&hasAnyData&&<span style={{fontSize:11,color:"#6B7280"}}>視聴率は実データがある日のみ全時間帯で表示。スクロールで前後の日付に移動できます</span>}
       <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:4,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:6,padding:"2px 4px"}}>
         <span style={{fontSize:10,color:"#6B7280",fontWeight:600,paddingLeft:4}}>縦ズーム</span>
         <button onClick={()=>setPpmIdx(i=>Math.max(0,i-1))} disabled={ppmIdx===0} style={{width:24,height:24,border:"none",background:"transparent",cursor:ppmIdx===0?"default":"pointer",fontSize:16,color:ppmIdx===0?"#D1D5DB":"#374151",borderRadius:4,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
