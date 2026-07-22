@@ -2742,8 +2742,8 @@ function ProgramGuidePage({metric="rating"}){
     {guideModal&&<CornerModal corner={guideModal.corner} cache={rCache} fullDayRatings={ratingCache[guideModal.corner.date]} onClose={()=>setGuideModal(null)} navList={guideModal.navList} navIdx={guideModal.idx} onNavigate={c=>{const idx=guideModal.navList.findIndex(item=>item.date===c.date&&item.title===c.title&&item.startMin===c.startMin);setGuideModal({...guideModal,corner:c,idx});}} dashboardUrl={guideModal.corner._dashUrl} guideMode={true}/>}
     {!hasAnyData&&loading&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>読み込み中...</div>}
     {!hasAnyData&&!loading&&<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#9CA3AF",fontSize:14}}>日付を選択してください</div>}
-    {hasAnyData&&<div ref={scrollElRef} onScroll={handleScroll} style={{flex:1,overflow:"auto"}}>
-      <div style={{display:"flex",minWidth:52+GUIDE_ST_ORDER.length*220}}>
+    {hasAnyData&&<div ref={scrollElRef} onScroll={handleScroll} style={{flex:1,overflowY:"auto",overflowX:"hidden"}}>
+      <div style={{display:"flex",width:"100%",minWidth:0}}>
         {/* 時刻列 */}
         <div style={{width:52,flexShrink:0,position:"sticky",left:0,background:"#F9FAFB",borderRight:"1px solid #E5E7EB",zIndex:4}}>
           <div style={{height:44,position:"sticky",top:0,background:"#F3F4F6",borderBottom:"1px solid #E5E7EB",zIndex:5,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9.5,color:"#6B7280",fontWeight:700,fontFamily:"monospace"}}>TIME</div>
@@ -2762,10 +2762,10 @@ function ProgramGuidePage({metric="rating"}){
         {GUIDE_ST_ORDER.map(sid=>{
           const st=ST.find(s=>s.id===sid);
           const progs=(byStation[sid]||[]).slice().sort((a,b)=>a.startAbs-b.startAbs);
-          return <div key={sid} style={{width:220,flexShrink:0,borderRight:"1px solid #E5E7EB",position:"relative"}}>
+          return <div key={sid} style={{flex:"1 1 0",minWidth:0,borderRight:"1px solid #E5E7EB",position:"relative"}}>
             <div style={{height:44,position:"sticky",top:0,background:"#F3F4F6",borderBottom:"1px solid #E5E7EB",zIndex:3,display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
               <span style={{background:st.c,color:"#fff",fontSize:9,fontWeight:800,padding:"2px 5px",borderRadius:3,fontFamily:"monospace"}}>{sid}</span>
-              <span style={{fontSize:10.5,color:"#374151",fontWeight:600}}>{st.nm}</span>
+              <span style={{fontSize:10.5,color:"#374151",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{st.nm}</span>
             </div>
             <div style={{position:"relative",height:totalH}}>
               {timeMarks.map(m=>{
