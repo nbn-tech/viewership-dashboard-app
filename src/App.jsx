@@ -62,8 +62,9 @@ const STATION_MAP={"1":"THK","2":"NHKE","3":"NHK","4":"CTV","5":"CBC","6":"NBN",
 const CHANNEL_ID_MAP={"0x0C08":"NHKE","0x0C10":"THK","0x0C18":"CBC","0x0C20":"NBN","0x0C28":"CTV","0x8400":"NHK","0x8430":"TVA"};
 const GUIDE_ST_ORDER=["NBN","THK","CTV","CBC","NHK","NHKE","TVA"];
 // 録画パイプラインのチャンネル番号(movie/ch{N}/配下のフォルダ)→局コード。NHKEは録画対象外
-const VIDEO_CH_TO_STATION={ch1:"THK",ch2:"TVA",ch3:"NHK",ch4:"CTV",ch5:"CBC",ch6:"NBN"};
-const VIDEO_CHANNELS=Object.keys(VIDEO_CH_TO_STATION);
+const VIDEO_CH_TO_STATION={ch1:"THK",ch4:"CTV",ch6:"NBN"};
+const VIDEO_STATION_TO_CH={NBN:"ch6",THK:"ch1",CTV:"ch4"};
+const VIDEO_CHANNELS=["ch1","ch2","ch3","ch4","ch5","ch6"];
 const ZOOM_WIDTHS=[120,105,90,75,60,50,40,35,25,20]; // 詳細グラフの表示幅（分）
 
 // 深夜 0:00〜4:59 は翌日扱い（分 + 1440）にして連続した時系列に変換
@@ -858,7 +859,7 @@ function buildDayTpl(programs,corners,date,slot){
   return result;
 }
 
-function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onHighlight,data,metric,loading,error,onRetry}){
+function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineBlockClick,onHighlight,data,metric,loading,error,onRetry}){
   const[expandedCorner,setExpandedCorner]=useState(null);
   const[hoveredBlock,setHoveredBlock]=useState(null);
   const dataStart=data?.[0]?.minute,dataEnd=data?.length?data[data.length-1].minute+1:null;
@@ -882,7 +883,7 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onHighlight
     const canExpand=isCorner&&!major&&!isCm;
     const blockKey=`${sid}-${key}`;
     const isHovered=hoveredBlock===blockKey;
-    return <button key={blockKey} onClick={ev=>{ev.stopPropagation();onClickMinute(isCorner?t2m(item.start):Math.round((s+e)/2));if(isCorner)onHighlight?.({start:t2m(item.start),end:t2m(item.end),stationId:sid});if(canExpand)setExpandedCorner(prev=>prev?.key===blockKey?null:{...item,key:blockKey,sid});}} title={`${item.title} ${item.start}–${item.end}`}
+    return <button key={blockKey} onClick={ev=>{ev.stopPropagation();const minute=VIDEO_STATION_TO_CH[sid]?t2m(item.start):(isCorner?t2m(item.start):Math.round((s+e)/2));if(onTimelineBlockClick)onTimelineBlockClick(minute,sid);else onClickMinute(minute);if(isCorner)onHighlight?.({start:t2m(item.start),end:t2m(item.end),stationId:sid});if(canExpand)setExpandedCorner(prev=>prev?.key===blockKey?null:{...item,key:blockKey,sid});}} title={`${item.title} ${item.start}–${item.end}`}
       onMouseEnter={()=>setHoveredBlock(blockKey)} onMouseLeave={()=>setHoveredBlock(null)}
       style={{position:"absolute",left:`${left}%`,width:`${width}%`,top,bottom,minWidth:isCm?3:8,overflow:"hidden",border:`1px solid ${isHovered?st.c:"rgba(255,255,255,.78)"}`,borderRadius:1,background:isCm?(isHovered?"#647784":"#8aa0af"):isHovered?st.c:major?`${st.c}38`:`${st.c}20`,color:isCm||isHovered?"#fff":st.c,cursor:"pointer",padding:major?"3px 6px":"2px 5px",textAlign:"left",whiteSpace:"nowrap",zIndex:isHovered?4:1,boxShadow:isHovered?`0 0 0 1px ${st.c}, 0 2px 6px rgba(0,0,0,.16)`:"none",transition:"background .12s ease,color .12s ease,box-shadow .12s ease"}}>
       <span style={{display:"block",fontSize:major?10.5:9.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis"}}>{isCm?"CM":item.title}</span>
@@ -2935,6 +2936,7 @@ export default function App(){
   const[videoCh,setVideoCh]=useState("ch6");
   const prevVideoUrlRef=useRef(null);
   const pendingSeekRef=useRef(null);
+  const suppressVideoSeekRef=useRef(false);
   const[page,setPage]=useState(PROGRAM_MODE?"dashboard":"guide");
   const[programContext]=useState(PROGRAM_MODE?{name:PM_NAME,stId:PM_STATION,date:PM_DATE,start:PM_START,end:PM_END,center:Math.floor((PM_START+PM_END)/2),slot:PM_SLOT}:null);
   const[zoomLevel,setZoomLevel]=useState(0);
@@ -3046,8 +3048,15 @@ export default function App(){
   useEffect(()=>{setPanCenter(null);},[slot,date]);
   const tog=id=>setSel(p=>p.includes(id)?p.filter(s=>s!==id):[...p,id]);
   const click=m=>{setSelMin(m);const r=rData.find(d=>d.minute===m),s=sData.find(d=>d.minute===m);setSelData({rating:r,share:s});setHL(null);};
+  const timelineBlockClick=(m,sid)=>{
+    const mappedCh=VIDEO_STATION_TO_CH[sid];
+    if(mappedCh)setVideoCh(mappedCh);
+    else if(m!==selMin)suppressVideoSeekRef.current=true;
+    click(m);
+  };
   useEffect(()=>{setVideoUrl(null);setNoVideoForTime(false);prevVideoUrlRef.current=null;},[date,slot]);
   useEffect(()=>{
+    if(suppressVideoSeekRef.current){suppressVideoSeekRef.current=false;return;}
     if(date==="2026-04-17"&&slot==="morning"&&selMin!==null){
       if(videoRef.current){const offset=(selMin-360)*60+77;if(offset>=0)videoRef.current.currentTime=offset;}
       return;
@@ -3196,7 +3205,7 @@ export default function App(){
         </div>}
         {date>="2026-06-17"&&videoFiles!==null&&<div style={{padding:"0 18px 12px"}}>
           <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,flexWrap:"wrap"}}>
-            <span style={{fontSize:11,fontWeight:700,color:"#374151"}}>放送動画（{VIDEO_CH_TO_STATION[videoCh]}）</span>
+            <span style={{fontSize:11,fontWeight:700,color:"#374151"}}>放送動画（{VIDEO_CH_TO_STATION[videoCh]||videoCh}）</span>
             {videoUrl&&selMin!==null&&<span style={{fontSize:10,color:"#6B7280",fontFamily:"monospace"}}>→ {m2t(selMin)} にシーク済み</span>}
             <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0",marginLeft:"auto"}}>
               {VIDEO_CHANNELS.map(ch=><button key={ch} onClick={()=>setVideoCh(ch)} style={{padding:"3px 10px",border:"none",background:videoCh===ch?"#0066cc":"transparent",color:videoCh===ch?"#fff":"#7a7a7a",cursor:"pointer",fontSize:10.5,fontWeight:600,fontFamily:"monospace"}}>{ch}</button>)}
@@ -3210,7 +3219,7 @@ export default function App(){
         <BroadcastTimeline tpl={dashTpl}
           startMin={chartData.length?chartData[0].minute:(programContext?winStart:slotStart)}
           endMin={chartData.length?chartData[chartData.length-1].minute+1:(programContext?winEnd:slotEnd)}
-          selMin={selMin} onClickMinute={click} onHighlight={setHL} data={dData} metric={metric}
+          selMin={selMin} onClickMinute={click} onTimelineBlockClick={timelineBlockClick} onHighlight={setHL} data={dData} metric={metric}
           loading={dashDataLoading} error={dashDataError} onRetry={retryDashData}/>
       </div>
       <div style={{width:340,minWidth:290,flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column",position:"sticky",top:programContext?"calc(var(--topbar-height) + 76px)":"calc(var(--topbar-height) + 48px)",maxHeight:programContext?"calc(100vh - var(--topbar-height) - 76px)":"calc(100vh - var(--topbar-height) - 48px)",overflowY:"auto"}}>
