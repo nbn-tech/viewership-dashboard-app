@@ -3110,8 +3110,8 @@ export default function App(){
       <span style={{fontSize:15,color:"#56778e"}}>＋</span>
       <span style={{minWidth:42,fontSize:10,fontFamily:"monospace",color:"#173b5d"}}>{Math.round(viewWidth)}分</span>
     </div>}
-    {dashMode==="chart"?<div style={{display:"flex",height:programContext?"calc(100vh - 140px)":"calc(100vh - 100px)"}}>
-      <div style={{flex:"1 1 0",display:"flex",flexDirection:"column",minWidth:0,overflowY:"auto"}}>
+    {dashMode==="chart"?<div style={{display:"flex",alignItems:"flex-start",minHeight:programContext?"calc(100vh - 140px)":"calc(100vh - 100px)"}}>
+      <div style={{flex:"1 1 0",display:"flex",flexDirection:"column",minWidth:0,overflow:"visible"}}>
         <div style={{padding:"8px 18px"}}><Toggle sel={sel} onT={tog}/></div>
         <div style={{padding:"0 18px",height:360,flexShrink:0}}><Chart data={chartData} sel={sel} onClick={click} selMin={selMin} hl={hl} metric={metric} onPan={programContext?handlePan:undefined}/></div>
         {date==="2026-04-17"&&slot==="morning"&&<div style={{padding:"0 18px 12px"}}>
@@ -3136,7 +3136,7 @@ export default function App(){
         </div>}
         <BroadcastTimeline tpl={dashTpl} startMin={programContext?winStart:slotStart} endMin={programContext?winEnd:slotEnd} selMin={selMin} onClickMinute={click} data={dData} metric={metric}/>
       </div>
-      <div style={{width:340,minWidth:290,flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column"}}>
+      <div style={{width:340,minWidth:290,flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column",position:"sticky",top:"var(--topbar-height)",maxHeight:"calc(100vh - var(--topbar-height))",overflowY:"auto"}}>
         <Panel selMin={selMin} rData={selData} allR={rData} allS={sData} sel={sel} onHL={setHL} metric={metric} tpl={dashTpl}/>
       </div>
     </div>:<div style={{padding:"8px 18px 16px"}}>
