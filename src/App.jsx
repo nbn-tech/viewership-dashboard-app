@@ -858,7 +858,7 @@ function buildDayTpl(programs,corners,date,slot){
   return result;
 }
 
-function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,data,metric,loading,error,onRetry}){
+function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onHighlight,data,metric,loading,error,onRetry}){
   const[expandedCorner,setExpandedCorner]=useState(null);
   const[hoveredBlock,setHoveredBlock]=useState(null);
   const dataStart=data?.[0]?.minute,dataEnd=data?.length?data[data.length-1].minute+1:null;
@@ -880,9 +880,10 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,data,metric
     const avg=valueAt(sid,s,e);
     const isCm=isCorner&&item.segment==="cm";
     const canExpand=isCorner&&!major&&!isCm;
-    const isHovered=hoveredBlock===key;
-    return <button key={key} onClick={ev=>{ev.stopPropagation();onClickMinute(Math.round((s+e)/2));if(canExpand)setExpandedCorner(prev=>prev?.key===key?null:{...item,key,sid});}} title={`${item.title} ${item.start}–${item.end}`}
-      onMouseEnter={()=>setHoveredBlock(key)} onMouseLeave={()=>setHoveredBlock(null)}
+    const blockKey=`${sid}-${key}`;
+    const isHovered=hoveredBlock===blockKey;
+    return <button key={blockKey} onClick={ev=>{ev.stopPropagation();onClickMinute(Math.round((s+e)/2));if(isCorner)onHighlight?.({start:t2m(item.start),end:t2m(item.end),stationId:sid});if(canExpand)setExpandedCorner(prev=>prev?.key===blockKey?null:{...item,key:blockKey,sid});}} title={`${item.title} ${item.start}–${item.end}`}
+      onMouseEnter={()=>setHoveredBlock(blockKey)} onMouseLeave={()=>setHoveredBlock(null)}
       style={{position:"absolute",left:`${left}%`,width:`${width}%`,top,bottom,minWidth:isCm?3:8,overflow:"hidden",border:`1px solid ${isHovered?st.c:"rgba(255,255,255,.78)"}`,borderRadius:1,background:isCm?(isHovered?"#647784":"#8aa0af"):isHovered?st.c:major?`${st.c}38`:`${st.c}20`,color:isCm||isHovered?"#fff":st.c,cursor:"pointer",padding:major?"3px 6px":"2px 5px",textAlign:"left",whiteSpace:"nowrap",zIndex:isHovered?4:1,boxShadow:isHovered?`0 0 0 1px ${st.c}, 0 2px 6px rgba(0,0,0,.16)`:"none",transition:"background .12s ease,color .12s ease,box-shadow .12s ease"}}>
       <span style={{display:"block",fontSize:major?10.5:9.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis"}}>{isCm?"CM":item.title}</span>
       {!isCm&&avg!==null&&<span style={{fontSize:major?11:9.5,fontWeight:700,marginRight:5}}>{avg.toFixed(1)}%</span>}
@@ -2520,7 +2521,7 @@ function Panel({selMin,rData,allR,allS,sel,onHL,metric,tpl}){
   return <div style={{overflowY:"auto",height:"100%",padding:"0 2px"}}>
     <div style={{position:"sticky",top:0,background:"#fff",padding:"10px 8px 8px",borderBottom:"1px solid #F3F4F6",zIndex:2}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <span style={{color:"#111827",fontSize:13,fontWeight:700}}>放送中の番組</span>
+        <span style={{color:"#111827",fontSize:13,fontWeight:700}}>選択時刻の放送内容</span>
         <span style={{color:"#9CA3AF",fontSize:9.5,fontFamily:"monospace"}}>SORTED BY {metric==="share"?"SHARE":"RATING"}</span>
       </div>
     </div>
@@ -3209,7 +3210,7 @@ export default function App(){
         <BroadcastTimeline tpl={dashTpl}
           startMin={chartData.length?chartData[0].minute:(programContext?winStart:slotStart)}
           endMin={chartData.length?chartData[chartData.length-1].minute+1:(programContext?winEnd:slotEnd)}
-          selMin={selMin} onClickMinute={click} data={dData} metric={metric}
+          selMin={selMin} onClickMinute={click} onHighlight={setHL} data={dData} metric={metric}
           loading={dashDataLoading} error={dashDataError} onRetry={retryDashData}/>
       </div>
       <div style={{width:340,minWidth:290,flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column",position:"sticky",top:programContext?"calc(var(--topbar-height) + 76px)":"calc(var(--topbar-height) + 48px)",maxHeight:programContext?"calc(100vh - var(--topbar-height) - 76px)":"calc(100vh - var(--topbar-height) - 48px)",overflowY:"auto"}}>
