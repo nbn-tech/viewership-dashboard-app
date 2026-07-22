@@ -860,10 +860,14 @@ function buildDayTpl(programs,corners,date,slot){
 
 function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,data,metric,loading,error,onRetry}){
   const[expandedCorner,setExpandedCorner]=useState(null);
+  const[hoveredBlock,setHoveredBlock]=useState(null);
   const dataStart=data?.[0]?.minute,dataEnd=data?.length?data[data.length-1].minute+1:null;
   const validRange=Number.isFinite(startMin)&&Number.isFinite(endMin)&&endMin>startMin;
   const rangeStart=validRange?startMin:(dataStart??0),rangeEnd=validRange?endMin:(dataEnd??rangeStart+1);
   const total=Math.max(1,rangeEnd-rangeStart);
+  const tickStep=total<=30?5:total<=60?10:total<=120?15:30;
+  const timeTicks=[];
+  for(let minute=Math.ceil(rangeStart/tickStep)*tickStep;minute<=rangeEnd;minute+=tickStep)timeTicks.push(minute);
   useEffect(()=>setExpandedCorner(null),[tpl,rangeStart,rangeEnd]);
   const valueAt=(sid,s,e)=>{
     const rows=data.filter(d=>d.minute>=s&&d.minute<e&&d[sid]!=null);
@@ -876,8 +880,10 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,data,metric
     const avg=valueAt(sid,s,e);
     const isCm=isCorner&&item.segment==="cm";
     const canExpand=isCorner&&!major&&!isCm;
+    const isHovered=hoveredBlock===key;
     return <button key={key} onClick={ev=>{ev.stopPropagation();onClickMinute(Math.round((s+e)/2));if(canExpand)setExpandedCorner(prev=>prev?.key===key?null:{...item,key,sid});}} title={`${item.title} ${item.start}–${item.end}`}
-      style={{position:"absolute",left:`${left}%`,width:`${width}%`,top,bottom,minWidth:isCm?3:8,overflow:"hidden",border:"1px solid rgba(255,255,255,.78)",borderRadius:1,background:isCm?"#8aa0af":major?`${st.c}38`:`${st.c}20`,color:isCm?"#fff":st.c,cursor:"pointer",padding:major?"3px 6px":"2px 5px",textAlign:"left",whiteSpace:"nowrap"}}>
+      onMouseEnter={()=>setHoveredBlock(key)} onMouseLeave={()=>setHoveredBlock(null)}
+      style={{position:"absolute",left:`${left}%`,width:`${width}%`,top,bottom,minWidth:isCm?3:8,overflow:"hidden",border:`1px solid ${isHovered?st.c:"rgba(255,255,255,.78)"}`,borderRadius:1,background:isCm?(isHovered?"#647784":"#8aa0af"):isHovered?st.c:major?`${st.c}38`:`${st.c}20`,color:isCm||isHovered?"#fff":st.c,cursor:"pointer",padding:major?"3px 6px":"2px 5px",textAlign:"left",whiteSpace:"nowrap",zIndex:isHovered?4:1,boxShadow:isHovered?`0 0 0 1px ${st.c}, 0 2px 6px rgba(0,0,0,.16)`:"none",transition:"background .12s ease,color .12s ease,box-shadow .12s ease"}}>
       <span style={{display:"block",fontSize:major?10.5:9.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis"}}>{isCm?"CM":item.title}</span>
       {!isCm&&avg!==null&&<span style={{fontSize:major?11:9.5,fontWeight:700,marginRight:5}}>{avg.toFixed(1)}%</span>}
       {noAnalysis&&<span style={{fontSize:8.5,opacity:.65}}>解析データなし</span>}
@@ -892,6 +898,21 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,data,metric
       {error&&<button onClick={onRetry} style={{marginLeft:"auto",padding:"3px 9px",border:"1px solid #dc2626",borderRadius:4,background:"#fff",color:"#dc2626",fontSize:10,cursor:"pointer"}}>取得に失敗しました・再読み込み</button>}
     </div>
     <div style={{position:"relative"}}>
+      <div style={{display:"flex",height:26,borderBottom:"1px solid #9fc5dd",background:"#e5f2fa"}}>
+        <div style={{width:96,flexShrink:0,padding:"7px 8px",borderRight:"1px solid #9fc5dd",fontSize:8.5,fontWeight:700,color:"#56778e"}}>時刻</div>
+        <div style={{position:"relative",flex:1,minWidth:0}}>
+          {timeTicks.map(minute=>{
+            const left=((minute-rangeStart)/total)*100;
+            return <div key={minute} style={{position:"absolute",left:`${left}%`,top:0,bottom:0,borderLeft:"1px solid #b9d4e5"}}>
+              <span style={{position:"absolute",top:6,left:4,fontSize:8.5,fontFamily:"monospace",color:"#56778e",whiteSpace:"nowrap"}}>{m2t(minute)}</span>
+            </div>;
+          })}
+        </div>
+      </div>
+      {timeTicks.map(minute=>{
+        const left=((minute-rangeStart)/total)*100;
+        return <div key={`grid-${minute}`} style={{position:"absolute",top:26,bottom:0,left:`calc(96px + (100% - 96px) * ${left/100})`,width:1,background:"rgba(159,197,221,.48)",pointerEvents:"none",zIndex:2}}/>;
+      })}
       {GUIDE_ST_ORDER.map(sid=>{
         const st=ST.find(x=>x.id===sid),programs=tpl[sid]||[];
         const fineCorners=sid==="NBN"?programs.flatMap(([name,s,e,corners],pi)=>corners.length
@@ -3131,6 +3152,7 @@ export default function App(){
   return <div className="app-root" style={{width:"100%",minHeight:"100vh",background:"#f5f5f7",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif",color:"#111827"}}>
     <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}`}</style>
     <NavBar/>
+    <div style={{position:"sticky",top:"var(--topbar-height)",zIndex:90,boxShadow:"0 2px 8px rgba(23,59,93,.12)"}}>
     <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",padding:"10px 18px",borderBottom:"1px solid #F3F4F6",background:"#fff"}}>
       <CalendarPicker value={date} onChange={d=>{setDate(d);setSelMin(null);setHL(null);}} dates={dates}/>
       <WeatherBadge weather={weatherData[date]}/>
@@ -3159,6 +3181,7 @@ export default function App(){
       <span style={{fontSize:15,color:"#56778e"}}>＋</span>
       <span style={{minWidth:42,fontSize:10,fontFamily:"monospace",color:"#173b5d"}}>{Math.round(viewWidth)}分</span>
     </div>}
+    </div>
     {dashMode==="chart"?<div style={{display:"flex",alignItems:"flex-start",minHeight:programContext?"calc(100vh - 140px)":"calc(100vh - 100px)"}}>
       <div style={{flex:"1 1 0",display:"flex",flexDirection:"column",minWidth:0,overflow:"visible"}}>
         <div style={{padding:"8px 18px"}}><Toggle sel={sel} onT={tog}/></div>
@@ -3189,7 +3212,7 @@ export default function App(){
           selMin={selMin} onClickMinute={click} data={dData} metric={metric}
           loading={dashDataLoading} error={dashDataError} onRetry={retryDashData}/>
       </div>
-      <div style={{width:340,minWidth:290,flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column",position:"sticky",top:"var(--topbar-height)",maxHeight:"calc(100vh - var(--topbar-height))",overflowY:"auto"}}>
+      <div style={{width:340,minWidth:290,flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column",position:"sticky",top:programContext?"calc(var(--topbar-height) + 76px)":"calc(var(--topbar-height) + 48px)",maxHeight:programContext?"calc(100vh - var(--topbar-height) - 76px)":"calc(100vh - var(--topbar-height) - 48px)",overflowY:"auto"}}>
         <Panel selMin={selMin} rData={selData} allR={rData} allS={sData} sel={sel} onHL={setHL} metric={metric} tpl={dashTpl}/>
       </div>
     </div>:<div style={{padding:"8px 18px 16px"}}>
