@@ -882,7 +882,7 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onHighlight
     const canExpand=isCorner&&!major&&!isCm;
     const blockKey=`${sid}-${key}`;
     const isHovered=hoveredBlock===blockKey;
-    return <button key={blockKey} onClick={ev=>{ev.stopPropagation();onClickMinute(Math.round((s+e)/2));if(isCorner)onHighlight?.({start:t2m(item.start),end:t2m(item.end),stationId:sid});if(canExpand)setExpandedCorner(prev=>prev?.key===blockKey?null:{...item,key:blockKey,sid});}} title={`${item.title} ${item.start}–${item.end}`}
+    return <button key={blockKey} onClick={ev=>{ev.stopPropagation();onClickMinute(isCorner?t2m(item.start):Math.round((s+e)/2));if(isCorner)onHighlight?.({start:t2m(item.start),end:t2m(item.end),stationId:sid});if(canExpand)setExpandedCorner(prev=>prev?.key===blockKey?null:{...item,key:blockKey,sid});}} title={`${item.title} ${item.start}–${item.end}`}
       onMouseEnter={()=>setHoveredBlock(blockKey)} onMouseLeave={()=>setHoveredBlock(null)}
       style={{position:"absolute",left:`${left}%`,width:`${width}%`,top,bottom,minWidth:isCm?3:8,overflow:"hidden",border:`1px solid ${isHovered?st.c:"rgba(255,255,255,.78)"}`,borderRadius:1,background:isCm?(isHovered?"#647784":"#8aa0af"):isHovered?st.c:major?`${st.c}38`:`${st.c}20`,color:isCm||isHovered?"#fff":st.c,cursor:"pointer",padding:major?"3px 6px":"2px 5px",textAlign:"left",whiteSpace:"nowrap",zIndex:isHovered?4:1,boxShadow:isHovered?`0 0 0 1px ${st.c}, 0 2px 6px rgba(0,0,0,.16)`:"none",transition:"background .12s ease,color .12s ease,box-shadow .12s ease"}}>
       <span style={{display:"block",fontSize:major?10.5:9.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis"}}>{isCm?"CM":item.title}</span>
