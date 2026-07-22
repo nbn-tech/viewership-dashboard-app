@@ -1028,7 +1028,7 @@ function Chart({data,sel,onClick,selMin,hl,metric,onPan}){
 function Toggle({sel,onT}){
   return <div style={{display:"flex",flexWrap:"wrap",gap:5,alignItems:"center"}}>
     <span style={{color:"#9CA3AF",fontSize:10,fontFamily:"monospace",marginRight:2}}>表示設定</span>
-    {ST.map(s=><button key={s.id} onClick={()=>onT(s.id)} style={{display:"flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:16,border:`1.5px solid ${sel.includes(s.id)?s.c:"#E5E7EB"}`,background:sel.includes(s.id)?`${s.c}0D`:"transparent",color:sel.includes(s.id)?s.c:"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"monospace"}}>
+    {GUIDE_ST_ORDER.map(sid=>ST.find(s=>s.id===sid)).map(s=><button key={s.id} onClick={()=>onT(s.id)} style={{display:"flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:16,border:`1.5px solid ${sel.includes(s.id)?s.c:"#E5E7EB"}`,background:sel.includes(s.id)?`${s.c}0D`:"transparent",color:sel.includes(s.id)?s.c:"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"monospace"}}>
       <span style={{width:7,height:7,borderRadius:"50%",background:sel.includes(s.id)?s.c:"#D1D5DB"}}/>{s.id}
     </button>)}
   </div>;
