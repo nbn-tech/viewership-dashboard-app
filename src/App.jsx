@@ -7,7 +7,7 @@ const ST = [
   { id: "THK", nm: "東海テレビ", c: "#D94F00" },
   { id: "CTV", nm: "中京テレビ", c: "#0891B2" },
   { id: "CBC", nm: "CBCテレビ", c: "#2563EB" },
-  { id: "NBN", nm: "名古屋テレビ", c: "#16A34A" },
+  { id: "NBN", nm: "メ～テレ", c: "#16A34A" },
   { id: "TVA", nm: "テレビ愛知", c: "#9333EA" },
   { id: "NHK", nm: "NHK総合", c: "#DC2626" },
   { id: "NHKE", nm: "NHKEテレ", c: "#EA580C" },
@@ -64,7 +64,7 @@ const GUIDE_ST_ORDER=["NBN","THK","CTV","CBC","NHK","NHKE","TVA"];
 // 録画パイプラインのチャンネル番号(movie/ch{N}/配下のフォルダ)→局コード。NHKEは録画対象外
 const VIDEO_CH_TO_STATION={ch1:"THK",ch2:"TVA",ch3:"NHK",ch4:"CTV",ch5:"CBC",ch6:"NBN"};
 const VIDEO_CHANNELS=Object.keys(VIDEO_CH_TO_STATION);
-const ZOOM_HALF=[5,10,15,20,30,45,60,90,120,180]; // 各ズームレベルの片側分数
+const ZOOM_WIDTHS=[120,105,90,75,60,50,40,35,25,20]; // 詳細グラフの表示幅（分）
 
 // 深夜 0:00〜4:59 は翌日扱い（分 + 1440）にして連続した時系列に変換
 function tvt2m(t){const m=t2m(t);return m<300?m+1440:m;}
@@ -833,7 +833,7 @@ function tplProgAt(tpl,stId,min){
 
 // 実番組(epg-all)×実分析コーナー(daily_corners)を、指定slot窓(朝5:30-8:30/夕方15:30-19:00)で
 // 突き合わせてtpl形式({[stId]:[[progName,startHHMM,endHHMM,corners[]],...]})に組み立てる。
-// 分析結果が無い番組はそもそも配列に含めない(=表示されない。分析が無ければ何も出さない仕様)
+// 分析結果が無い番組も番組枠として残し、詳細タイムラインでは「解析データなし」として表示する。
 function buildDayTpl(programs,corners,date,slot){
   const result={};ST.forEach(s=>result[s.id]=[]);
   if(!programs||!corners)return result;
@@ -851,11 +851,51 @@ function buildDayTpl(programs,corners,date,slot){
       return cStartAbs<p.endAbs&&cEndAbs>p.startAbs;
     }).sort((a,b)=>t2m(a.startMin)-t2m(b.startMin))
       .map(c=>[c.title,c.startMin,c.endMin,(c.segment&&SEG[c.segment])?c.segment:classifySegment(c.title,c.tags),c.tags,c.summary]);
-    if(stCorners.length===0)return; // 分析結果が無い番組は表示しない
     result[p.stId].push([p.title,fmtT(new Date(p.startAbs*60000)),fmtT(new Date(p.endAbs*60000)),stCorners]);
   });
   Object.keys(result).forEach(sid=>result[sid].sort((a,b)=>t2m(a[1])-t2m(b[1])));
   return result;
+}
+
+function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,data,metric}){
+  const total=Math.max(1,endMin-startMin);
+  const valueAt=(sid,s,e)=>{
+    const rows=data.filter(d=>d.minute>=s&&d.minute<e&&d[sid]!=null);
+    return rows.length?rows.reduce((sum,d)=>sum+d[sid],0)/rows.length:null;
+  };
+  const renderBlock=(sid,item,key,isCorner=false,noAnalysis=false)=>{
+    const s=Math.max(startMin,t2m(item.start)),e=Math.min(endMin,t2m(item.end));
+    if(e<=s)return null;
+    const st=ST.find(x=>x.id===sid),left=((s-startMin)/total)*100,width=((e-s)/total)*100;
+    const avg=valueAt(sid,s,e);
+    const isCm=isCorner&&item.segment==="cm";
+    return <button key={key} onClick={()=>onClickMinute(Math.round((s+e)/2))} title={`${item.title} ${item.start}–${item.end}`}
+      style={{position:"absolute",left:`${left}%`,width:`${width}%`,top:2,bottom:2,minWidth:isCm?3:8,overflow:"hidden",border:"1px solid rgba(255,255,255,.72)",borderRadius:1,background:isCm?"#8aa0af":`${st.c}26`,color:isCm?"#fff":st.c,cursor:"pointer",padding:"3px 5px",textAlign:"left",whiteSpace:"nowrap"}}>
+      <span style={{display:"block",fontSize:10.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis"}}>{isCm?"CM":item.title}</span>
+      {!isCm&&avg!==null&&<span style={{fontSize:11,fontWeight:700,marginRight:5}}>{avg.toFixed(1)}{metric==="rating"?"%":"%"}</span>}
+      {noAnalysis&&<span style={{fontSize:8.5,opacity:.65}}>解析データなし</span>}
+    </button>;
+  };
+  const cursorLeft=selMin==null?-1:((selMin-startMin)/total)*100;
+  return <div style={{margin:"0 18px 16px",border:"1px solid #9fc5dd",background:"rgba(242,249,255,.92)",overflow:"hidden"}}>
+    <div style={{padding:"7px 10px",borderBottom:"1px solid #9fc5dd",fontSize:12,fontWeight:700,color:"#173b5d"}}>放送内容タイムライン</div>
+    <div style={{position:"relative"}}>
+      {GUIDE_ST_ORDER.map(sid=>{
+        const st=ST.find(x=>x.id===sid),programs=tpl[sid]||[];
+        return <div key={sid} style={{display:"flex",minHeight:sid==="NBN"?62:40,borderBottom:"1px solid #b9d4e5"}}>
+          <div style={{width:96,flexShrink:0,padding:"7px 8px",background:sid==="NBN"?"#d5e5eb":"#e5f2fa",color:st.c,fontSize:10,fontWeight:700,borderRight:"1px solid #9fc5dd"}}>{sid==="NBN"?"メ～テレ":st.nm}</div>
+          <div style={{position:"relative",flex:1,minWidth:0}} onClick={e=>{const r=e.currentTarget.getBoundingClientRect();onClickMinute(Math.round(startMin+(e.clientX-r.left)/r.width*total));}}>
+            {programs.flatMap(([name,s,e,corners],pi)=>{
+              if(sid!=="NBN")return[renderBlock(sid,{title:name,start:s,end:e},`${pi}-program`)];
+              if(!corners.length)return[renderBlock(sid,{title:name,start:s,end:e},`${pi}-empty`,false,true)];
+              return corners.map(([title,cs,ce,segment],ci)=>renderBlock(sid,{title,start:cs,end:ce,segment},`${pi}-${ci}`,true,false));
+            })}
+          </div>
+        </div>;
+      })}
+      {cursorLeft>=0&&cursorLeft<=100&&<div style={{position:"absolute",top:0,bottom:0,left:`calc(96px + (100% - 96px) * ${cursorLeft/100})`,width:1,background:"#ef4444",pointerEvents:"none",zIndex:5}}/>}
+    </div>
+  </div>;
 }
 
 function SegmentBand({stId,startMin,endMin,height=14,onHover,tpl}){
@@ -2482,6 +2522,7 @@ function ProgramGuidePage({metric="rating"}){
   const[ppmIdx,setPpmIdx]=useState(3); // index3=6px/分(約2時間)
   const[tooltip,setTooltip]=useState(null); // {title,avg,stId,x,y}
   const[guideModal,setGuideModal]=useState(null); // {corner, navList, idx}
+  const[activeJumpHour,setActiveJumpHour]=useState(5);
 
   const scrollElRef=useRef(null);
   const fetchingRef=useRef(new Set()); // 取得中の日付(重複fetch防止)
@@ -2569,6 +2610,19 @@ function ProgramGuidePage({metric="rating"}){
     return marks;
   },[startOfRange,endOfRange]);
 
+  const hourGroups=[
+    {label:"午前",hours:[5,6,7,8,9,10,11]},
+    {label:"午後",hours:[12,13,14,15,16,17,18]},
+    {label:"夜",hours:[19,20,21,22,23]},
+    {label:"深夜",hours:[24,25,26,27,28]},
+  ];
+  const jumpToHour=hour=>{
+    const el=scrollElRef.current;if(!el||endOfRange<=startOfRange)return;
+    const target=localMidnightAbsMin(guideDate)+hour*60;
+    el.scrollTo({top:Math.max(0,(target-startOfRange)*PPM),behavior:"smooth"});
+    setActiveJumpHour(hour);
+  };
+
   // 過去日を前方に追加した時、見た目の位置がズレないようスクロール位置を補正する
   useLayoutEffect(()=>{
     const el=scrollElRef.current;
@@ -2586,7 +2640,7 @@ function ProgramGuidePage({metric="rating"}){
     if(target==null||!Array.isArray(epgCache[target]))return;
     const el=scrollElRef.current;
     if(el&&endOfRange>startOfRange){
-      el.scrollTop=Math.max(0,(localMidnightAbsMin(target)-startOfRange)*PPM);
+      el.scrollTop=Math.max(0,(localMidnightAbsMin(target)+5*60-startOfRange)*PPM);
       pendingJumpRef.current=null;
     }
   },[epgCache,startOfRange,endOfRange,PPM]);
@@ -2660,7 +2714,7 @@ function ProgramGuidePage({metric="rating"}){
   const hasAnyData=mergedPrograms.length>0;
   const loading=!hasAnyData&&loadedDates.some(d=>epgCache[d]===null||epgCache[d]===undefined);
 
-  return <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 88px)",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif"}}>
+  return <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - var(--topbar-height))",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif"}}>
     {/* 番組表ヘッダー */}
     <div style={{padding:"10px 18px",borderBottom:"1px solid #E5E7EB",background:"#fff",display:"flex",alignItems:"center",gap:12,flexShrink:0,flexWrap:"wrap"}}>
       <span style={{fontSize:13,fontWeight:700,color:"#111827"}}>番組表</span>
@@ -2674,6 +2728,12 @@ function ProgramGuidePage({metric="rating"}){
         <span style={{fontSize:10,fontFamily:"monospace",color:"#374151",minWidth:36,textAlign:"center"}}>×{(PPM/2).toFixed(1)}</span>
         <button onClick={()=>setPpmIdx(i=>Math.min(GUIDE_PPM_STEPS.length-1,i+1))} disabled={ppmIdx===GUIDE_PPM_STEPS.length-1} style={{width:24,height:24,border:"none",background:"transparent",cursor:ppmIdx===GUIDE_PPM_STEPS.length-1?"default":"pointer",fontSize:16,color:ppmIdx===GUIDE_PPM_STEPS.length-1?"#D1D5DB":"#374151",borderRadius:4,display:"flex",alignItems:"center",justifyContent:"center"}}>＋</button>
       </div>
+    </div>
+    <div className="tvp-hour-nav" aria-label="時刻へ移動">
+      {hourGroups.map(group=><div className="tvp-hour-group" key={group.label}>
+        <span className="tvp-hour-period">{group.label}</span>
+        {group.hours.map(hour=><button key={hour} className={`tvp-hour-button ${activeJumpHour===hour?"is-active":""}`} onClick={()=>jumpToHour(hour)}>{hour}</button>)}
+      </div>)}
     </div>
     {tooltip&&<div style={{position:"fixed",left:tooltip.x+14,top:tooltip.y-10,background:"#fff",color:"#1d1d1f",padding:"8px 12px",borderRadius:8,fontSize:11.5,pointerEvents:"none",zIndex:9999,maxWidth:220,border:"1px solid #e0e0e0",boxShadow:"0 2px 12px rgba(0,0,0,0.08)",lineHeight:1.5}}>
       <div style={{fontWeight:600,marginBottom:tooltip.avg!==null?4:0,wordBreak:"break-all",letterSpacing:"-0.224px"}}>{tooltip.title}</div>
@@ -2723,7 +2783,7 @@ function ProgramGuidePage({metric="rating"}){
                 const stDt=new Date(p.startAbs*60000);
                 const stLabel=`${String(stDt.getHours()).padStart(2,"0")}:${String(stDt.getMinutes()).padStart(2,"0")}`;
                 return <div key={p.key} onClick={()=>openGuideModal(p,sid)}
-                  style={{position:"absolute",top,left:2,right:2,height:h,background:"#fff",border:"1px solid #E5E7EB",borderLeft:`3px solid ${st.c}`,borderRadius:3,padding:"3px 5px",overflow:"hidden",cursor:"pointer",fontSize:10,display:"flex",flexDirection:"column",gap:1,transition:"background 0.1s"}}
+                  style={{position:"absolute",top,left:1,right:1,height:h,background:"#fff",border:"1px solid #9fc5dd",borderLeft:`3px solid ${st.c}`,borderRadius:2,padding:"3px 5px",overflow:"hidden",cursor:"pointer",fontSize:10,display:"flex",flexDirection:"column",gap:1,transition:"background 0.1s"}}
                   onMouseMove={e=>{e.currentTarget.style.background="#EFF6FF";e.currentTarget.style.borderColor="#BFDBFE";setTooltip({title:p.title,avg,stId:sid,x:e.clientX,y:e.clientY});}}
                   onMouseLeave={e=>{e.currentTarget.style.background="#fff";e.currentTarget.style.borderColor="#E5E7EB";setTooltip(null);}}>
                   <div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",flexShrink:0}}>{stLabel}</div>
@@ -2815,7 +2875,7 @@ export default function App(){
   const pendingSeekRef=useRef(null);
   const[page,setPage]=useState(PROGRAM_MODE?"dashboard":"guide");
   const[programContext]=useState(PROGRAM_MODE?{name:PM_NAME,stId:PM_STATION,date:PM_DATE,start:PM_START,end:PM_END,center:Math.floor((PM_START+PM_END)/2),slot:PM_SLOT}:null);
-  const[zoomLevel,setZoomLevel]=useState(4);
+  const[zoomLevel,setZoomLevel]=useState(0);
   const[panCenter,setPanCenter]=useState(null);
   const[metric,setMetric]=useState("rating");
   const[dashMode,setDashMode]=useState("chart");
@@ -2892,12 +2952,15 @@ export default function App(){
   // 分析結果が無い番組はそもそも配列に含めない(=表示されない。分析が無ければ何も出さない仕様)
   const dashTpl=useMemo(()=>buildDayTpl(dashEpgCache[date],dashCornerCache[date],date,slot),[dashEpgCache,dashCornerCache,date,slot]);
   const dashDataLoading=dashEpgCache[date]==null||dashCornerCache[date]==null;
-  const zoomHalf=ZOOM_HALF[zoomLevel];
   const progCenter=programContext?.center??null;
   const slotStart=slot==='morning'?330:930,slotEnd=slot==='morning'?510:1140;
-  const effectiveCenter=panCenter??progCenter;
-  const winStart=effectiveCenter!==null?Math.max(slotStart,effectiveCenter-zoomHalf):slotStart;
-  const winEnd=effectiveCenter!==null?Math.min(slotEnd,effectiveCenter+zoomHalf):slotEnd;
+  const domainStart=programContext?Math.max(slotStart,programContext.start-30):slotStart;
+  const domainEnd=programContext?Math.min(slotEnd,programContext.end+30):slotEnd;
+  const viewWidth=programContext?Math.min(ZOOM_WIDTHS[zoomLevel],domainEnd-domainStart):domainEnd-domainStart;
+  const minCenter=domainStart+viewWidth/2,maxCenter=domainEnd-viewWidth/2;
+  const effectiveCenter=programContext?Math.max(minCenter,Math.min(maxCenter,panCenter??progCenter)):null;
+  const winStart=effectiveCenter!==null?effectiveCenter-viewWidth/2:slotStart;
+  const winEnd=effectiveCenter!==null?effectiveCenter+viewWidth/2:slotEnd;
   const chartData=useMemo(()=>{
     if(effectiveCenter===null)return dData;
     const filtered=dData.filter(d=>d.minute>=winStart&&d.minute<=winEnd);
@@ -2906,9 +2969,9 @@ export default function App(){
   const handlePan=useCallback((deltaMin)=>{
     setPanCenter(c=>{
       const base=c??progCenter??Math.floor((slotStart+slotEnd)/2);
-      return Math.max(slotStart+zoomHalf,Math.min(slotEnd-zoomHalf,base+deltaMin));
+      return Math.max(minCenter,Math.min(maxCenter,base+deltaMin));
     });
-  },[progCenter,slotStart,slotEnd,zoomHalf]);
+  },[progCenter,slotStart,slotEnd,minCenter,maxCenter]);
   useEffect(()=>{setPanCenter(null);},[slot,date]);
   const tog=id=>setSel(p=>p.includes(id)?p.filter(s=>s!==id):[...p,id]);
   const click=m=>{setSelMin(m);const r=rData.find(d=>d.minute===m),s=sData.find(d=>d.minute===m);setSelData({rating:r,share:s});setHL(null);};
@@ -2951,42 +3014,41 @@ export default function App(){
   const dow=ds=>["日","月","火","水","木","金","土"][new Date(ds).getDay()];
   const isWd=ds=>{const d=new Date(ds).getDay();return d!==0&&d!==6;};
 
-  const NavBar=()=><div style={{position:"sticky",top:0,zIndex:100}}>
-    <div style={{background:"#000",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0 18px",height:44}}>
+  const NavBar=()=> <>
+    <header className="tvp-topbar">
       <div style={{display:"flex",alignItems:"center",gap:12}}>
         <span style={{fontSize:14,fontWeight:600,color:"#fff",letterSpacing:"-0.28px"}}>視聴率ダッシュボード</span>
         <span style={{fontSize:11,color:"rgba(255,255,255,0.4)",letterSpacing:"0.06em"}}>在名7局</span>
       </div>
-      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+      <div style={{display:"flex",gap:8,alignItems:"center"}} aria-label="指標切り替え">
         <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid rgba(255,255,255,0.2)"}}>
-          {[{id:"rating",l:"視聴率"},{id:"share",l:"占拠率"}].map(m=><button key={m.id} onClick={()=>setMetric(m.id)} style={{padding:"5px 14px",border:"none",background:metric===m.id?"#0066cc":"transparent",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:400,letterSpacing:"-0.12px"}}>{m.l}</button>)}
-        </div>
-        <div style={{display:"flex",gap:2}}>
-          {[{id:"guide",l:"番組表"},{id:"dashboard",l:"Dashboard"},{id:"search",l:"Search"},{id:"analysis",l:"Analysis"}].map(p=><button key={p.id} onClick={()=>setPage(p.id)} style={{padding:"6px 12px",borderRadius:9999,border:"none",background:page===p.id?"#0066cc":"transparent",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:400,letterSpacing:"-0.12px"}}>{p.l}</button>)}
+          {[{id:"rating",l:"視聴率"},{id:"share",l:"占拠率"}].map(m=><button key={m.id} onClick={()=>setMetric(m.id)} style={{padding:"5px 14px",border:"none",background:metric===m.id?"var(--metele-accent)":"transparent",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:400,letterSpacing:"-0.12px"}}>{m.l}</button>)}
         </div>
       </div>
-    </div>
-    <div style={{background:"#f5f5f7",borderBottom:"1px solid #e0e0e0",padding:"5px 18px",fontSize:11,color:"#7a7a7a"}}>
-      <button onClick={()=>setBannerOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:6,background:"transparent",border:"none",padding:0,cursor:"pointer",color:"#7a7a7a",fontSize:11}}>
-        <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:14,height:14,borderRadius:9999,border:"1px solid #7a7a7a",fontSize:9,lineHeight:1,fontStyle:"italic",fontFamily:"Georgia,serif"}}>i</span>
-        <span>データについて</span>
-        <span style={{fontSize:8}}>{bannerOpen?"▲":"▼"}</span>
-      </button>
-      {bannerOpen&&<div style={{marginTop:5,lineHeight:1.6,maxWidth:920}}>視聴率は4/1〜4/14・4/17が実データ（名古屋地区・世帯視聴率）、それ以外はデモデータです。番組表・天気は実データです。番組内容・コーナー情報は、実際の放送内容を分析した結果がある部分のみ実データを表示し（現状は主に2026年7月分）、分析結果が無い部分は表示されません。</div>}
-    </div>
-  </div>;
+    </header>
+    <aside className="tvp-sidebar">
+      <div className="tvp-sidebar-label">メニュー</div>
+      {[{id:"guide",l:"番組表"},{id:"dashboard",l:"視聴率ダッシュボード"},{id:"search",l:"番組・放送内容検索"},{id:"analysis",l:"AI分析"}].map(p=><button key={p.id} className={`tvp-nav-button ${page===p.id?"is-active":""}`} onClick={()=>setPage(p.id)}>{p.l}</button>)}
+      <div className="tvp-info-wrap">
+        <button className="tvp-info-button" onClick={()=>setBannerOpen(o=>!o)}>
+          <span style={{marginRight:6}}>ⓘ</span>データについて <span style={{float:"right"}}>{bannerOpen?"▲":"▼"}</span>
+        </button>
+        {bannerOpen&&<div className="tvp-info-copy">視聴率は4/1〜4/14・4/17が実データ（名古屋地区・世帯視聴率）、それ以外はデモデータです。番組表・天気は実データです。番組内容・コーナー情報は、実際の放送内容を分析した結果がある部分のみ実データを表示し（現状は主に2026年7月分）、分析結果が無い部分は表示されません。</div>}
+      </div>
+    </aside>
+  </>;
 
   const ratingsCache=rCache;
 
   if(page==="guide"){
-    return <div style={{width:"100%",minHeight:"100vh",background:"#f5f5f7",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif",color:"#111827"}}>
+    return <div className="app-root" style={{width:"100%",minHeight:"100vh",background:"#f5f5f7",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif",color:"#111827"}}>
       <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}`}</style>
       <NavBar/>
       <ProgramGuidePage metric={metric}/>
     </div>;
   }
   if(page==="search"){
-    return <div style={{width:"100%",minHeight:"100vh",background:"#f5f5f7",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif",color:"#111827"}}>
+    return <div className="app-root" style={{width:"100%",minHeight:"100vh",background:"#f5f5f7",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif",color:"#111827"}}>
       <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       <NavBar/>
       <SearchPage page={page} setPage={setPage}
@@ -2999,7 +3061,7 @@ export default function App(){
     </div>;
   }
   if(page==="analysis"){
-    return <div style={{width:"100%",minHeight:"100vh",background:"#f5f5f7",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif",color:"#111827"}}>
+    return <div className="app-root" style={{width:"100%",minHeight:"100vh",background:"#f5f5f7",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif",color:"#111827"}}>
       <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       <NavBar/>
       <AnalysisPage page={page} setPage={setPage} metric={metric} setMetric={setMetric} ratingsCache={ratingsCache} weatherData={weatherData}
@@ -3017,7 +3079,7 @@ export default function App(){
     </div>;
   }
 
-  return <div style={{width:"100%",minHeight:"100vh",background:"#f5f5f7",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif",color:"#111827"}}>
+  return <div className="app-root" style={{width:"100%",minHeight:"100vh",background:"#f5f5f7",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif",color:"#111827"}}>
     <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}`}</style>
     <NavBar/>
     <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",padding:"10px 18px",borderBottom:"1px solid #F3F4F6",background:"#fff"}}>
@@ -3038,9 +3100,15 @@ export default function App(){
         <span style={{fontSize:10,color:"#7a7a7a",fontFamily:"monospace"}}>{m2t(programContext.start)}–{m2t(programContext.end)}</span>
       </div>}
     </div>
-    {programContext&&dashMode==="chart"&&<div style={{display:"flex",alignItems:"center",gap:5,padding:"5px 18px",background:"#FAFAFA",borderBottom:"1px solid #F3F4F6",flexWrap:"wrap"}}>
-      <span style={{fontSize:10.5,color:"#7a7a7a",fontWeight:600,marginRight:4}}>ズーム</span>
-      {ZOOM_HALF.map((h,i)=><button key={i} onClick={()=>setZoomLevel(i)} style={{padding:"3px 9px",borderRadius:8,border:"1px solid",borderColor:zoomLevel===i?"#0066cc":"#e0e0e0",background:zoomLevel===i?"#0066cc":"#fff",color:zoomLevel===i?"#fff":"#7a7a7a",fontSize:10.5,cursor:"pointer",fontFamily:"monospace",fontWeight:zoomLevel===i?600:400}}>±{h}分</button>)}
+    {programContext&&dashMode==="chart"&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 18px",background:"#e5f2fa",borderBottom:"1px solid #9fc5dd",flexWrap:"wrap"}}>
+      <span style={{fontSize:10.5,color:"#56778e",fontWeight:700}}>表示範囲 {m2t(Math.round(winStart))}–{m2t(Math.round(winEnd))}</span>
+      <button onClick={()=>handlePan(-viewWidth*.25)} disabled={winStart<=domainStart} style={{width:28,height:24,border:"1px solid #9fc5dd",background:"#fff",color:"#173b5d",cursor:winStart<=domainStart?"default":"pointer",opacity:winStart<=domainStart ? .35 : 1}}>◀</button>
+      <button onClick={()=>handlePan(viewWidth*.25)} disabled={winEnd>=domainEnd} style={{width:28,height:24,border:"1px solid #9fc5dd",background:"#fff",color:"#173b5d",cursor:winEnd>=domainEnd?"default":"pointer",opacity:winEnd>=domainEnd ? .35 : 1}}>▶</button>
+      <span style={{fontSize:10,color:"#56778e",marginLeft:"auto"}}>zoom</span>
+      <span style={{fontSize:15,color:"#56778e"}}>−</span>
+      <input className="tvp-zoom-range" type="range" min="0" max={ZOOM_WIDTHS.length-1} step="1" value={zoomLevel} onChange={e=>setZoomLevel(Number(e.target.value))}/>
+      <span style={{fontSize:15,color:"#56778e"}}>＋</span>
+      <span style={{minWidth:42,fontSize:10,fontFamily:"monospace",color:"#173b5d"}}>{Math.round(viewWidth)}分</span>
     </div>}
     {dashMode==="chart"?<div style={{display:"flex",height:programContext?"calc(100vh - 140px)":"calc(100vh - 100px)"}}>
       <div style={{flex:"1 1 0",display:"flex",flexDirection:"column",minWidth:0,overflowY:"auto"}}>
@@ -3066,10 +3134,7 @@ export default function App(){
           {noVideoForTime&&<div style={{padding:"20px 0",textAlign:"center",fontSize:12,color:"#9CA3AF"}}>この時刻の動画はありません</div>}
           {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls onLoadedMetadata={()=>{if(videoRef.current&&pendingSeekRef.current!==null){videoRef.current.currentTime=pendingSeekRef.current;pendingSeekRef.current=null;}}} onEnded={()=>{if(!videoFiles)return;const idx=videoFiles.findIndex(f=>`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${f.key}`===videoUrl);if(idx===-1||idx===videoFiles.length-1)return;const nxt=videoFiles[idx+1];const nxtUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}} style={{width:"100%",borderRadius:8,background:"#000",maxHeight:400}}/>}
         </div>}
-        <div style={{padding:"0 18px"}}>
-          <SegmentBands slot={slot} sel={sel} selMin={selMin} onClickMinute={click} tpl={dashTpl} customStart={programContext?winStart:undefined} customEnd={programContext?winEnd:undefined}/>
-        </div>
-        <div style={{padding:"0 18px 16px"}}><SegmentLegend/></div>
+        <BroadcastTimeline tpl={dashTpl} startMin={programContext?winStart:slotStart} endMin={programContext?winEnd:slotEnd} selMin={selMin} onClickMinute={click} data={dData} metric={metric}/>
       </div>
       <div style={{width:340,minWidth:290,flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column"}}>
         <Panel selMin={selMin} rData={selData} allR={rData} allS={sData} sel={sel} onHL={setHL} metric={metric} tpl={dashTpl}/>
