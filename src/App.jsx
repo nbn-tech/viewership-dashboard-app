@@ -836,11 +836,12 @@ function tplProgAt(tpl,stId,min){
 // 分析結果が無い番組も番組枠として残し、詳細タイムラインでは「解析データなし」として表示する。
 function buildDayTpl(programs,corners,date,slot){
   const result={};ST.forEach(s=>result[s.id]=[]);
-  if(!programs||!corners)return result;
+  if(!programs)return result;
+  const safeCorners=corners||[];
   const dayMid=localMidnightAbsMin(date);
   const slotStartAbs=dayMid+(slot==="morning"?330:930),slotEndAbs=dayMid+(slot==="morning"?510:1140);
   const cornersByStation={};
-  corners.forEach(c=>{if(!c.date||!c.startMin)return;(cornersByStation[c.stId]=cornersByStation[c.stId]||[]).push(c);});
+  safeCorners.forEach(c=>{if(!c.date||!c.startMin)return;(cornersByStation[c.stId]=cornersByStation[c.stId]||[]).push(c);});
   const fmtT=d=>`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
   programs.forEach(p=>{
     if(!result[p.stId])return; // NHKE等、実分析対象外の局はそもそもcornersByStationに無い
@@ -857,40 +858,79 @@ function buildDayTpl(programs,corners,date,slot){
   return result;
 }
 
-function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,data,metric}){
-  const total=Math.max(1,endMin-startMin);
+function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,data,metric,loading,error,onRetry}){
+  const[expandedCorner,setExpandedCorner]=useState(null);
+  const dataStart=data?.[0]?.minute,dataEnd=data?.length?data[data.length-1].minute+1:null;
+  const validRange=Number.isFinite(startMin)&&Number.isFinite(endMin)&&endMin>startMin;
+  const rangeStart=validRange?startMin:(dataStart??0),rangeEnd=validRange?endMin:(dataEnd??rangeStart+1);
+  const total=Math.max(1,rangeEnd-rangeStart);
+  useEffect(()=>setExpandedCorner(null),[tpl,rangeStart,rangeEnd]);
   const valueAt=(sid,s,e)=>{
     const rows=data.filter(d=>d.minute>=s&&d.minute<e&&d[sid]!=null);
     return rows.length?rows.reduce((sum,d)=>sum+d[sid],0)/rows.length:null;
   };
-  const renderBlock=(sid,item,key,isCorner=false,noAnalysis=false)=>{
-    const s=Math.max(startMin,t2m(item.start)),e=Math.min(endMin,t2m(item.end));
+  const renderBlock=(sid,item,key,{isCorner=false,noAnalysis=false,top=2,bottom=2,major=false}={})=>{
+    const s=Math.max(rangeStart,t2m(item.start)),e=Math.min(rangeEnd,t2m(item.end));
     if(e<=s)return null;
-    const st=ST.find(x=>x.id===sid),left=((s-startMin)/total)*100,width=((e-s)/total)*100;
+    const st=ST.find(x=>x.id===sid),left=((s-rangeStart)/total)*100,width=((e-s)/total)*100;
     const avg=valueAt(sid,s,e);
     const isCm=isCorner&&item.segment==="cm";
-    return <button key={key} onClick={()=>onClickMinute(Math.round((s+e)/2))} title={`${item.title} ${item.start}–${item.end}`}
-      style={{position:"absolute",left:`${left}%`,width:`${width}%`,top:2,bottom:2,minWidth:isCm?3:8,overflow:"hidden",border:"1px solid rgba(255,255,255,.72)",borderRadius:1,background:isCm?"#8aa0af":`${st.c}26`,color:isCm?"#fff":st.c,cursor:"pointer",padding:"3px 5px",textAlign:"left",whiteSpace:"nowrap"}}>
-      <span style={{display:"block",fontSize:10.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis"}}>{isCm?"CM":item.title}</span>
-      {!isCm&&avg!==null&&<span style={{fontSize:11,fontWeight:700,marginRight:5}}>{avg.toFixed(1)}{metric==="rating"?"%":"%"}</span>}
+    const canExpand=isCorner&&!major&&!isCm;
+    return <button key={key} onClick={ev=>{ev.stopPropagation();onClickMinute(Math.round((s+e)/2));if(canExpand)setExpandedCorner(prev=>prev?.key===key?null:{...item,key,sid});}} title={`${item.title} ${item.start}–${item.end}`}
+      style={{position:"absolute",left:`${left}%`,width:`${width}%`,top,bottom,minWidth:isCm?3:8,overflow:"hidden",border:"1px solid rgba(255,255,255,.78)",borderRadius:1,background:isCm?"#8aa0af":major?`${st.c}38`:`${st.c}20`,color:isCm?"#fff":st.c,cursor:"pointer",padding:major?"3px 6px":"2px 5px",textAlign:"left",whiteSpace:"nowrap"}}>
+      <span style={{display:"block",fontSize:major?10.5:9.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis"}}>{isCm?"CM":item.title}</span>
+      {!isCm&&avg!==null&&<span style={{fontSize:major?11:9.5,fontWeight:700,marginRight:5}}>{avg.toFixed(1)}%</span>}
       {noAnalysis&&<span style={{fontSize:8.5,opacity:.65}}>解析データなし</span>}
     </button>;
   };
-  const cursorLeft=selMin==null?-1:((selMin-startMin)/total)*100;
+  const cursorLeft=selMin==null?-1:((selMin-rangeStart)/total)*100;
   return <div style={{margin:"0 18px 16px",border:"1px solid #9fc5dd",background:"rgba(242,249,255,.92)",overflow:"hidden"}}>
-    <div style={{padding:"7px 10px",borderBottom:"1px solid #9fc5dd",fontSize:12,fontWeight:700,color:"#173b5d"}}>放送内容タイムライン</div>
+    <div style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",borderBottom:"1px solid #9fc5dd",fontSize:12,fontWeight:700,color:"#173b5d"}}>
+      <span>放送内容タイムライン</span>
+      <span style={{fontSize:9.5,fontWeight:400,color:"#56778e",fontFamily:"monospace"}}>{m2t(Math.round(rangeStart))}–{m2t(Math.round(rangeEnd))}</span>
+      {loading&&<span style={{marginLeft:"auto",fontSize:10,fontWeight:400,color:"#56778e"}}>番組情報を読み込み中…</span>}
+      {error&&<button onClick={onRetry} style={{marginLeft:"auto",padding:"3px 9px",border:"1px solid #dc2626",borderRadius:4,background:"#fff",color:"#dc2626",fontSize:10,cursor:"pointer"}}>取得に失敗しました・再読み込み</button>}
+    </div>
     <div style={{position:"relative"}}>
       {GUIDE_ST_ORDER.map(sid=>{
         const st=ST.find(x=>x.id===sid),programs=tpl[sid]||[];
-        return <div key={sid} style={{display:"flex",minHeight:sid==="NBN"?62:40,borderBottom:"1px solid #b9d4e5"}}>
-          <div style={{width:96,flexShrink:0,padding:"7px 8px",background:sid==="NBN"?"#d5e5eb":"#e5f2fa",color:st.c,fontSize:10,fontWeight:700,borderRight:"1px solid #9fc5dd"}}>{sid==="NBN"?"メ～テレ":st.nm}</div>
-          <div style={{position:"relative",flex:1,minWidth:0}} onClick={e=>{const r=e.currentTarget.getBoundingClientRect();onClickMinute(Math.round(startMin+(e.clientX-r.left)/r.width*total));}}>
-            {programs.flatMap(([name,s,e,corners],pi)=>{
-              if(sid!=="NBN")return[renderBlock(sid,{title:name,start:s,end:e},`${pi}-program`)];
-              if(!corners.length)return[renderBlock(sid,{title:name,start:s,end:e},`${pi}-empty`,false,true)];
-              return corners.map(([title,cs,ce,segment],ci)=>renderBlock(sid,{title,start:cs,end:ce,segment},`${pi}-${ci}`,true,false));
-            })}
+        const fineCorners=sid==="NBN"?programs.flatMap(([name,s,e,corners],pi)=>corners.length
+          ?corners.map(([title,cs,ce,segment,tags,summary],ci)=>({title,start:cs,end:ce,segment,tags:tags||[],summary:summary||"",key:`${pi}-${ci}`}))
+          :[{title:name,start:s,end:e,segment:"other",tags:[],summary:"",noAnalysis:true,key:`${pi}-empty`}]
+        ):[];
+        const majorGroups=[];
+        fineCorners.forEach(c=>{
+          const last=majorGroups[majorGroups.length-1],label=c.noAnalysis?c.title:(SEG[c.segment]?.lb||"その他");
+          if(last&&!c.noAnalysis&&last.segment===c.segment&&t2m(c.start)<=t2m(last.end)+1){last.end=c.end;last.items.push(c);}
+          else majorGroups.push({title:label,start:c.start,end:c.end,segment:c.segment,items:[c],key:`major-${c.key}`});
+        });
+        return <div key={sid}>
+          <div style={{display:"flex",height:sid==="NBN"?72:40,borderBottom:"1px solid #b9d4e5"}}>
+            <div style={{width:96,flexShrink:0,padding:"7px 8px",background:sid==="NBN"?"#d5e5eb":"#e5f2fa",color:st.c,fontSize:10,fontWeight:700,borderRight:"1px solid #9fc5dd"}}>
+              <div>{sid==="NBN"?"メ～テレ":st.nm}</div>
+              {sid==="NBN"&&<div style={{marginTop:7,fontSize:8,color:"#56778e",fontWeight:400}}>大分類／コーナー</div>}
+            </div>
+            <div style={{position:"relative",flex:1,minWidth:0}} onClick={e=>{const r=e.currentTarget.getBoundingClientRect();onClickMinute(Math.round(rangeStart+(e.clientX-r.left)/r.width*total));}}>
+              {sid!=="NBN"&&programs.map(([name,s,e],pi)=>renderBlock(sid,{title:name,start:s,end:e},`${pi}-program`))}
+              {sid==="NBN"&&<>
+                <div style={{position:"absolute",left:0,right:0,top:35,borderTop:"1px solid #b9d4e5"}}/>
+                {majorGroups.map(group=>renderBlock(sid,group,group.key,{top:2,bottom:37,major:true,noAnalysis:group.items[0]?.noAnalysis}))}
+                {fineCorners.map(c=>renderBlock(sid,c,c.key,{top:37,bottom:2,isCorner:!c.noAnalysis,noAnalysis:c.noAnalysis}))}
+              </>}
+            </div>
           </div>
+          {sid==="NBN"&&expandedCorner&&<div style={{display:"flex",borderBottom:"1px solid #b9d4e5",background:"#fff"}}>
+            <div style={{width:96,flexShrink:0,borderRight:"1px solid #9fc5dd",background:"#e5f2fa"}}/>
+            <div style={{flex:1,padding:"10px 14px",color:"#173b5d"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
+                <span style={{fontSize:11.5,fontWeight:700,color:st.c}}>{expandedCorner.title}</span>
+                <span style={{fontSize:9.5,fontFamily:"monospace",color:"#56778e"}}>{expandedCorner.start}–{expandedCorner.end}</span>
+                <button onClick={()=>setExpandedCorner(null)} style={{marginLeft:"auto",border:0,background:"transparent",color:"#789",cursor:"pointer",fontSize:14}}>×</button>
+              </div>
+              <div style={{fontSize:11,lineHeight:1.7,whiteSpace:"pre-wrap"}}>{expandedCorner.summary||"このコーナーの内容データはありません。"}</div>
+              {expandedCorner.tags?.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:7}}>{expandedCorner.tags.map(tag=><span key={tag} style={{padding:"1px 6px",border:"1px solid #c9dce8",borderRadius:3,fontSize:9,color:"#56778e"}}>#{tag}</span>)}</div>}
+            </div>
+          </div>}
         </div>;
       })}
       {cursorLeft>=0&&cursorLeft<=100&&<div style={{position:"absolute",top:0,bottom:0,left:`calc(96px + (100% - 96px) * ${cursorLeft/100})`,width:1,background:"#ef4444",pointerEvents:"none",zIndex:5}}/>}
@@ -2929,6 +2969,8 @@ export default function App(){
   // Dashboard実データ: 選択中の日付の番組表(epg-all)と実分析コーナー(daily_corners)を取得
   const[dashEpgCache,setDashEpgCache]=useState({}); // date -> programs[](絶対分)|null(読み込み中)
   const[dashCornerCache,setDashCornerCache]=useState({}); // date -> corners[]|null(読み込み中)
+  const[dashLoadErrors,setDashLoadErrors]=useState({}); // date -> {epg, corners}
+  const[dashRetryVersion,setDashRetryVersion]=useState(0);
   useEffect(()=>{
     if(date in dashEpgCache)return;
     setDashEpgCache(prev=>({...prev,[date]:null}));
@@ -2936,22 +2978,29 @@ export default function App(){
     const isJson=parseInt(yyyymmdd)>=20260616;
     fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/epg-all/bangumi_${yyyymmdd}.${isJson?'json':'csv'}`)
       .then(r=>r.ok?(isJson?r.json():r.text()):Promise.reject())
-      .then(raw=>setDashEpgCache(prev=>({...prev,[date]:parseEpgTimeline(raw,isJson,date)})))
-      .catch(()=>setDashEpgCache(prev=>({...prev,[date]:[]})));
-  },[date]);
+      .then(raw=>{setDashEpgCache(prev=>({...prev,[date]:parseEpgTimeline(raw,isJson,date)}));setDashLoadErrors(prev=>({...prev,[date]:{...(prev[date]||{}),epg:null}}));})
+      .catch(()=>{setDashEpgCache(prev=>({...prev,[date]:[]}));setDashLoadErrors(prev=>({...prev,[date]:{...(prev[date]||{}),epg:"番組表データを取得できませんでした"}}));});
+  },[date,dashRetryVersion]);
   useEffect(()=>{
     if(date in dashCornerCache)return;
     setDashCornerCache(prev=>({...prev,[date]:null}));
     apiClient.annotationListByDate(date)
-      .then(results=>setDashCornerCache(prev=>({...prev,[date]:results})))
-      .catch(()=>setDashCornerCache(prev=>({...prev,[date]:[]})));
-  },[date]);
+      .then(results=>{setDashCornerCache(prev=>({...prev,[date]:results}));setDashLoadErrors(prev=>({...prev,[date]:{...(prev[date]||{}),corners:null}}));})
+      .catch(()=>{setDashCornerCache(prev=>({...prev,[date]:[]}));setDashLoadErrors(prev=>({...prev,[date]:{...(prev[date]||{}),corners:"解析データを取得できませんでした"}}));});
+  },[date,dashRetryVersion]);
 
   // 実番組(epg-all)×実分析コーナー(daily_corners)を、選択中のslot窓(朝5:30-8:30/夕方15:30-19:00)で
   // 突き合わせてtpl形式({[stId]:[[progName,startHHMM,endHHMM,corners[]],...]})に組み立てる。
   // 分析結果が無い番組はそもそも配列に含めない(=表示されない。分析が無ければ何も出さない仕様)
   const dashTpl=useMemo(()=>buildDayTpl(dashEpgCache[date],dashCornerCache[date],date,slot),[dashEpgCache,dashCornerCache,date,slot]);
   const dashDataLoading=dashEpgCache[date]==null||dashCornerCache[date]==null;
+  const dashDataError=[dashLoadErrors[date]?.epg,dashLoadErrors[date]?.corners].filter(Boolean).join("／");
+  const retryDashData=()=>{
+    setDashEpgCache(prev=>{const next={...prev};delete next[date];return next;});
+    setDashCornerCache(prev=>{const next={...prev};delete next[date];return next;});
+    setDashLoadErrors(prev=>{const next={...prev};delete next[date];return next;});
+    setDashRetryVersion(v=>v+1);
+  };
   const progCenter=programContext?.center??null;
   const slotStart=slot==='morning'?330:930,slotEnd=slot==='morning'?510:1140;
   const domainStart=programContext?Math.max(slotStart,programContext.start-30):slotStart;
@@ -3134,7 +3183,11 @@ export default function App(){
           {noVideoForTime&&<div style={{padding:"20px 0",textAlign:"center",fontSize:12,color:"#9CA3AF"}}>この時刻の動画はありません</div>}
           {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls onLoadedMetadata={()=>{if(videoRef.current&&pendingSeekRef.current!==null){videoRef.current.currentTime=pendingSeekRef.current;pendingSeekRef.current=null;}}} onEnded={()=>{if(!videoFiles)return;const idx=videoFiles.findIndex(f=>`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${f.key}`===videoUrl);if(idx===-1||idx===videoFiles.length-1)return;const nxt=videoFiles[idx+1];const nxtUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}} style={{width:"100%",borderRadius:8,background:"#000",maxHeight:400}}/>}
         </div>}
-        <BroadcastTimeline tpl={dashTpl} startMin={programContext?winStart:slotStart} endMin={programContext?winEnd:slotEnd} selMin={selMin} onClickMinute={click} data={dData} metric={metric}/>
+        <BroadcastTimeline tpl={dashTpl}
+          startMin={chartData.length?chartData[0].minute:(programContext?winStart:slotStart)}
+          endMin={chartData.length?chartData[chartData.length-1].minute+1:(programContext?winEnd:slotEnd)}
+          selMin={selMin} onClickMinute={click} data={dData} metric={metric}
+          loading={dashDataLoading} error={dashDataError} onRetry={retryDashData}/>
       </div>
       <div style={{width:340,minWidth:290,flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column",position:"sticky",top:"var(--topbar-height)",maxHeight:"calc(100vh - var(--topbar-height))",overflowY:"auto"}}>
         <Panel selMin={selMin} rData={selData} allR={rData} allS={sData} sel={sel} onHL={setHL} metric={metric} tpl={dashTpl}/>
