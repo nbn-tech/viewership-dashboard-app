@@ -859,6 +859,8 @@ function buildDayTpl(programs,corners,date,slot){
   return result;
 }
 
+const TIMELINE_LABEL_WIDTH=96;
+
 function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineBlockClick,onHighlight,data,metric,loading,error,onRetry}){
   const[expandedCorner,setExpandedCorner]=useState(null);
   const[hoveredBlock,setHoveredBlock]=useState(null);
@@ -901,7 +903,7 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
     </div>
     <div style={{position:"relative"}}>
       <div style={{display:"flex",height:26,borderBottom:"1px solid #9fc5dd",background:"#e5f2fa"}}>
-        <div style={{width:96,flexShrink:0,padding:"7px 8px",borderRight:"1px solid #9fc5dd",fontSize:8.5,fontWeight:700,color:"#56778e"}}>時刻</div>
+        <div style={{width:TIMELINE_LABEL_WIDTH,flexShrink:0,padding:"7px 8px",borderRight:"1px solid #9fc5dd",fontSize:8.5,fontWeight:700,color:"#56778e"}}>時刻</div>
         <div style={{position:"relative",flex:1,minWidth:0}}>
           {timeTicks.map(minute=>{
             const left=((minute-rangeStart)/total)*100;
@@ -913,7 +915,7 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
       </div>
       {timeTicks.map(minute=>{
         const left=((minute-rangeStart)/total)*100;
-        return <div key={`grid-${minute}`} style={{position:"absolute",top:26,bottom:0,left:`calc(96px + (100% - 96px) * ${left/100})`,width:1,background:"rgba(159,197,221,.48)",pointerEvents:"none",zIndex:2}}/>;
+        return <div key={`grid-${minute}`} style={{position:"absolute",top:26,bottom:0,left:`calc(${TIMELINE_LABEL_WIDTH}px + (100% - ${TIMELINE_LABEL_WIDTH}px) * ${left/100})`,width:1,background:"rgba(159,197,221,.48)",pointerEvents:"none",zIndex:2}}/>;
       })}
       {GUIDE_ST_ORDER.map(sid=>{
         const st=ST.find(x=>x.id===sid),programs=tpl[sid]||[];
@@ -930,7 +932,7 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
         });
         return <div key={sid}>
           <div style={{display:"flex",height:hasAnalysis?72:40,borderBottom:"1px solid #b9d4e5"}}>
-            <div style={{width:96,flexShrink:0,padding:"7px 8px",background:hasAnalysis?"#d5e5eb":"#e5f2fa",color:st.c,fontSize:10,fontWeight:700,borderRight:"1px solid #9fc5dd"}}>
+            <div style={{width:TIMELINE_LABEL_WIDTH,flexShrink:0,padding:"7px 8px",background:hasAnalysis?"#d5e5eb":"#e5f2fa",color:st.c,fontSize:10,fontWeight:700,borderRight:"1px solid #9fc5dd"}}>
               <div>{sid==="NBN"?"メ～テレ":st.nm}</div>
               {hasAnalysis&&<div style={{marginTop:7,fontSize:8,color:"#56778e",fontWeight:400}}>大分類／コーナー</div>}
             </div>
@@ -944,7 +946,7 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
             </div>
           </div>
           {expandedCorner?.sid===sid&&<div style={{display:"flex",borderBottom:"1px solid #b9d4e5",background:"#fff"}}>
-            <div style={{width:96,flexShrink:0,borderRight:"1px solid #9fc5dd",background:"#e5f2fa"}}/>
+            <div style={{width:TIMELINE_LABEL_WIDTH,flexShrink:0,borderRight:"1px solid #9fc5dd",background:"#e5f2fa"}}/>
             <div style={{flex:1,padding:"10px 14px",color:"#173b5d"}}>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
                 <span style={{fontSize:11.5,fontWeight:700,color:st.c}}>{expandedCorner.title}</span>
@@ -957,7 +959,7 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
           </div>}
         </div>;
       })}
-      {cursorLeft>=0&&cursorLeft<=100&&<div style={{position:"absolute",top:0,bottom:0,left:`calc(96px + (100% - 96px) * ${cursorLeft/100})`,width:1,background:"#ef4444",pointerEvents:"none",zIndex:5}}/>}
+      {cursorLeft>=0&&cursorLeft<=100&&<div style={{position:"absolute",top:0,bottom:0,left:`calc(${TIMELINE_LABEL_WIDTH}px + (100% - ${TIMELINE_LABEL_WIDTH}px) * ${cursorLeft/100})`,width:1,background:"#ef4444",pointerEvents:"none",zIndex:5}}/>}
     </div>
   </div>;
 }
@@ -987,12 +989,15 @@ function Chart({data,sel,onClick,selMin,hl,metric,onPan}){
   const dragX=useRef(0);
   const hasDragged=useRef(false);
   useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setD({w:e.contentRect.width,h:Math.min(400,Math.max(280,e.contentRect.height))});});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
-  const p={t:28,r:16,b:38,l:34},cW=d.w-p.l-p.r,cH=d.h-p.t-p.b;
-  const mpp=data.length>1?(data.length-1)/cW:1;
+  // タイムラインの局名列と同じ幅を左に確保し、両者の時刻軸を同じX座標に揃える
+  const p={t:28,r:0,b:38,l:TIMELINE_LABEL_WIDTH},cW=d.w-p.l-p.r,cH=d.h-p.t-p.b;
+  // 1分値は「その分の開始位置」に置く。右端は最後の1分が終わる時刻なので、
+  // タイムラインの [start, end) と同じ時間スケールになる。
+  const mpp=data.length>0?data.length/cW:1;
   const mx=useMemo(()=>{if(metric==="share")return 60;let x=0;data.forEach(dt=>sel.forEach(s=>{if(dt[s]>x)x=dt[s];}));return Math.ceil(x+1);},[data,sel,metric]);
-  const xS=useCallback(i=>p.l+(i/(data.length-1))*cW,[data.length,cW]);
+  const xS=useCallback(i=>p.l+(i/Math.max(1,data.length))*cW,[data.length,cW]);
   const yS=useCallback(v=>p.t+cH-(v/mx)*cH,[cH,mx]);
-  const gi=useCallback(cx=>{const rc=ref.current?.getBoundingClientRect();if(!rc)return-1;return Math.max(0,Math.min(data.length-1,Math.round(((cx-rc.left-p.l)/cW)*(data.length-1))));},[cW,data.length]);
+  const gi=useCallback(cx=>{const rc=ref.current?.getBoundingClientRect();if(!rc)return-1;return Math.max(0,Math.min(data.length-1,Math.floor(((cx-rc.left-p.l)/cW)*data.length)));},[cW,data.length]);
   const tL=useMemo(()=>{const l=[];const st=data.length>100?10:5;for(let i=0;i<data.length;i+=st)l.push({i,lb:data[i].time});return l;},[data]);
   const yT=useMemo(()=>{const t=[];const st=metric==="share"?10:2;for(let i=0;i<=mx;i+=st)t.push(i);return t;},[mx,metric]);
   const si=data.findIndex(dt=>dt.minute===selMin);
@@ -3050,7 +3055,8 @@ export default function App(){
   const winEnd=effectiveCenter!==null?effectiveCenter+viewWidth/2:slotEnd;
   const chartData=useMemo(()=>{
     if(effectiveCenter===null)return dData;
-    const filtered=dData.filter(d=>d.minute>=winStart&&d.minute<=winEnd);
+    // 表示範囲は [開始, 終了) として扱い、120分表示に121個の1分値が入らないようにする
+    const filtered=dData.filter(d=>d.minute>=winStart&&d.minute<winEnd);
     return filtered.length>0?filtered:dData;
   },[dData,effectiveCenter,winStart,winEnd]);
   const handlePan=useCallback((deltaMin)=>{
