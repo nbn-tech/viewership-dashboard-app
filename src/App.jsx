@@ -3210,26 +3210,6 @@ export default function App(){
       <div style={{flex:"1 1 0",display:"flex",flexDirection:"column",minWidth:0,overflow:"visible"}}>
         <div style={{padding:"8px 18px"}}><Toggle sel={sel} onT={tog}/></div>
         <div style={{padding:"0 18px",height:360,flexShrink:0}}><Chart data={chartData} sel={sel} onClick={click} selMin={selMin} hl={hl} metric={metric} onPan={programContext?handlePan:undefined}/></div>
-        {date==="2026-04-17"&&slot==="morning"&&<div style={{padding:"0 18px 12px"}}>
-          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
-            <span style={{fontSize:11,fontWeight:700,color:"#374151"}}>4/17 ドデスカ! 放送動画</span>
-            {selMin!==null&&<span style={{fontSize:10,color:"#6B7280",fontFamily:"monospace"}}>→ {m2t(selMin)} にシーク済み</span>}
-          </div>
-          <video ref={videoRef} src="https://dodesca-video.s3.ap-northeast-1.amazonaws.com/0417.mp4" controls style={{width:"100%",borderRadius:8,background:"#000",maxHeight:400}}/>
-        </div>}
-        {date>="2026-06-17"&&videoFiles!==null&&<div style={{padding:"0 18px 12px"}}>
-          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,flexWrap:"wrap"}}>
-            <span style={{fontSize:11,fontWeight:700,color:"#374151"}}>放送動画（{VIDEO_CH_TO_STATION[videoCh]||videoCh}）</span>
-            {videoUrl&&selMin!==null&&<span style={{fontSize:10,color:"#6B7280",fontFamily:"monospace"}}>→ {m2t(selMin)} にシーク済み</span>}
-            <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0",marginLeft:"auto"}}>
-              {VIDEO_CHANNELS.map(ch=><button key={ch} onClick={()=>setVideoCh(ch)} style={{padding:"3px 10px",border:"none",background:videoCh===ch?"#0066cc":"transparent",color:videoCh===ch?"#fff":"#7a7a7a",cursor:"pointer",fontSize:10.5,fontWeight:600,fontFamily:"monospace"}}>{ch}</button>)}
-            </div>
-          </div>
-          {videoFiles.length===0&&<div style={{padding:"20px 0",textAlign:"center",fontSize:12,color:"#9CA3AF"}}>この日の動画データはありません</div>}
-          {videoFiles.length>0&&!videoUrl&&!noVideoForTime&&<div style={{padding:"20px 0",textAlign:"center",fontSize:12,color:"#9CA3AF"}}>グラフの時刻をクリックすると動画を表示します</div>}
-          {noVideoForTime&&<div style={{padding:"20px 0",textAlign:"center",fontSize:12,color:"#9CA3AF"}}>この時刻の動画はありません</div>}
-          {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls onLoadedMetadata={()=>{if(videoRef.current&&pendingSeekRef.current!==null){videoRef.current.currentTime=pendingSeekRef.current;pendingSeekRef.current=null;}}} onEnded={()=>{if(!videoFiles)return;const idx=videoFiles.findIndex(f=>`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${f.key}`===videoUrl);if(idx===-1||idx===videoFiles.length-1)return;const nxt=videoFiles[idx+1];const nxtUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}} style={{width:"100%",borderRadius:8,background:"#000",maxHeight:400}}/>}
-        </div>}
         <BroadcastTimeline tpl={dashTpl}
           startMin={chartData.length?chartData[0].minute:(programContext?winStart:slotStart)}
           endMin={chartData.length?chartData[chartData.length-1].minute+1:(programContext?winEnd:slotEnd)}
@@ -3237,6 +3217,26 @@ export default function App(){
           loading={dashDataLoading} error={dashDataError} onRetry={retryDashData}/>
       </div>
       <div style={{width:340,minWidth:290,flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column",position:"sticky",top:programContext?"calc(var(--topbar-height) + 76px)":"calc(var(--topbar-height) + 48px)",maxHeight:programContext?"calc(100vh - var(--topbar-height) - 76px)":"calc(100vh - var(--topbar-height) - 48px)",overflowY:"auto"}}>
+        {date==="2026-04-17"&&slot==="morning"&&<div style={{padding:"10px 10px 12px",borderBottom:"1px solid #D7E5EE",background:"#F7FBFE"}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:7,flexWrap:"wrap"}}>
+            <span style={{fontSize:11,fontWeight:700,color:"#173B5D"}}>4/17 ドデスカ! 放送動画</span>
+            {selMin!==null&&<span style={{fontSize:9.5,color:"#6B7280",fontFamily:"monospace",marginLeft:"auto"}}>{m2t(selMin)} にシーク済み</span>}
+          </div>
+          <video ref={videoRef} src="https://dodesca-video.s3.ap-northeast-1.amazonaws.com/0417.mp4" controls style={{display:"block",width:"100%",aspectRatio:"16 / 9",objectFit:"contain",borderRadius:5,background:"#000"}}/>
+        </div>}
+        {date>="2026-06-17"&&videoFiles!==null&&<div style={{padding:"10px 10px 12px",borderBottom:"1px solid #D7E5EE",background:"#F7FBFE"}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:7,flexWrap:"wrap"}}>
+            <span style={{fontSize:11,fontWeight:700,color:"#173B5D"}}>放送動画（{VIDEO_CH_TO_STATION[videoCh]||videoCh}）</span>
+            {videoUrl&&selMin!==null&&<span style={{fontSize:9.5,color:"#6B7280",fontFamily:"monospace",marginLeft:"auto"}}>{m2t(selMin)} にシーク済み</span>}
+          </div>
+          <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #D7E5EE",marginBottom:7}}>
+            {VIDEO_CHANNELS.map(ch=><button key={ch} onClick={()=>setVideoCh(ch)} style={{flex:1,padding:"3px 0",border:"none",background:videoCh===ch?"#0066cc":"#fff",color:videoCh===ch?"#fff":"#61788A",cursor:"pointer",fontSize:9.5,fontWeight:700,fontFamily:"monospace"}}>{ch}</button>)}
+          </div>
+          {videoFiles.length===0&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この日の動画データはありません</div>}
+          {videoFiles.length>0&&!videoUrl&&!noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>グラフの時刻をクリックすると動画を表示します</div>}
+          {noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この時刻の動画はありません</div>}
+          {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls onLoadedMetadata={()=>{if(videoRef.current&&pendingSeekRef.current!==null){videoRef.current.currentTime=pendingSeekRef.current;pendingSeekRef.current=null;}}} onEnded={()=>{if(!videoFiles)return;const idx=videoFiles.findIndex(f=>`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${f.key}`===videoUrl);if(idx===-1||idx===videoFiles.length-1)return;const nxt=videoFiles[idx+1];const nxtUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}} style={{display:"block",width:"100%",aspectRatio:"16 / 9",objectFit:"contain",borderRadius:5,background:"#000"}}/>}
+        </div>}
         <Panel selMin={selMin} rData={selData} allR={rData} allS={sData} sel={sel} onHL={setHL} metric={metric} tpl={dashTpl}/>
       </div>
     </div>:<div style={{padding:"8px 18px 16px"}}>
