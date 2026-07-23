@@ -880,7 +880,7 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
     const st=ST.find(x=>x.id===sid),left=((s-rangeStart)/total)*100,width=((e-s)/total)*100;
     const avg=valueAt(sid,s,e);
     const isCm=isCorner&&item.segment==="cm";
-    const canExpand=isCorner&&!major&&!isCm;
+    const canExpand=isCorner&&!major;
     const blockKey=`${sid}-${key}`;
     const isHovered=hoveredBlock===blockKey;
     return <button key={blockKey} onClick={ev=>{ev.stopPropagation();const minute=VIDEO_STATION_TO_CH[sid]?t2m(item.start):(isCorner?t2m(item.start):Math.round((s+e)/2));if(onTimelineBlockClick)onTimelineBlockClick(minute,sid);else onClickMinute(minute);if(isCorner)onHighlight?.({start:t2m(item.start),end:t2m(item.end),stationId:sid});if(canExpand)setExpandedCorner(prev=>prev?.key===blockKey?null:{...item,key:blockKey,sid});}} title={`${item.title} ${item.start}–${item.end}`}
@@ -917,7 +917,8 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
       })}
       {GUIDE_ST_ORDER.map(sid=>{
         const st=ST.find(x=>x.id===sid),programs=tpl[sid]||[];
-        const fineCorners=sid==="NBN"?programs.flatMap(([name,s,e,corners],pi)=>corners.length
+        const hasAnalysis=programs.some(([, , ,corners])=>corners.length>0);
+        const fineCorners=hasAnalysis?programs.flatMap(([name,s,e,corners],pi)=>corners.length
           ?corners.map(([title,cs,ce,segment,tags,summary],ci)=>({title,start:cs,end:ce,segment,tags:tags||[],summary:summary||"",key:`${pi}-${ci}`}))
           :[{title:name,start:s,end:e,segment:"other",tags:[],summary:"",noAnalysis:true,key:`${pi}-empty`}]
         ):[];
@@ -928,21 +929,21 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
           else majorGroups.push({title:label,start:c.start,end:c.end,segment:c.segment,items:[c],key:`major-${c.key}`});
         });
         return <div key={sid}>
-          <div style={{display:"flex",height:sid==="NBN"?72:40,borderBottom:"1px solid #b9d4e5"}}>
-            <div style={{width:96,flexShrink:0,padding:"7px 8px",background:sid==="NBN"?"#d5e5eb":"#e5f2fa",color:st.c,fontSize:10,fontWeight:700,borderRight:"1px solid #9fc5dd"}}>
+          <div style={{display:"flex",height:hasAnalysis?72:40,borderBottom:"1px solid #b9d4e5"}}>
+            <div style={{width:96,flexShrink:0,padding:"7px 8px",background:hasAnalysis?"#d5e5eb":"#e5f2fa",color:st.c,fontSize:10,fontWeight:700,borderRight:"1px solid #9fc5dd"}}>
               <div>{sid==="NBN"?"メ～テレ":st.nm}</div>
-              {sid==="NBN"&&<div style={{marginTop:7,fontSize:8,color:"#56778e",fontWeight:400}}>大分類／コーナー</div>}
+              {hasAnalysis&&<div style={{marginTop:7,fontSize:8,color:"#56778e",fontWeight:400}}>大分類／コーナー</div>}
             </div>
             <div style={{position:"relative",flex:1,minWidth:0}} onClick={e=>{const r=e.currentTarget.getBoundingClientRect();onClickMinute(Math.round(rangeStart+(e.clientX-r.left)/r.width*total));}}>
-              {sid!=="NBN"&&programs.map(([name,s,e],pi)=>renderBlock(sid,{title:name,start:s,end:e},`${pi}-program`))}
-              {sid==="NBN"&&<>
+              {!hasAnalysis&&programs.map(([name,s,e],pi)=>renderBlock(sid,{title:name,start:s,end:e},`${pi}-program`))}
+              {hasAnalysis&&<>
                 <div style={{position:"absolute",left:0,right:0,top:35,borderTop:"1px solid #b9d4e5"}}/>
                 {majorGroups.map(group=>renderBlock(sid,group,group.key,{top:2,bottom:37,major:true,noAnalysis:group.items[0]?.noAnalysis}))}
                 {fineCorners.map(c=>renderBlock(sid,c,c.key,{top:37,bottom:2,isCorner:!c.noAnalysis,noAnalysis:c.noAnalysis}))}
               </>}
             </div>
           </div>
-          {sid==="NBN"&&expandedCorner&&<div style={{display:"flex",borderBottom:"1px solid #b9d4e5",background:"#fff"}}>
+          {expandedCorner?.sid===sid&&<div style={{display:"flex",borderBottom:"1px solid #b9d4e5",background:"#fff"}}>
             <div style={{width:96,flexShrink:0,borderRight:"1px solid #9fc5dd",background:"#e5f2fa"}}/>
             <div style={{flex:1,padding:"10px 14px",color:"#173b5d"}}>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
@@ -950,7 +951,7 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
                 <span style={{fontSize:9.5,fontFamily:"monospace",color:"#56778e"}}>{expandedCorner.start}–{expandedCorner.end}</span>
                 <button onClick={()=>setExpandedCorner(null)} style={{marginLeft:"auto",border:0,background:"transparent",color:"#789",cursor:"pointer",fontSize:14}}>×</button>
               </div>
-              <div style={{fontSize:11,lineHeight:1.7,whiteSpace:"pre-wrap"}}>{expandedCorner.summary||"このコーナーの内容データはありません。"}</div>
+              <div style={{fontSize:11,lineHeight:1.7,whiteSpace:"pre-wrap"}}>{expandedCorner.summary||(expandedCorner.segment==="cm"?"CM中":"このコーナーの内容データはありません。")}</div>
               {expandedCorner.tags?.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:7}}>{expandedCorner.tags.map(tag=><span key={tag} style={{padding:"1px 6px",border:"1px solid #c9dce8",borderRadius:3,fontSize:9,color:"#56778e"}}>#{tag}</span>)}</div>}
             </div>
           </div>}
@@ -2576,7 +2577,7 @@ const PM_SLOT=_UP.get('slot')||(PM_START>=930?'evening':'morning');
 // ============================================================
 const GUIDE_PPM_STEPS=[2,3,4,6,8,12,16];
 
-function ProgramGuidePage({metric="rating"}){
+function ProgramGuidePage({metric="rating",weatherData={}}){
   const[guideDate,setGuideDate]=useState(GUIDE_DATE_MAX); // カレンダー表示・ハイライト用の「現在地」
   const[loadedDates,setLoadedDates]=useState([]); // 連続タイムラインに結合済みの日付(YYYY-MM-DD)昇順
   const[epgCache,setEpgCache]=useState({}); // date -> programs[](絶対分)|null(読み込み中)
@@ -2782,6 +2783,7 @@ function ProgramGuidePage({metric="rating"}){
     <div style={{padding:"10px 18px",borderBottom:"1px solid #E5E7EB",background:"#fff",display:"flex",alignItems:"center",gap:12,flexShrink:0,flexWrap:"wrap"}}>
       <span style={{fontSize:13,fontWeight:700,color:"#111827"}}>番組表</span>
       <CalendarPicker value={guideDate} onChange={jumpTo} dates={DASHBOARD_DATES}/>
+      <WeatherBadge weather={weatherData[guideDate]}/>
       {loading&&<span style={{fontSize:11,color:"#9CA3AF"}}>⏳ 読み込み中...</span>}
       {error&&<span style={{fontSize:11,color:"#DC2626"}}>⚠ {error} (S3 CORSの設定をご確認ください)</span>}
       {!loading&&!error&&hasAnyData&&<span style={{fontSize:11,color:"#6B7280"}}>視聴率は実データがある日のみ全時間帯で表示。スクロールで前後の日付に移動できます</span>}
@@ -2876,10 +2878,14 @@ function CalendarPicker({value,onChange,dates}){
     document.addEventListener('mousedown',h);
     return()=>document.removeEventListener('mousedown',h);
   },[open]);
-  const dset=new Set(dates);
+  const orderedDates=[...dates].sort();
+  const dset=new Set(orderedDates);
+  const selectedIdx=orderedDates.indexOf(value);
+  const prevDate=selectedIdx>0?orderedDates[selectedIdx-1]:null;
+  const nextDate=selectedIdx>=0&&selectedIdx<orderedDates.length-1?orderedDates[selectedIdx+1]:null;
   const dow=ds=>["日","月","火","水","木","金","土"][new Date(ds).getDay()];
   const mnames=["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
-  const minD=dates[0],maxD=dates[dates.length-1];
+  const minD=orderedDates[0],maxD=orderedDates[orderedDates.length-1];
   const prevOk=viewYear>parseInt(minD.slice(0,4))||(viewYear===parseInt(minD.slice(0,4))&&viewMonth>parseInt(minD.slice(5,7))-1);
   const nextOk=viewYear<parseInt(maxD.slice(0,4))||(viewYear===parseInt(maxD.slice(0,4))&&viewMonth<parseInt(maxD.slice(5,7))-1);
   const prevM=()=>{if(viewMonth===0){setViewYear(y=>y-1);setViewMonth(11);}else setViewMonth(m=>m-1);};
@@ -2891,33 +2897,39 @@ function CalendarPicker({value,onChange,dates}){
   for(let d=1;d<=last.getDate();d++)cells.push(`${viewYear}-${String(viewMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
   while(cells.length%7!==0)cells.push(null);
   return(
-    <div ref={ref} style={{position:"relative"}}>
-      <button onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:5,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,padding:"4px 10px",fontSize:11.5,fontFamily:"monospace",cursor:"pointer",outline:"none",color:"#374151"}}>
-        <span style={{fontSize:10,color:"#9CA3AF"}}>📅</span>
-        <span>{value} ({dow(value)})</span>
-        <span style={{fontSize:9,color:"#9CA3AF",marginLeft:2}}>{open?"▲":"▼"}</span>
+    <div ref={ref} style={{position:"relative",display:"flex",alignItems:"center",gap:3}}>
+      <button onClick={()=>prevDate&&onChange(prevDate)} disabled={!prevDate} title="前の利用可能日" style={{width:28,height:30,border:"1px solid #C9DCE8",borderRadius:"7px 3px 3px 7px",background:prevDate?"#F5FAFD":"#F3F4F6",color:prevDate?"#173B5D":"#C7D2DA",fontSize:16,cursor:prevDate?"pointer":"default",display:"flex",alignItems:"center",justifyContent:"center"}}>‹</button>
+      <button onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:7,minWidth:170,height:30,background:open?"#EEF9F1":"#fff",border:`1px solid ${open?"#16A34A":"#C9DCE8"}`,borderRadius:5,padding:"4px 10px",fontSize:11.5,fontFamily:"monospace",fontWeight:700,cursor:"pointer",outline:"none",color:"#173B5D",boxShadow:open?"0 0 0 2px rgba(22,163,74,.12)":"none"}}>
+        <span style={{fontSize:12}}>📅</span>
+        <span style={{flex:1,textAlign:"center"}}>{value}（{dow(value)}）</span>
+        <span style={{fontSize:9,color:"#7892A3"}}>{open?"▲":"▼"}</span>
       </button>
-      {open&&<div style={{position:"absolute",top:"calc(100% + 4px)",left:0,background:"#fff",border:"1px solid #E5E7EB",borderRadius:12,zIndex:9999,padding:"12px",width:244,userSelect:"none",boxShadow:"0 4px 20px rgba(0,0,0,0.08)"}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
-          <button onClick={prevM} disabled={!prevOk} style={{background:"none",border:"none",cursor:prevOk?"pointer":"default",color:prevOk?"#374151":"#D1D5DB",fontSize:18,width:28,height:28,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center"}}>‹</button>
-          <span style={{fontSize:12,fontWeight:600,color:"#111827",letterSpacing:"-0.224px"}}>{viewYear}年 {mnames[viewMonth]}</span>
-          <button onClick={nextM} disabled={!nextOk} style={{background:"none",border:"none",cursor:nextOk?"pointer":"default",color:nextOk?"#374151":"#D1D5DB",fontSize:18,width:28,height:28,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center"}}>›</button>
+      <button onClick={()=>nextDate&&onChange(nextDate)} disabled={!nextDate} title="次の利用可能日" style={{width:28,height:30,border:"1px solid #C9DCE8",borderRadius:"3px 7px 7px 3px",background:nextDate?"#F5FAFD":"#F3F4F6",color:nextDate?"#173B5D":"#C7D2DA",fontSize:16,cursor:nextDate?"pointer":"default",display:"flex",alignItems:"center",justifyContent:"center"}}>›</button>
+      {open&&<div style={{position:"absolute",top:"calc(100% + 7px)",left:31,background:"#fff",border:"1px solid #9FC5DD",borderRadius:10,zIndex:9999,padding:"14px",width:304,userSelect:"none",boxShadow:"0 10px 32px rgba(23,59,93,.2)"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+          <button onClick={prevM} disabled={!prevOk} style={{background:prevOk?"#EAF5FB":"transparent",border:"none",cursor:prevOk?"pointer":"default",color:prevOk?"#173B5D":"#D1D5DB",fontSize:20,width:32,height:32,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center"}}>‹</button>
+          <span style={{fontSize:14,fontWeight:800,color:"#173B5D",letterSpacing:"-0.224px"}}>{viewYear}年 {mnames[viewMonth]}</span>
+          <button onClick={nextM} disabled={!nextOk} style={{background:nextOk?"#EAF5FB":"transparent",border:"none",cursor:nextOk?"pointer":"default",color:nextOk?"#173B5D":"#D1D5DB",fontSize:20,width:32,height:32,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center"}}>›</button>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,marginBottom:3}}>
-          {["日","月","火","水","木","金","土"].map((d,i)=><div key={d} style={{textAlign:"center",fontSize:9,fontWeight:600,padding:"2px 0",color:i===0?"#DC2626":i===6?"#2563EB":"#9CA3AF"}}>{d}</div>)}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,marginBottom:5}}>
+          {["日","月","火","水","木","金","土"].map((d,i)=><div key={d} style={{textAlign:"center",fontSize:10,fontWeight:700,padding:"3px 0",color:i===0?"#DC2626":i===6?"#2563EB":"#7892A3"}}>{d}</div>)}
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3}}>
           {cells.map((ds,i)=>{
             if(!ds)return<div key={i}/>;
             const isSel=ds===value,isAvail=dset.has(ds),isToday=ds===GUIDE_DATE_MAX,dw=new Date(ds).getDay();
             return<button key={ds} onClick={()=>{if(isAvail){onChange(ds);setOpen(false);}}} style={{
-              width:"100%",aspectRatio:"1/1",border:isToday&&!isSel?"1px solid #0066cc":"none",borderRadius:6,
-              background:isSel?"#0066cc":isToday&&!isSel?"#EFF6FF":"transparent",
+              position:"relative",width:"100%",height:34,border:isToday&&!isSel?"1px solid #16A34A":"1px solid transparent",borderRadius:6,
+              background:isSel?"#16A34A":isToday&&!isSel?"#EEF9F1":isAvail?"#F7FBFD":"transparent",
               color:isSel?"#fff":!isAvail?"#D1D5DB":dw===0?"#DC2626":dw===6?"#2563EB":"#111827",
-              cursor:isAvail?"pointer":"default",fontSize:11.5,fontWeight:isSel?700:400,
+              cursor:isAvail?"pointer":"default",fontSize:12,fontWeight:isSel?800:isAvail?600:400,
               display:"flex",alignItems:"center",justifyContent:"center",padding:0
-            }}>{parseInt(ds.slice(8))}</button>;
+            }}>{parseInt(ds.slice(8))}{isAvail&&!isSel&&<span style={{position:"absolute",bottom:2,width:3,height:3,borderRadius:"50%",background:"#16A34A"}}/>}</button>;
           })}
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12,paddingTop:10,borderTop:"1px solid #E5EEF4"}}>
+          <span style={{fontSize:9.5,color:"#7892A3"}}>● 選択可能な日</span>
+          <button onClick={()=>{onChange(maxD);setOpen(false);}} style={{border:"1px solid #9FC5DD",borderRadius:5,background:"#EAF5FB",color:"#173B5D",padding:"4px 9px",fontSize:10,fontWeight:700,cursor:"pointer"}}>最新日へ</button>
         </div>
       </div>}
     </div>
@@ -3126,7 +3138,7 @@ export default function App(){
     return <div className="app-root" style={{width:"100%",minHeight:"100vh",background:"#f5f5f7",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif",color:"#111827"}}>
       <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}`}</style>
       <NavBar/>
-      <ProgramGuidePage metric={metric}/>
+      <ProgramGuidePage metric={metric} weatherData={weatherData}/>
     </div>;
   }
   if(page==="search"){
