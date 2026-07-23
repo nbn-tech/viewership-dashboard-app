@@ -2793,10 +2793,12 @@ function ProgramGuidePage({metric="rating"}){
       </div>
     </div>
     <div className="tvp-hour-nav" aria-label="時刻へ移動">
-      {hourGroups.map(group=><div className="tvp-hour-group" key={group.label}>
-        <span className="tvp-hour-period">{group.label}</span>
-        {group.hours.map(hour=><button key={hour} className={`tvp-hour-button ${activeJumpHour===hour?"is-active":""}`} onClick={()=>jumpToHour(hour)}>{hour}</button>)}
-      </div>)}
+      <div className="tvp-hour-period-row">
+        {hourGroups.map(group=><div className="tvp-hour-period" key={group.label} style={{gridColumn:`span ${group.hours.length}`}}>{group.label}</div>)}
+      </div>
+      <div className="tvp-hour-button-row">
+        {hourGroups.flatMap(group=>group.hours).map(hour=><button key={hour} className={`tvp-hour-button ${activeJumpHour===hour?"is-active":""}`} onClick={()=>jumpToHour(hour)}>{hour}</button>)}
+      </div>
     </div>
     {tooltip&&<div style={{position:"fixed",left:tooltip.x+14,top:tooltip.y-10,background:"#fff",color:"#1d1d1f",padding:"8px 12px",borderRadius:8,fontSize:11.5,pointerEvents:"none",zIndex:9999,maxWidth:220,border:"1px solid #e0e0e0",boxShadow:"0 2px 12px rgba(0,0,0,0.08)",lineHeight:1.5}}>
       <div style={{fontWeight:600,marginBottom:tooltip.avg!==null?4:0,wordBreak:"break-all",letterSpacing:"-0.224px"}}>{tooltip.title}</div>
@@ -2808,13 +2810,13 @@ function ProgramGuidePage({metric="rating"}){
     {hasAnyData&&<div ref={scrollElRef} onScroll={handleScroll} style={{flex:1,overflowY:"auto",overflowX:"hidden"}}>
       <div style={{display:"flex",width:"100%",minWidth:0}}>
         {/* 時刻列 */}
-        <div style={{width:52,flexShrink:0,position:"sticky",left:0,background:"#F9FAFB",borderRight:"1px solid #E5E7EB",zIndex:4}}>
-          <div style={{height:44,position:"sticky",top:0,background:"#F3F4F6",borderBottom:"1px solid #E5E7EB",zIndex:5,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9.5,color:"#6B7280",fontWeight:700,fontFamily:"monospace"}}>TIME</div>
+        <div style={{width:68,flexShrink:0,position:"sticky",left:0,background:"#EAF5FB",borderRight:"2px solid #9FC5DD",zIndex:4}}>
+          <div style={{height:44,position:"sticky",top:0,background:"#DDEEF8",borderBottom:"1px solid #9FC5DD",zIndex:5,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:"#173B5D",fontWeight:800,fontFamily:"monospace",letterSpacing:".08em"}}>時刻</div>
           <div style={{position:"relative",height:totalH}}>
             {timeMarks.map(m=>{
               const dt=new Date(m*60000);
               const isMidnight=dt.getHours()===0;
-              return <div key={m} style={{position:"absolute",top:(m-startOfRange)*PPM,left:0,right:0,borderTop:`1px solid ${isMidnight?"#9CA3AF":"#E5E7EB"}`,paddingLeft:5,paddingTop:2,fontSize:10,color:isMidnight?"#111827":"#9CA3AF",fontFamily:"monospace",fontWeight:isMidnight?700:400}}>
+              return <div key={m} style={{position:"absolute",top:(m-startOfRange)*PPM,left:0,right:0,borderTop:`2px solid ${isMidnight?"#56778E":"#9FC5DD"}`,paddingLeft:7,paddingTop:4,fontSize:13,color:"#173B5D",fontFamily:"monospace",fontWeight:800,lineHeight:1}}>
                 {String(dt.getHours()).padStart(2,"0")}:{String(dt.getMinutes()).padStart(2,"0")}
                 {isMidnight&&<div style={{fontSize:8,color:"#6B7280",fontWeight:700}}>{dt.getMonth()+1}/{dt.getDate()}</div>}
               </div>;
@@ -2833,7 +2835,7 @@ function ProgramGuidePage({metric="rating"}){
             <div style={{position:"relative",height:totalH}}>
               {timeMarks.map(m=>{
                 const isMidnight=new Date(m*60000).getHours()===0;
-                return <div key={m} style={{position:"absolute",top:(m-startOfRange)*PPM,left:0,right:0,borderTop:isMidnight?"1px solid #D1D5DB":"1px dashed #F3F4F6"}}/>;
+                return <div key={m} style={{position:"absolute",top:(m-startOfRange)*PPM,left:0,right:0,borderTop:isMidnight?"2px solid #9FC5DD":"1px solid #D8E8F2"}}/>;
               })}
               {progs.map((p,i)=>{
                 const nextStart=i<progs.length-1?progs[i+1].startAbs:null;
@@ -2849,8 +2851,8 @@ function ProgramGuidePage({metric="rating"}){
                   style={{position:"absolute",top,left:1,right:1,height:h,background:"#fff",border:"1px solid #9fc5dd",borderLeft:`3px solid ${st.c}`,borderRadius:2,padding:"3px 5px",overflow:"hidden",cursor:"pointer",fontSize:10,display:"flex",flexDirection:"column",gap:1,transition:"background 0.1s"}}
                   onMouseMove={e=>{e.currentTarget.style.background="#EFF6FF";e.currentTarget.style.borderColor="#BFDBFE";setTooltip({title:p.title,avg,stId:sid,x:e.clientX,y:e.clientY});}}
                   onMouseLeave={e=>{e.currentTarget.style.background="#fff";e.currentTarget.style.borderColor="#E5E7EB";setTooltip(null);}}>
-                  <div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",flexShrink:0}}>{stLabel}</div>
-                  <div style={{fontSize:compact?9.5:11,fontWeight:600,color:"#111827",lineHeight:1.25,overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:compact?1:2,WebkitBoxOrient:"vertical",flex:1}}>{p.title}</div>
+                  <div style={{alignSelf:"flex-start",fontSize:compact?8.5:10,color:st.c,fontFamily:"monospace",fontWeight:800,flexShrink:0,lineHeight:1.15,padding:compact?"0":"2px 5px",borderRadius:3,background:compact?"transparent":`${st.c}14`}}>{stLabel}</div>
+                  <div style={{fontSize:compact?10.5:13,fontWeight:700,color:"#0C304B",lineHeight:1.3,letterSpacing:"-0.12px",overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:compact?1:3,WebkitBoxOrient:"vertical",flex:1}}>{p.title}</div>
                   {avg!==null&&<div style={{fontSize:h<46?10:15,fontWeight:700,color:st.c,fontFamily:"monospace",flexShrink:0,marginTop:"auto"}}>{avg.toFixed(1)}%<span style={{fontSize:8,opacity:0.7,marginLeft:1}}>{metric==="share"?"占拠":"視聴"}</span></div>}
                 </div>;
               })}

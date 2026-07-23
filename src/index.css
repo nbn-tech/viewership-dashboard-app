@@ -126,37 +126,50 @@ body {
 }
 
 .tvp-hour-nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px 14px;
-  align-items: center;
-  padding: 6px 18px;
+  display: block;
+  width: 100%;
+  padding: 0;
   border-bottom: 1px solid var(--tvp-line);
-  background: rgba(225,242,252,.96);
+  background: #e5f2fa;
 }
 
-.tvp-hour-group { display: flex; align-items: center; gap: 2px; }
+.tvp-hour-period-row,
+.tvp-hour-button-row {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  width: 100%;
+}
 .tvp-hour-period {
-  min-width: 32px;
-  color: var(--tvp-muted);
-  font-size: 10px;
-  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  border-right: 1px solid rgba(255,255,255,.45);
+  background: #91adbf;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .04em;
 }
 .tvp-hour-button {
-  min-width: 24px;
-  padding: 3px 5px;
+  min-width: 0;
+  height: 25px;
+  padding: 0;
   border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
+  border-right: 1px solid #b9d4e5;
+  border-bottom: 3px solid transparent;
+  background: #e5f2fa;
   color: var(--tvp-ink);
   cursor: pointer;
-  font: 600 10px/1.2 ui-monospace, monospace;
+  font: 700 10px/1 ui-monospace, monospace;
 }
+.tvp-hour-button:hover { background: #d5eaf6; }
 .tvp-hour-button:hover,
 .tvp-hour-button.is-active {
   border-bottom-color: var(--metele-accent);
   color: var(--metele-accent);
 }
+.tvp-hour-button.is-active { background: #eef9f1; }
 
 .tvp-zoom-range { accent-color: var(--metele-accent); width: 150px; }
 
@@ -168,7 +181,8 @@ body {
   :root { --sidebar-width: 0px; }
   .tvp-sidebar { display: none; }
   .tvp-topbar { padding: 0 10px; }
-  .tvp-hour-nav { padding: 6px 10px; }
+  .tvp-hour-period { font-size: 9px; }
+  .tvp-hour-button { font-size: 8px; }
 }
 
 button {
