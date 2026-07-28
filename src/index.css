@@ -32,8 +32,8 @@ body {
   --tvp-ink: #0c304b;
   --tvp-muted: #56778e;
   --metele-accent: #16a34a;
-  /* 左メニュー幅は画面幅に比例(約1/6 = メニュー:本体:動画欄 が1:4:1になる比率) */
-  --sidebar-width: clamp(180px, 16.6667vw, 320px);
+  /* 左メニュー幅は画面幅に比例(約1/7 = メニュー:本体:動画欄 が1:5:1になる比率) */
+  --sidebar-width: clamp(180px, 14.2857vw, 320px);
   --topbar-height: 46px;
 }
 
