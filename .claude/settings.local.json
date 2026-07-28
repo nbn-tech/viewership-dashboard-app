@@ -5,7 +5,8 @@
       "Bash(python /tmp/parse_jcom.py)",
       "Bash(python -c ' *)",
       "Read(//c/Users/NBN/AppData/Local/Temp/**)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "PowerShell($p = Start-Process npx -ArgumentList \"vite\",\"--port\",\"5199\" -PassThru -RedirectStandardOutput \"$env:TEMP\\\\vitedev.log\" -RedirectStandardError \"$env:TEMP\\\\vitedeverr.log\" -NoNewWindow; Start-Sleep -Seconds 6; try { $r = Invoke-WebRequest \"http://localhost:5199/\" -UseBasicParsing -TimeoutSec 5; \"HTTP $\\($r.StatusCode\\)\" } catch { \"REQ ERR: $_\" }; Get-Content \"$env:TEMP\\\\vitedeverr.log\" -ErrorAction SilentlyContinue | Select-Object -Last 15; Stop-Process -Id $p.Id -Force)"
     ]
   }
 }
