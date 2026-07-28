@@ -740,7 +740,22 @@ function genRatings(date,slot){
 // S3の視聴率エクセル(rating/{yyyymmdd}_consolidated.xlsx)を実行時に取得し、
 // ビルド時にratings_data.jsonへ埋め込んだ日付以降に新しく上がったファイルを自動的に反映する
 const RATING_HEADER_STATION={NBN:"NBN",THK:"THK",CTV:"CTV",CBC:"CBC",NHK:"NHK",NHKE:"ETV",TVA:"TVA"};
-async function fetchAndParseRatingXlsx(date){
+// 視聴率エクセルにある個人視聴率区分。ALL以外は選択された時だけ実行時に取得する(静的データには含めずバンドル肥大化を避ける)
+const DEMO_LIST=[
+  {key:"ALL",label:"個人全体 4才以上"},
+  {key:"U49",label:"男女 4－49才"},
+  {key:"C",label:"男女 4－12才"},
+  {key:"T",label:"男女 13－19才"},
+  {key:"M1",label:"男 20－34才"},
+  {key:"M2",label:"男 35－49才"},
+  {key:"M3",label:"男 50－64才"},
+  {key:"M4",label:"男 65才以上"},
+  {key:"F1",label:"女 20－34才"},
+  {key:"F2",label:"女 35－49才"},
+  {key:"F3",label:"女 50－64才"},
+  {key:"F4",label:"女 65才以上"},
+];
+async function fetchAndParseRatingXlsx(date,demo="ALL"){
   const yyyymmdd=date.replace(/-/g,'');
   const res=await fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/rating/${yyyymmdd}_consolidated.xlsx`);
   if(!res.ok)throw new Error(`HTTP ${res.status}`);
@@ -749,8 +764,8 @@ async function fetchAndParseRatingXlsx(date){
   const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:null});
   const header=rows[0];
   const colIdx={};
-  REAL_RATINGS_COLS.forEach(sid=>{colIdx[sid]=header.indexOf(`${RATING_HEADER_STATION[sid]}_ALL`);});
-  if(Object.values(colIdx).some(i=>i===-1))throw new Error("ALL列が見つかりません");
+  REAL_RATINGS_COLS.forEach(sid=>{colIdx[sid]=header.indexOf(`${RATING_HEADER_STATION[sid]}_${demo}`);});
+  if(Object.values(colIdx).some(i=>i===-1))throw new Error(`${demo}列が見つかりません`);
   const[h0,m0]=rows[1][0].split(':').map(Number);
   const startMin=h0*60+m0; // 通常は300(05:00)始まり
   const buildSlot=(sm,em)=>{
@@ -3005,7 +3020,25 @@ export default function App(){
   useEffect(()=>{
     syncNewRatingsFromS3().then(updated=>{if(updated.length)setRatingsVersion(v=>v+1);}).catch(()=>{});
   },[]);
-  const rData=useMemo(()=>getRatings(date,slot),[date,slot,ratingsVersion]);
+  // 視聴率の推移: デフォルトはALL(個人全体)。ALL以外はビルド時データに含まれないため、
+  // 選択された時だけS3のエクセルから実行時に取得する(demoCacheに`${date}|${slot}|${demo}`でキャッシュ)
+  const[demoMetric,setDemoMetric]=useState("ALL");
+  const[demoCache,setDemoCache]=useState({});
+  useEffect(()=>{
+    if(demoMetric==="ALL")return;
+    const key=`${date}|${slot}|${demoMetric}`;
+    if(key in demoCache)return;
+    setDemoCache(prev=>({...prev,[key]:null}));
+    fetchAndParseRatingXlsx(date,demoMetric).then(({morning,evening})=>{
+      const raw=slot==="morning"?morning:evening;
+      const sm=slot==="morning"?330:930;
+      setDemoCache(prev=>({...prev,[key]:raw?rawRowsToRatingObjects(raw,sm):[]}));
+    }).catch(()=>{setDemoCache(prev=>({...prev,[key]:[]}));});
+  },[date,slot,demoMetric]);
+  const rData=useMemo(()=>{
+    if(demoMetric==="ALL")return getRatings(date,slot);
+    return demoCache[`${date}|${slot}|${demoMetric}`]||[];
+  },[date,slot,ratingsVersion,demoMetric,demoCache]);
   const sData=useMemo(()=>rData.map(e=>{const t=ST.reduce((s,st)=>s+(e[st.id]||0),0);const o={time:e.time,minute:e.minute};ST.forEach(s=>{o[s.id]=t>0?(e[s.id]/t)*100:0;});return o;}),[rData]);
   const dData=metric==="share"?sData:rData;
 
@@ -3214,7 +3247,12 @@ export default function App(){
     </div>
     {dashMode==="chart"?<div style={{display:"flex",alignItems:"flex-start",minHeight:programContext?"calc(100vh - 140px)":"calc(100vh - 100px)"}}>
       <div style={{flex:"1 1 0",display:"flex",flexDirection:"column",minWidth:0,overflow:"visible"}}>
-        <div style={{padding:"8px 18px"}}><Toggle sel={sel} onT={tog}/></div>
+        <div style={{padding:"8px 18px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <Toggle sel={sel} onT={tog}/>
+          <select value={demoMetric} onChange={e=>setDemoMetric(e.target.value)} style={{marginLeft:"auto",padding:"4px 10px",borderRadius:8,border:"1px solid #e0e0e0",background:"#fff",color:"#1d1d1f",fontSize:12,fontFamily:"inherit",cursor:"pointer"}}>
+            {DEMO_LIST.map(d=><option key={d.key} value={d.key}>{d.label}（{d.key}）</option>)}
+          </select>
+        </div>
         <div style={{padding:"0 18px",height:360,flexShrink:0}}><Chart data={chartData} sel={sel} onClick={click} selMin={selMin} hl={hl} metric={metric} onPan={programContext?handlePan:undefined}/></div>
         <BroadcastTimeline tpl={dashTpl}
           startMin={chartData.length?chartData[0].minute:(programContext?winStart:slotStart)}
