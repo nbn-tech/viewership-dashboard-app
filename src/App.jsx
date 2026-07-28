@@ -3567,9 +3567,10 @@ export default function App(){
   const winStart=effectiveCenter-viewWidth/2;
   const winEnd=effectiveCenter+viewWidth/2;
   const chartData=useMemo(()=>{
-    // 表示範囲は [開始, 終了) として扱い、120分表示に121個の1分値が入らないようにする
-    const filtered=dData.filter(d=>d.minute>=winStart&&d.minute<winEnd);
-    return filtered.length>0?filtered:dData;
+    // 表示範囲は [開始, 終了) として扱い、120分表示に121個の1分値が入らないようにする。
+    // 該当範囲にデータが無い場合、以前はdData全体(複数日ぶん)にフォールバックしていたが、
+    // それだと「朝帯」表示中に別日の24時間ぶんが紛れ込んで見えるバグになるため、空のまま返す
+    return dData.filter(d=>d.minute>=winStart&&d.minute<winEnd);
   },[dData,winStart,winEnd]);
   // panCenterは絶対分のまま保持するので、日付境界(5時)をまたいでも位置が飛ばず連続的にスクロールできる
   const handlePan=useCallback((deltaMin)=>{
