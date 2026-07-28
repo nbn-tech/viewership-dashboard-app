@@ -1018,6 +1018,20 @@ function Chart({data,sel,onClick,selMin,hl,metric,onPan}){
   // 1分値は「その分の開始位置」に置く。右端は最後の1分が終わる時刻なので、
   // タイムラインの [start, end) と同じ時間スケールになる。
   const mpp=data.length>0?data.length/cW:1;
+  // マウスホイール／トラックパッドの横スクロールでもグラフを左右に移動できるようにする。
+  // ReactのonWheelはpassiveで登録されpreventDefaultが効かないため、ネイティブリスナーで対応する。
+  useEffect(()=>{
+    const el=ref.current;
+    if(!el||!onPan)return;
+    const handler=ev=>{
+      const delta=Math.abs(ev.deltaX)>Math.abs(ev.deltaY)?ev.deltaX:ev.deltaY;
+      if(delta===0)return;
+      ev.preventDefault();
+      onPan(delta*mpp);
+    };
+    el.addEventListener('wheel',handler,{passive:false});
+    return()=>el.removeEventListener('wheel',handler);
+  },[onPan,mpp]);
   const mx=useMemo(()=>{if(metric==="share")return 60;let x=0;data.forEach(dt=>sel.forEach(s=>{if(dt[s]>x)x=dt[s];}));return Math.ceil(x+1);},[data,sel,metric]);
   const xS=useCallback(i=>p.l+(i/Math.max(1,data.length))*cW,[data.length,cW]);
   const yS=useCallback(v=>p.t+cH-(v/mx)*cH,[cH,mx]);
