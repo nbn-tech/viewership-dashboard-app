@@ -3561,7 +3561,9 @@ export default function App(){
   },[domainWidth]);
   const viewWidth=effectiveZoomWidths[Math.min(zoomLevel,effectiveZoomWidths.length-1)];
   const minCenter=domainStart+viewWidth/2,maxCenter=domainEnd-viewWidth/2;
-  const effectiveCenter=Math.max(minCenter,Math.min(maxCenter,panCenter??progCenterAbs??(dateMid+1020)));
+  // 未操作時のデフォルト位置は朝帯(slotの初期値="morning")の中心。夕方帯ボタンを押した後はそちら中心になる
+  const defaultCenter=dateMid+(slot==='morning'?420:1035);
+  const effectiveCenter=Math.max(minCenter,Math.min(maxCenter,panCenter??progCenterAbs??defaultCenter));
   const winStart=effectiveCenter-viewWidth/2;
   const winEnd=effectiveCenter+viewWidth/2;
   const chartData=useMemo(()=>{
@@ -3571,8 +3573,8 @@ export default function App(){
   },[dData,winStart,winEnd]);
   // panCenterは絶対分のまま保持するので、日付境界(5時)をまたいでも位置が飛ばず連続的にスクロールできる
   const handlePan=useCallback((deltaMin)=>{
-    setPanCenter(c=>Math.max(minCenter,Math.min(maxCenter,(c??progCenterAbs??(dateMid+1020))+deltaMin)));
-  },[progCenterAbs,dateMid,minCenter,maxCenter]);
+    setPanCenter(c=>Math.max(minCenter,Math.min(maxCenter,(c??progCenterAbs??defaultCenter)+deltaMin)));
+  },[progCenterAbs,defaultCenter,minCenter,maxCenter]);
   // 表示中心が現在の日付の放送日(05:00-29:00)からはみ出したら、左上のカレンダー表示(date)を追従させる
   useEffect(()=>{
     if(programContext)return;
