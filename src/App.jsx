@@ -879,6 +879,8 @@ const TIMELINE_LABEL_WIDTH=96;
 function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineBlockClick,onHighlight,data,metric,loading,error,onRetry}){
   const[expandedCorner,setExpandedCorner]=useState(null);
   const[hoveredBlock,setHoveredBlock]=useState(null);
+  // 局ごとにコーナー別表示⇔番組名のみ表示を切り替える。デフォルトは番組名のみ(分析結果があっても)
+  const[cornerView,setCornerView]=useState({});
   const dataStart=data?.[0]?.minute,dataEnd=data?.length?data[data.length-1].minute+1:null;
   const validRange=Number.isFinite(startMin)&&Number.isFinite(endMin)&&endMin>startMin;
   const rangeStart=validRange?startMin:(dataStart??0),rangeEnd=validRange?endMin:(dataEnd??rangeStart+1);
@@ -935,7 +937,8 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
       {GUIDE_ST_ORDER.map(sid=>{
         const st=ST.find(x=>x.id===sid),programs=tpl[sid]||[];
         const hasAnalysis=programs.some(([, , ,corners])=>corners.length>0);
-        const fineCorners=hasAnalysis?programs.flatMap(([name,s,e,corners],pi)=>corners.length
+        const showCorners=hasAnalysis&&!!cornerView[sid];
+        const fineCorners=showCorners?programs.flatMap(([name,s,e,corners],pi)=>corners.length
           ?corners.map(([title,cs,ce,segment,tags,summary],ci)=>({title,start:cs,end:ce,segment,tags:tags||[],summary:summary||"",key:`${pi}-${ci}`}))
           :[{title:name,start:s,end:e,segment:"other",tags:[],summary:"",noAnalysis:true,key:`${pi}-empty`}]
         ):[];
@@ -946,14 +949,17 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
           else majorGroups.push({title:label,start:c.start,end:c.end,segment:c.segment,items:[c],key:`major-${c.key}`});
         });
         return <div key={sid}>
-          <div style={{display:"flex",height:hasAnalysis?72:40,borderBottom:"1px solid #b9d4e5"}}>
-            <div style={{width:TIMELINE_LABEL_WIDTH,flexShrink:0,padding:"7px 8px",background:hasAnalysis?"#d5e5eb":"#e5f2fa",color:st.c,fontSize:10,fontWeight:700,borderRight:"1px solid #9fc5dd"}}>
+          <div style={{display:"flex",height:showCorners?72:40,borderBottom:"1px solid #b9d4e5"}}>
+            <div style={{width:TIMELINE_LABEL_WIDTH,flexShrink:0,padding:"7px 8px",background:showCorners?"#d5e5eb":"#e5f2fa",color:st.c,fontSize:10,fontWeight:700,borderRight:"1px solid #9fc5dd"}}>
               <div>{sid==="NBN"?"メ～テレ":st.nm}</div>
-              {hasAnalysis&&<div style={{marginTop:7,fontSize:8,color:"#56778e",fontWeight:400}}>大分類／コーナー</div>}
+              {hasAnalysis&&<button onClick={ev=>{ev.stopPropagation();setCornerView(prev=>({...prev,[sid]:!prev[sid]}));}}
+                style={{marginTop:6,padding:"1px 6px",fontSize:7.5,fontWeight:600,border:`1px solid ${showCorners?st.c:"#9fc5dd"}`,borderRadius:9999,background:showCorners?st.c:"#fff",color:showCorners?"#fff":"#56778e",cursor:"pointer"}}>
+                {showCorners?"コーナー表示":"番組表示"}
+              </button>}
             </div>
             <div style={{position:"relative",flex:1,minWidth:0}} onClick={e=>{const r=e.currentTarget.getBoundingClientRect();onClickMinute(Math.round(rangeStart+(e.clientX-r.left)/r.width*total));}}>
-              {!hasAnalysis&&programs.map(([name,s,e],pi)=>renderBlock(sid,{title:name,start:s,end:e},`${pi}-program`))}
-              {hasAnalysis&&<>
+              {!showCorners&&programs.map(([name,s,e],pi)=>renderBlock(sid,{title:name,start:s,end:e},`${pi}-program`))}
+              {showCorners&&<>
                 <div style={{position:"absolute",left:0,right:0,top:35,borderTop:"1px solid #b9d4e5"}}/>
                 {majorGroups.map(group=>renderBlock(sid,group,group.key,{top:2,bottom:37,major:true,noAnalysis:group.items[0]?.noAnalysis}))}
                 {fineCorners.map(c=>renderBlock(sid,c,c.key,{top:37,bottom:2,isCorner:!c.noAnalysis,noAnalysis:c.noAnalysis}))}
