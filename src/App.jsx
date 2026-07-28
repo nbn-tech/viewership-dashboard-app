@@ -888,15 +888,17 @@ function tplProgAt(tpl,stId,min){
   return{prog:null,corner:null};
 }
 
-// 実番組(epg-all)×実分析コーナー(daily_corners)を、指定slot窓(朝5:30-8:30/夕方15:30-19:00)で
-// 突き合わせてtpl形式({[stId]:[[progName,startHHMM,endHHMM,corners[]],...]})に組み立てる。
+// 実番組(epg-all)×実分析コーナー(daily_corners)を、指定slot窓(朝5:30-8:30/夕方15:30-19:00、
+// または"full"指定で終日05:00-29:00)で突き合わせてtpl形式
+// ({[stId]:[[progName,startHHMM,endHHMM,corners[]],...]})に組み立てる。
 // 分析結果が無い番組も番組枠として残し、詳細タイムラインでは「解析データなし」として表示する。
 function buildDayTpl(programs,corners,date,slot){
   const result={};ST.forEach(s=>result[s.id]=[]);
   if(!programs)return result;
   const safeCorners=corners||[];
   const dayMid=localMidnightAbsMin(date);
-  const slotStartAbs=dayMid+(slot==="morning"?330:930),slotEndAbs=dayMid+(slot==="morning"?510:1140);
+  const slotStartAbs=dayMid+(slot==="morning"?330:slot==="evening"?930:300);
+  const slotEndAbs=dayMid+(slot==="morning"?510:slot==="evening"?1140:1740);
   const cornersByStation={};
   safeCorners.forEach(c=>{if(!c.date||!c.startMin)return;(cornersByStation[c.stId]=cornersByStation[c.stId]||[]).push(c);});
   const fmtT=d=>`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
@@ -3291,25 +3293,19 @@ export default function App(){
   useEffect(()=>{
     syncNewRatingsFromS3().then(updated=>{if(updated.length)setRatingsVersion(v=>v+1);}).catch(()=>{});
   },[]);
-  // 視聴率の推移: デフォルトはALL(個人全体)。ALL以外はビルド時データに含まれないため、
-  // 選択された時だけS3のエクセルから実行時に取得する(demoCacheに`${date}|${slot}|${demo}`でキャッシュ)
+  // 視聴率の推移: 視聴率は全時間帯(05:00-29:00)ぶんあるため、選んだデモグラフィック(デフォルトALL)ごとに
+  // S3のエクセルから終日ぶんを実行時に取得する(`${date}|${demo}`でキャッシュ)
   const[demoMetric,setDemoMetric]=useState("ALL");
-  const[demoCache,setDemoCache]=useState({});
+  const[dashRatingsCache,setDashRatingsCache]=useState({}); // `${date}|${demo}` -> rows|null(読み込み中)|[](データなし)
   useEffect(()=>{
-    if(demoMetric==="ALL")return;
-    const key=`${date}|${slot}|${demoMetric}`;
-    if(key in demoCache)return;
-    setDemoCache(prev=>({...prev,[key]:null}));
-    fetchAndParseRatingXlsx(date,demoMetric).then(({morning,evening})=>{
-      const raw=slot==="morning"?morning:evening;
-      const sm=slot==="morning"?330:930;
-      setDemoCache(prev=>({...prev,[key]:raw?rawRowsToRatingObjects(raw,sm):[]}));
-    }).catch(()=>{setDemoCache(prev=>({...prev,[key]:[]}));});
-  },[date,slot,demoMetric]);
-  const rData=useMemo(()=>{
-    if(demoMetric==="ALL")return getRatings(date,slot);
-    return demoCache[`${date}|${slot}|${demoMetric}`]||[];
-  },[date,slot,ratingsVersion,demoMetric,demoCache]);
+    const key=`${date}|${demoMetric}`;
+    if(key in dashRatingsCache)return;
+    setDashRatingsCache(prev=>({...prev,[key]:null}));
+    fetchAndParseRatingXlsx(date,demoMetric).then(({allday})=>{
+      setDashRatingsCache(prev=>({...prev,[key]:allday?rawRowsToRatingObjects(allday,300):[]}));
+    }).catch(()=>{setDashRatingsCache(prev=>({...prev,[key]:[]}));});
+  },[date,demoMetric]);
+  const rData=useMemo(()=>dashRatingsCache[`${date}|${demoMetric}`]||[],[date,demoMetric,dashRatingsCache]);
   const sData=useMemo(()=>rData.map(e=>{const t=ST.reduce((s,st)=>s+(e[st.id]||0),0);const o={time:e.time,minute:e.minute};ST.forEach(s=>{o[s.id]=t>0?(e[s.id]/t)*100:0;});return o;}),[rData]);
   const dData=metric==="share"?sData:rData;
 
@@ -3336,10 +3332,10 @@ export default function App(){
       .catch(()=>{setDashCornerCache(prev=>({...prev,[date]:[]}));setDashLoadErrors(prev=>({...prev,[date]:{...(prev[date]||{}),corners:"解析データを取得できませんでした"}}));});
   },[date,dashRetryVersion]);
 
-  // 実番組(epg-all)×実分析コーナー(daily_corners)を、選択中のslot窓(朝5:30-8:30/夕方15:30-19:00)で
+  // 実番組(epg-all)×実分析コーナー(daily_corners)を、全時間帯(05:00-29:00)で
   // 突き合わせてtpl形式({[stId]:[[progName,startHHMM,endHHMM,corners[]],...]})に組み立てる。
   // 分析結果が無い番組はそもそも配列に含めない(=表示されない。分析が無ければ何も出さない仕様)
-  const dashTpl=useMemo(()=>buildDayTpl(dashEpgCache[date],dashCornerCache[date],date,slot),[dashEpgCache,dashCornerCache,date,slot]);
+  const dashTpl=useMemo(()=>buildDayTpl(dashEpgCache[date],dashCornerCache[date],date,"full"),[dashEpgCache,dashCornerCache,date]);
   const dashDataLoading=dashEpgCache[date]==null||dashCornerCache[date]==null;
   const dashDataError=[dashLoadErrors[date]?.epg,dashLoadErrors[date]?.corners].filter(Boolean).join("／");
   const retryDashData=()=>{
@@ -3349,14 +3345,17 @@ export default function App(){
     setDashRetryVersion(v=>v+1);
   };
   const progCenter=programContext?.center??null;
-  const slotStart=slot==='morning'?330:930,slotEnd=slot==='morning'?510:1140;
-  const domainStart=programContext?Math.max(slotStart,programContext.start-30):slotStart;
-  const domainEnd=programContext?Math.min(slotEnd,programContext.end+30):slotEnd;
-  // 表示範囲・zoomは番組表からの遷移(programContext)有無に関わらず常に使えるようにする。
-  // zoomLevel=0(未操作の初期状態)は必ず「その時間帯を全部表示」になるよう、
-  // 現在のdomain幅を先頭に置いた実効zoom段階リストを都度組み立てる(朝・夕方どちらも同じ仕組み)
+  // 視聴率ダッシュボードは全時間帯(05:00-29:00)を常時表示する。朝帯・夕方帯ボタンは
+  // データの取得範囲を制限するのではなく、表示位置をその時間帯にジャンプさせるショートカットとして使う
+  const domainStart=programContext?Math.max(300,programContext.start-30):300;
+  const domainEnd=programContext?Math.min(1740,programContext.end+30):1740;
   const domainWidth=domainEnd-domainStart;
-  const effectiveZoomWidths=useMemo(()=>[domainWidth,...ZOOM_WIDTHS.filter(w=>w<domainWidth)],[domainWidth]);
+  // zoomLevel=0(未操作の初期状態)は必ず「全時間帯を表示」になるよう、朝・夕方帯ジャンプ幅(210/180分)も
+  // 含めた実効zoom段階リストを都度組み立てる
+  const effectiveZoomWidths=useMemo(()=>{
+    const extra=[210,180].filter(w=>w<domainWidth);
+    return[domainWidth,...new Set([...extra,...ZOOM_WIDTHS.filter(w=>w<domainWidth)])].sort((a,b)=>b-a);
+  },[domainWidth]);
   const viewWidth=effectiveZoomWidths[Math.min(zoomLevel,effectiveZoomWidths.length-1)];
   const minCenter=domainStart+viewWidth/2,maxCenter=domainEnd-viewWidth/2;
   const effectiveCenter=Math.max(minCenter,Math.min(maxCenter,panCenter??progCenter??Math.floor((domainStart+domainEnd)/2)));
@@ -3367,13 +3366,25 @@ export default function App(){
     const filtered=dData.filter(d=>d.minute>=winStart&&d.minute<winEnd);
     return filtered.length>0?filtered:dData;
   },[dData,winStart,winEnd]);
+  // 表示範囲の端に達した状態でさらに同方向へパンすると、日付を進め／戻して続けてスクロールできる
+  // (programContext=番組表からの深リンク時は日付を跨がせない)
   const handlePan=useCallback((deltaMin)=>{
     setPanCenter(c=>{
       const base=c??progCenter??Math.floor((domainStart+domainEnd)/2);
-      return Math.max(minCenter,Math.min(maxCenter,base+deltaMin));
+      const next=base+deltaMin;
+      if(!programContext&&next>maxCenter&&date<GUIDE_DATE_MAX){setDate(d=>shiftDateStr(d,1));return Math.max(minCenter,Math.min(maxCenter,next-1440));}
+      if(!programContext&&next<minCenter&&date>GUIDE_DATE_MIN){setDate(d=>shiftDateStr(d,-1));return Math.max(minCenter,Math.min(maxCenter,next+1440));}
+      return Math.max(minCenter,Math.min(maxCenter,next));
     });
-  },[progCenter,domainStart,domainEnd,minCenter,maxCenter]);
-  useEffect(()=>{setPanCenter(null);},[slot,date]);
+  },[progCenter,domainStart,domainEnd,minCenter,maxCenter,programContext,date]);
+  // 朝帯・夕方帯ボタン: データ範囲は変えず、表示位置だけその時間帯にジャンプさせる
+  const jumpToSlot=s=>{
+    setSlot(s);setSelMin(null);setHL(null);
+    const sStart=s==='morning'?330:930,sEnd=s==='morning'?510:1140;
+    const idx=effectiveZoomWidths.indexOf(sEnd-sStart);
+    if(idx>=0)setZoomLevel(idx);
+    setPanCenter(Math.floor((sStart+sEnd)/2));
+  };
   const tog=id=>setSel(p=>p.includes(id)?p.filter(s=>s!==id):[...p,id]);
   const click=m=>{setSelMin(m);const r=rData.find(d=>d.minute===m),s=sData.find(d=>d.minute===m);setSelData({rating:r,share:s});setHL(null);};
   const timelineBlockClick=(m,sid,exactSeek)=>{
@@ -3513,10 +3524,10 @@ export default function App(){
     <NavBar/>
     <div style={{position:"sticky",top:"var(--topbar-height)",zIndex:90,boxShadow:"0 2px 8px rgba(23,59,93,.12)"}}>
     <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",padding:"10px 18px",borderBottom:"1px solid #F3F4F6",background:"#fff"}}>
-      <CalendarPicker value={date} onChange={d=>{setDate(d);setSelMin(null);setHL(null);}} dates={dates}/>
+      <CalendarPicker value={date} onChange={d=>{setDate(d);setSelMin(null);setHL(null);setPanCenter(null);}} dates={dates}/>
       <WeatherBadge weather={weatherData[date]}/>
       <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
-        {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 15:30–19:00"}].map(s=><button key={s.id} onClick={()=>{setSlot(s.id);setSelMin(null);setHL(null);}} style={seg(slot===s.id)}>{s.l}</button>)}
+        {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 15:30–19:00"}].map(s=><button key={s.id} onClick={()=>jumpToSlot(s.id)} style={seg(slot===s.id)}>{s.l}</button>)}
       </div>
       <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
         {[{id:"chart",l:"グラフ表示"},{id:"timetable",l:"番組表〜コーナー別〜"}].map(m=><button key={m.id} onClick={()=>{setDashMode(m.id);setSelMin(null);setHL(null);}} style={seg(dashMode===m.id)}>{m.l}</button>)}

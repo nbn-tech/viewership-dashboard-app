@@ -9,7 +9,16 @@
       "Bash(curl -s \"https://api.github.com/repos/dbghelp/JCOM-TV-EPG/git/trees/3e283f70e905860ea48f79cc29c0b7983815efc8\" --max-time 20)",
       "Bash(curl -s \"https://raw.githubusercontent.com/dbghelp/JCOM-TV-EPG/f1992e84bb5ef03a1b50411b80f2327f0b533376/jcom.xml\" --max-time 60)",
       "Bash(curl -s \"https://raw.githubusercontent.com/dbghelp/JCOM-TV-EPG/f1992e84bb5ef03a1b50411b80f2327f0b533376/jcom.xml\" --max-time 120)",
-      "Bash(powershell -Command \"Stop-Process -Id 32112 -Force\")"
+      "Bash(powershell -Command \"Stop-Process -Id 32112 -Force\")",
+      "Bash(node verify_fullday.mjs)",
+      "Bash(node verify_daypaging.mjs)",
+      "Bash(node verify_leftpaging.mjs)",
+      "Bash(node verify_render_ok.mjs)",
+      "Bash(powershell -Command \"Stop-Process -Id 35036 -Force\")",
+      "Bash(grep -n *)",
+      "Bash(sed -i \"s/5190/5191/\" verify_fullday.mjs)",
+      "Bash(node verify_download_page.mjs)",
+      "Bash(powershell -Command \"Stop-Process -Id 25880 -Force\")"
     ]
   }
 }
