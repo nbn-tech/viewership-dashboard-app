@@ -3092,23 +3092,27 @@ export default function App(){
   const slotStart=slot==='morning'?330:930,slotEnd=slot==='morning'?510:1140;
   const domainStart=programContext?Math.max(slotStart,programContext.start-30):slotStart;
   const domainEnd=programContext?Math.min(slotEnd,programContext.end+30):slotEnd;
-  const viewWidth=programContext?Math.min(ZOOM_WIDTHS[zoomLevel],domainEnd-domainStart):domainEnd-domainStart;
+  // 表示範囲・zoomは番組表からの遷移(programContext)有無に関わらず常に使えるようにする。
+  // zoomLevel=0(未操作の初期状態)は必ず「その時間帯を全部表示」になるよう、
+  // 現在のdomain幅を先頭に置いた実効zoom段階リストを都度組み立てる(朝・夕方どちらも同じ仕組み)
+  const domainWidth=domainEnd-domainStart;
+  const effectiveZoomWidths=useMemo(()=>[domainWidth,...ZOOM_WIDTHS.filter(w=>w<domainWidth)],[domainWidth]);
+  const viewWidth=effectiveZoomWidths[Math.min(zoomLevel,effectiveZoomWidths.length-1)];
   const minCenter=domainStart+viewWidth/2,maxCenter=domainEnd-viewWidth/2;
-  const effectiveCenter=programContext?Math.max(minCenter,Math.min(maxCenter,panCenter??progCenter)):null;
-  const winStart=effectiveCenter!==null?effectiveCenter-viewWidth/2:slotStart;
-  const winEnd=effectiveCenter!==null?effectiveCenter+viewWidth/2:slotEnd;
+  const effectiveCenter=Math.max(minCenter,Math.min(maxCenter,panCenter??progCenter??Math.floor((domainStart+domainEnd)/2)));
+  const winStart=effectiveCenter-viewWidth/2;
+  const winEnd=effectiveCenter+viewWidth/2;
   const chartData=useMemo(()=>{
-    if(effectiveCenter===null)return dData;
     // 表示範囲は [開始, 終了) として扱い、120分表示に121個の1分値が入らないようにする
     const filtered=dData.filter(d=>d.minute>=winStart&&d.minute<winEnd);
     return filtered.length>0?filtered:dData;
-  },[dData,effectiveCenter,winStart,winEnd]);
+  },[dData,winStart,winEnd]);
   const handlePan=useCallback((deltaMin)=>{
     setPanCenter(c=>{
-      const base=c??progCenter??Math.floor((slotStart+slotEnd)/2);
+      const base=c??progCenter??Math.floor((domainStart+domainEnd)/2);
       return Math.max(minCenter,Math.min(maxCenter,base+deltaMin));
     });
-  },[progCenter,slotStart,slotEnd,minCenter,maxCenter]);
+  },[progCenter,domainStart,domainEnd,minCenter,maxCenter]);
   useEffect(()=>{setPanCenter(null);},[slot,date]);
   const tog=id=>setSel(p=>p.includes(id)?p.filter(s=>s!==id):[...p,id]);
   const click=m=>{setSelMin(m);const r=rData.find(d=>d.minute===m),s=sData.find(d=>d.minute===m);setSelData({rating:r,share:s});setHL(null);};
@@ -3259,18 +3263,18 @@ export default function App(){
         <span style={{fontSize:10,color:"#7a7a7a",fontFamily:"monospace"}}>{m2t(programContext.start)}–{m2t(programContext.end)}</span>
       </div>}
     </div>
-    {programContext&&dashMode==="chart"&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 18px",background:"#e5f2fa",borderBottom:"1px solid #9fc5dd",flexWrap:"wrap"}}>
+    {dashMode==="chart"&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 18px",background:"#e5f2fa",borderBottom:"1px solid #9fc5dd",flexWrap:"wrap"}}>
       <span style={{fontSize:10.5,color:"#56778e",fontWeight:700}}>表示範囲 {m2t(Math.round(winStart))}–{m2t(Math.round(winEnd))}</span>
       <button onClick={()=>handlePan(-viewWidth*.25)} disabled={winStart<=domainStart} style={{width:28,height:24,border:"1px solid #9fc5dd",background:"#fff",color:"#173b5d",cursor:winStart<=domainStart?"default":"pointer",opacity:winStart<=domainStart ? .35 : 1}}>◀</button>
       <button onClick={()=>handlePan(viewWidth*.25)} disabled={winEnd>=domainEnd} style={{width:28,height:24,border:"1px solid #9fc5dd",background:"#fff",color:"#173b5d",cursor:winEnd>=domainEnd?"default":"pointer",opacity:winEnd>=domainEnd ? .35 : 1}}>▶</button>
       <span style={{fontSize:10,color:"#56778e",marginLeft:"auto"}}>zoom</span>
       <span style={{fontSize:15,color:"#56778e"}}>−</span>
-      <input className="tvp-zoom-range" type="range" min="0" max={ZOOM_WIDTHS.length-1} step="1" value={zoomLevel} onChange={e=>setZoomLevel(Number(e.target.value))}/>
+      <input className="tvp-zoom-range" type="range" min="0" max={effectiveZoomWidths.length-1} step="1" value={Math.min(zoomLevel,effectiveZoomWidths.length-1)} onChange={e=>setZoomLevel(Number(e.target.value))}/>
       <span style={{fontSize:15,color:"#56778e"}}>＋</span>
       <span style={{minWidth:42,fontSize:10,fontFamily:"monospace",color:"#173b5d"}}>{Math.round(viewWidth)}分</span>
     </div>}
     </div>
-    {dashMode==="chart"?<div style={{display:"flex",alignItems:"flex-start",minHeight:programContext?"calc(100vh - 140px)":"calc(100vh - 100px)"}}>
+    {dashMode==="chart"?<div style={{display:"flex",alignItems:"flex-start",minHeight:"calc(100vh - 140px)"}}>
       <div style={{flex:"1 1 0",display:"flex",flexDirection:"column",minWidth:0,overflow:"visible"}}>
         <div style={{padding:"8px 18px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
           <Toggle sel={sel} onT={tog}/>
@@ -3278,14 +3282,14 @@ export default function App(){
             {DEMO_LIST.map(d=><option key={d.key} value={d.key}>{d.label}（{d.key}）</option>)}
           </select>
         </div>
-        <div style={{padding:"0 18px",height:360,flexShrink:0}}><Chart data={chartData} sel={sel} onClick={click} selMin={selMin} hl={hl} metric={metric} onPan={programContext?handlePan:undefined}/></div>
+        <div style={{padding:"0 18px",height:360,flexShrink:0}}><Chart data={chartData} sel={sel} onClick={click} selMin={selMin} hl={hl} metric={metric} onPan={handlePan}/></div>
         <BroadcastTimeline tpl={dashTpl}
-          startMin={chartData.length?chartData[0].minute:(programContext?winStart:slotStart)}
-          endMin={chartData.length?chartData[chartData.length-1].minute+1:(programContext?winEnd:slotEnd)}
+          startMin={chartData.length?chartData[0].minute:winStart}
+          endMin={chartData.length?chartData[chartData.length-1].minute+1:winEnd}
           selMin={selMin} onClickMinute={click} onTimelineBlockClick={timelineBlockClick} onHighlight={setHL} data={dData} metric={metric}
           loading={dashDataLoading} error={dashDataError} onRetry={retryDashData}/>
       </div>
-      <div style={{width:340,minWidth:290,flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column",position:"sticky",top:programContext?"calc(var(--topbar-height) + 76px)":"calc(var(--topbar-height) + 48px)",maxHeight:programContext?"calc(100vh - var(--topbar-height) - 76px)":"calc(100vh - var(--topbar-height) - 48px)",overflowY:"auto"}}>
+      <div style={{width:340,minWidth:290,flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column",position:"sticky",top:"calc(var(--topbar-height) + 76px)",maxHeight:"calc(100vh - var(--topbar-height) - 76px)",overflowY:"auto"}}>
         {date==="2026-04-17"&&slot==="morning"&&<div style={{padding:"10px 10px 12px",borderBottom:"1px solid #D7E5EE",background:"#F7FBFE"}}>
           <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:7,flexWrap:"wrap"}}>
             <span style={{fontSize:11,fontWeight:700,color:"#173B5D"}}>4/17 ドデスカ! 放送動画</span>
