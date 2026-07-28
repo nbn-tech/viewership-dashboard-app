@@ -48,7 +48,7 @@ function classifySegment(title,tags){
   return "other";
 }
 
-const t2m = t => { const [h,m] = t.split(":").map(Number); return h*60+m; };
+const t2m = t => { if(typeof t==="number")return t; const [h,m] = t.split(":").map(Number); return h*60+m; };
 const m2t = m => `${String(Math.floor(m/60)).padStart(2,"0")}:${String(m%60).padStart(2,"0")}`;
 // 日付文字列(YYYY-MM-DD)をローカル暦日基準でdelta日ぶんずらす(UTC変換を経由しないタイムゾーン安全な実装)
 const shiftDateStr=(d,delta)=>{const[y,m,day]=d.split("-").map(Number);const dt=new Date(y,m-1,day+delta);return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;};
@@ -80,6 +80,10 @@ function localMidnightAbsMin(dateStr){
   const[y,m,d]=dateStr.split("-").map(Number);
   return Math.round(new Date(y,m-1,d,0,0).getTime()/60000);
 }
+// ローカル0時が絶対分(エポック分)で何の剰余(mod 1440)になるか(タイムゾーン起因で0とは限らない、DST無しなら日付によらず一定)
+const LOCAL_DAY_ALIGN=(()=>{const v=localMidnightAbsMin("2025-01-01")%1440;return v<0?v+1440:v;})();
+// 深夜帯を24時以降(27:00等)ではなく通常の時計表示(03:00等)で見せるための、絶対分(エポック分)→"HH:MM"変換
+const wrapClock = absMin => m2t((((absMin-LOCAL_DAY_ALIGN)%1440)+1440)%1440);
 
 // 番組表(epg-all)をパースし、番組表ページの連続タイムライン用に絶対分(startAbs/endAbs)で返す。
 // JSON(20260616以降)はSeIdを、CSV(それ以前)はstId+絶対時刻+タイトルの合成キーをdedup用keyにする
@@ -917,6 +921,44 @@ function buildDayTpl(programs,corners,date,slot){
   return result;
 }
 
+// Dashboard専用: 複数日ぶんの番組表(epg-all)×実分析コーナー(daily_corners)を、絶対分(エポック分)の
+// まま(HH:MM文字列に変換せず)1本のtpl形式に組み立てる。スロットで区切らず終日・複数日連続にできるため、
+// 視聴率の推移・放送内容タイムラインを日をまたいで連続スクロールさせるのに使う。
+// (t2mは数値をそのまま返すため、既存のtplAllCorners/tplProgAt等ともそのまま互換)
+function buildFullDayAbsTpl(epgByDate,cornersByDate,dates){
+  const result={};ST.forEach(s=>result[s.id]=[]);
+  const seen=new Set();
+  const allPrograms=[];
+  dates.forEach(d=>{
+    const progs=epgByDate[d];
+    if(!progs)return;
+    progs.forEach(p=>{if(!seen.has(p.key)){seen.add(p.key);allPrograms.push(p);}});
+  });
+  const cornersByStation={};
+  dates.forEach(d=>{
+    (cornersByDate[d]||[]).forEach(c=>{
+      if(!c.date||!c.startMin)return;
+      (cornersByStation[c.stId]=cornersByStation[c.stId]||[]).push(c);
+    });
+  });
+  allPrograms.forEach(p=>{
+    if(!result[p.stId])return;
+    const stCorners=(cornersByStation[p.stId]||[]).filter(c=>{
+      const cStartAbs=localMidnightAbsMin(c.date)+t2m(c.startMin);
+      const cEndAbs=Math.max(cStartAbs+1,localMidnightAbsMin(c.date)+t2m(c.endMin||c.startMin));
+      return cStartAbs<p.endAbs&&cEndAbs>p.startAbs;
+    }).sort((a,b)=>(localMidnightAbsMin(a.date)+t2m(a.startMin))-(localMidnightAbsMin(b.date)+t2m(b.startMin)))
+      .map(c=>{
+        const cs=localMidnightAbsMin(c.date)+t2m(c.startMin);
+        const ce=localMidnightAbsMin(c.date)+t2m(c.endMin||c.startMin);
+        return[c.title,cs,ce,(c.segment&&SEG[c.segment])?c.segment:classifySegment(c.title,c.tags),c.tags,c.summary,c.object_key,c.start_sec,c.end_sec];
+      });
+    result[p.stId].push([p.title,p.startAbs,p.endAbs,stCorners]);
+  });
+  Object.keys(result).forEach(sid=>result[sid].sort((a,b)=>a[1]-b[1]));
+  return result;
+}
+
 const TIMELINE_LABEL_WIDTH=96;
 
 function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineBlockClick,onHighlight,data,metric,loading,error,onRetry}){
@@ -948,7 +990,7 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
     return <button key={blockKey} onClick={ev=>{ev.stopPropagation();const minute=VIDEO_STATION_TO_CH[sid]?t2m(item.start):(isCorner?t2m(item.start):Math.round((s+e)/2));
       // コーナー(分析結果)ブロックを押した場合のみ、分単位ではなくそのコーナーの録画チャンク内の正確な開始秒にシークする
       const exactSeek=(isCorner&&VIDEO_STATION_TO_CH[sid]&&item.objectKey!=null&&item.startSec!=null)?{objectKey:item.objectKey,startSec:item.startSec}:null;
-      if(onTimelineBlockClick)onTimelineBlockClick(minute,sid,exactSeek);else onClickMinute(minute);if(isCorner)onHighlight?.({start:t2m(item.start),end:t2m(item.end),stationId:sid});if(canExpand)setExpandedCorner(prev=>prev?.key===blockKey?null:{...item,key:blockKey,sid});}} title={`${item.title} ${item.start}–${item.end}`}
+      if(onTimelineBlockClick)onTimelineBlockClick(minute,sid,exactSeek);else onClickMinute(minute);if(isCorner)onHighlight?.({start:t2m(item.start),end:t2m(item.end),stationId:sid});if(canExpand)setExpandedCorner(prev=>prev?.key===blockKey?null:{...item,key:blockKey,sid});}} title={`${item.title} ${wrapClock(t2m(item.start))}–${wrapClock(t2m(item.end))}`}
       onMouseEnter={()=>setHoveredBlock(blockKey)} onMouseLeave={()=>setHoveredBlock(null)}
       style={{position:"absolute",left:`${left}%`,width:`${width}%`,top,bottom,minWidth:isCm?3:8,overflow:"hidden",border:`1px solid ${isHovered?st.c:"rgba(255,255,255,.78)"}`,borderRadius:1,background:isCm?(isHovered?"#647784":"#8aa0af"):isHovered?st.c:major?`${st.c}38`:`${st.c}20`,color:isCm||isHovered?"#fff":st.c,cursor:"pointer",padding:major?"3px 6px":"2px 5px",textAlign:"left",whiteSpace:"nowrap",zIndex:isHovered?4:1,boxShadow:isHovered?`0 0 0 1px ${st.c}, 0 2px 6px rgba(0,0,0,.16)`:"none",transition:"background .12s ease,color .12s ease,box-shadow .12s ease"}}>
       <span style={{display:"block",fontSize:major?10.5:9.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis"}}>{isCm?"CM":item.title}</span>
@@ -960,7 +1002,7 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
   return <div style={{margin:"0 18px 16px",border:"1px solid #9fc5dd",background:"rgba(242,249,255,.92)",overflow:"hidden"}}>
     <div style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",borderBottom:"1px solid #9fc5dd",fontSize:12,fontWeight:700,color:"#173b5d"}}>
       <span>放送内容タイムライン</span>
-      <span style={{fontSize:9.5,fontWeight:400,color:"#56778e",fontFamily:"monospace"}}>{m2t(Math.round(rangeStart))}–{m2t(Math.round(rangeEnd))}</span>
+      <span style={{fontSize:9.5,fontWeight:400,color:"#56778e",fontFamily:"monospace"}}>{wrapClock(Math.round(rangeStart))}–{wrapClock(Math.round(rangeEnd))}</span>
       {loading&&<span style={{marginLeft:"auto",fontSize:10,fontWeight:400,color:"#56778e"}}>番組情報を読み込み中…</span>}
       {error&&<button onClick={onRetry} style={{marginLeft:"auto",padding:"3px 9px",border:"1px solid #dc2626",borderRadius:4,background:"#fff",color:"#dc2626",fontSize:10,cursor:"pointer"}}>取得に失敗しました・再読み込み</button>}
     </div>
@@ -971,7 +1013,7 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
           {timeTicks.map(minute=>{
             const left=((minute-rangeStart)/total)*100;
             return <div key={minute} style={{position:"absolute",left:`${left}%`,top:0,bottom:0,borderLeft:"1px solid #b9d4e5"}}>
-              <span style={{position:"absolute",top:6,left:4,fontSize:8.5,fontFamily:"monospace",color:"#56778e",whiteSpace:"nowrap"}}>{m2t(minute)}</span>
+              <span style={{position:"absolute",top:6,left:4,fontSize:8.5,fontFamily:"monospace",color:"#56778e",whiteSpace:"nowrap"}}>{wrapClock(minute)}</span>
             </div>;
           })}
         </div>
@@ -1017,7 +1059,7 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
             <div style={{flex:1,padding:"10px 14px",color:"#173b5d"}}>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
                 <span style={{fontSize:11.5,fontWeight:700,color:st.c}}>{expandedCorner.title}</span>
-                <span style={{fontSize:9.5,fontFamily:"monospace",color:"#56778e"}}>{expandedCorner.start}–{expandedCorner.end}</span>
+                <span style={{fontSize:9.5,fontFamily:"monospace",color:"#56778e"}}>{wrapClock(t2m(expandedCorner.start))}–{wrapClock(t2m(expandedCorner.end))}</span>
                 <button onClick={()=>setExpandedCorner(null)} style={{marginLeft:"auto",border:0,background:"transparent",color:"#789",cursor:"pointer",fontSize:14}}>×</button>
               </div>
               <div style={{fontSize:11,lineHeight:1.7,whiteSpace:"pre-wrap"}}>{expandedCorner.summary||(expandedCorner.segment==="cm"?"CM中":"このコーナーの内容データはありません。")}</div>
@@ -1079,7 +1121,7 @@ function Chart({data,sel,onClick,selMin,hl,metric,onPan}){
   const xS=useCallback(i=>p.l+(i/Math.max(1,data.length))*cW,[data.length,cW]);
   const yS=useCallback(v=>p.t+cH-(v/mx)*cH,[cH,mx]);
   const gi=useCallback(cx=>{const rc=ref.current?.getBoundingClientRect();if(!rc)return-1;return Math.max(0,Math.min(data.length-1,Math.floor(((cx-rc.left-p.l)/cW)*data.length)));},[cW,data.length]);
-  const tL=useMemo(()=>{const l=[];const st=data.length>100?10:5;for(let i=0;i<data.length;i+=st)l.push({i,lb:data[i].time});return l;},[data]);
+  const tL=useMemo(()=>{const l=[];const st=data.length>100?10:5;for(let i=0;i<data.length;i+=st)l.push({i,lb:wrapClock(data[i].minute)});return l;},[data]);
   const yT=useMemo(()=>{const t=[];const st=metric==="share"?10:2;for(let i=0;i<=mx;i+=st)t.push(i);return t;},[mx,metric]);
   const si=data.findIndex(dt=>dt.minute===selMin);
   let hs=-1,he=-1;if(hl){hs=data.findIndex(dt=>dt.minute===hl.start);he=data.findIndex(dt=>dt.minute===hl.end);}
@@ -1105,7 +1147,7 @@ function Chart({data,sel,onClick,selMin,hl,metric,onPan}){
         {sel.map(sid=>{const st=ST.find(s=>s.id===sid);return <circle key={sid} cx={xS(hv)} cy={yS(data[hv][sid])} r={3} fill={st.c} stroke="#fff" strokeWidth={1.5}/>;})}
         <g>
           <rect x={Math.min(xS(hv)+10,d.w-165)} y={p.t} width={150} height={18+sel.length*16} rx={5} fill="rgba(255,255,255,0.97)" stroke="#E5E7EB"/>
-          <text x={Math.min(xS(hv)+18,d.w-157)} y={p.t+13} fill="#374151" fontSize="10.5" fontFamily="monospace" fontWeight="600">{data[hv].time}</text>
+          <text x={Math.min(xS(hv)+18,d.w-157)} y={p.t+13} fill="#374151" fontSize="10.5" fontFamily="monospace" fontWeight="600">{wrapClock(data[hv].minute)}</text>
           {sel.map((sid,i)=>{const st=ST.find(s=>s.id===sid);return <g key={sid}><circle cx={Math.min(xS(hv)+20,d.w-155)} cy={p.t+28+i*16} r={3.5} fill={st.c}/><text x={Math.min(xS(hv)+28,d.w-147)} y={p.t+32+i*16} fill="#374151" fontSize="10" fontFamily="monospace">{st.id} {data[hv][sid].toFixed(1)}%</text></g>;})}
         </g>
       </>}
@@ -2622,7 +2664,7 @@ function Panel({selMin,rData,allR,allS,sel,onHL,metric,tpl}){
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
           <div style={{display:"flex",alignItems:"center",gap:7}}>
             <span style={{background:st.c,color:"#fff",fontSize:8.5,fontWeight:800,padding:"2px 5px",borderRadius:3,fontFamily:"monospace"}}>{st.id}</span>
-            <span style={{color:"#9CA3AF",fontSize:9.5,fontFamily:"monospace"}}>{corner?`${corner.startMin}–${corner.endMin}`:"—"}</span>
+            <span style={{color:"#9CA3AF",fontSize:9.5,fontFamily:"monospace"}}>{corner?`${wrapClock(t2m(corner.startMin))}–${wrapClock(t2m(corner.endMin))}`:"—"}</span>
           </div>
           <span style={{color:st.c,fontSize:12.5,fontWeight:700,fontFamily:"monospace"}}>{ds}%</span>
         </div>
@@ -2635,8 +2677,8 @@ function Panel({selMin,rData,allR,allS,sel,onHL,metric,tpl}){
         {corner&&corner.tags.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:isE?6:0}}>{corner.tags.map(t=><span key={t} style={{padding:"1px 6px",borderRadius:3,fontSize:9,border:"1px solid #E5E7EB",color:"#6B7280",background:"#F9FAFB"}}>#{t}</span>)}</div>}
         {isE&&corner&&<div style={{animation:"fi 0.25s ease"}}>
           <div style={{display:"flex",gap:6,marginTop:6,marginBottom:6}}>
-            <div style={{flex:1,background:"#F9FAFB",borderRadius:5,padding:"5px 8px",border:"1px solid #F3F4F6"}}><div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",marginBottom:2}}>IN ({corner.startMin})</div><div style={{fontSize:13,fontWeight:700,color:st.c,fontFamily:"monospace"}}>{fmt(iV)}</div></div>
-            <div style={{flex:1,background:"#F9FAFB",borderRadius:5,padding:"5px 8px",border:"1px solid #F3F4F6"}}><div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",marginBottom:2}}>OUT ({corner.endMin})</div><div style={{fontSize:13,fontWeight:700,color:st.c,fontFamily:"monospace"}}>{fmt(oV)}</div></div>
+            <div style={{flex:1,background:"#F9FAFB",borderRadius:5,padding:"5px 8px",border:"1px solid #F3F4F6"}}><div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",marginBottom:2}}>IN ({wrapClock(t2m(corner.startMin))})</div><div style={{fontSize:13,fontWeight:700,color:st.c,fontFamily:"monospace"}}>{fmt(iV)}</div></div>
+            <div style={{flex:1,background:"#F9FAFB",borderRadius:5,padding:"5px 8px",border:"1px solid #F3F4F6"}}><div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",marginBottom:2}}>OUT ({wrapClock(t2m(corner.endMin))})</div><div style={{fontSize:13,fontWeight:700,color:st.c,fontFamily:"monospace"}}>{fmt(oV)}</div></div>
             <div style={{flex:1,background:df!=null?(df>=0?"#F0FDF4":"#FEF2F2"):"#F9FAFB",borderRadius:5,padding:"5px 8px",border:`1px solid ${df!=null?(df>=0?"#DCFCE7":"#FEE2E2"):"#F3F4F6"}`}}><div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",marginBottom:2}}>DIFF</div><div style={{fontSize:13,fontWeight:700,fontFamily:"monospace",color:df!=null?(df>=0?"#16A34A":"#DC2626"):"#9CA3AF"}}>{df!=null?`${df>=0?"+":""}${df.toFixed(1)}`:"—"}</div></div>
           </div>
           <div style={{padding:"7px 9px",background:"#F9FAFB",borderRadius:5,borderLeft:`2px solid ${st.c}`,color:"#4B5563",fontSize:11,lineHeight:1.65}}>{corner.summary}</div>
@@ -3246,7 +3288,8 @@ export default function App(){
   const cornerSeekRef=useRef(null);
   const[page,setPage]=useState(PROGRAM_MODE?"dashboard":"guide");
   const[programContext]=useState(PROGRAM_MODE?{name:PM_NAME,stId:PM_STATION,date:PM_DATE,start:PM_START,end:PM_END,center:Math.floor((PM_START+PM_END)/2),slot:PM_SLOT}:null);
-  const[zoomLevel,setZoomLevel]=useState(0);
+  // 2 = 実効zoom段階リストの3番目(=180分/3時間)。デフォルトの視聴率表示時間は3時間
+  const[zoomLevel,setZoomLevel]=useState(2);
   const[panCenter,setPanCenter]=useState(null);
   const[metric,setMetric]=useState("rating");
   const[dashMode,setDashMode]=useState("chart");
@@ -3288,54 +3331,76 @@ export default function App(){
       .catch(()=>{});
   },[]);
   // S3に新しい視聴率エクセル(rating/*_consolidated.xlsx)が上がっていないか起動時に確認し、
-  // ビルド時データに無い日付があれば取り込む(リビルド不要で反映される)
+  // ビルド時データに無い日付があれば取り込む(リビルド不要で反映される。他ページ向け)
   const[ratingsVersion,setRatingsVersion]=useState(0);
   useEffect(()=>{
     syncNewRatingsFromS3().then(updated=>{if(updated.length)setRatingsVersion(v=>v+1);}).catch(()=>{});
   },[]);
-  // 視聴率の推移: 視聴率は全時間帯(05:00-29:00)ぶんあるため、選んだデモグラフィック(デフォルトALL)ごとに
-  // S3のエクセルから終日ぶんを実行時に取得する(`${date}|${demo}`でキャッシュ)
   const[demoMetric,setDemoMetric]=useState("ALL");
-  const[dashRatingsCache,setDashRatingsCache]=useState({}); // `${date}|${demo}` -> rows|null(読み込み中)|[](データなし)
+  // 視聴率ダッシュボードは日をまたいで連続スクロールできるようにするため、現在の日付の前後1日ぶんも
+  // 常に読み込んでおく(有効期間外の日は除く)。スクロール中にdateが変わるとここも追従して広がる
+  const loadedDates=useMemo(()=>[shiftDateStr(date,-1),date,shiftDateStr(date,1)].filter(d=>d>=GUIDE_DATE_MIN&&d<=GUIDE_DATE_MAX),[date]);
+  const loadedDatesKey=loadedDates.join(",");
+
+  // 視聴率: 全時間帯(05:00-29:00)ぶんを日付ごとにS3のエクセルから実行時に取得し、絶対分(エポック分)で
+  // 保持する。選んだデモグラフィック(デフォルトALL)ごとに`${date}|${demo}`でキャッシュする
+  const[dashRatingsCache,setDashRatingsCache]=useState({}); // `${date}|${demo}` -> rows(絶対分)|null(読み込み中)|[](データなし)
   useEffect(()=>{
-    const key=`${date}|${demoMetric}`;
-    if(key in dashRatingsCache)return;
-    setDashRatingsCache(prev=>({...prev,[key]:null}));
-    fetchAndParseRatingXlsx(date,demoMetric).then(({allday})=>{
-      setDashRatingsCache(prev=>({...prev,[key]:allday?rawRowsToRatingObjects(allday,300):[]}));
-    }).catch(()=>{setDashRatingsCache(prev=>({...prev,[key]:[]}));});
-  },[date,demoMetric]);
-  const rData=useMemo(()=>dashRatingsCache[`${date}|${demoMetric}`]||[],[date,demoMetric,dashRatingsCache]);
+    loadedDates.forEach(d=>{
+      const key=`${d}|${demoMetric}`;
+      if(key in dashRatingsCache)return;
+      setDashRatingsCache(prev=>({...prev,[key]:null}));
+      const dMid=localMidnightAbsMin(d);
+      fetchAndParseRatingXlsx(d,demoMetric).then(({allday})=>{
+        setDashRatingsCache(prev=>({...prev,[key]:allday?rawRowsToRatingObjects(allday,dMid+300):[]}));
+      }).catch(()=>{setDashRatingsCache(prev=>({...prev,[key]:[]}));});
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[loadedDatesKey,demoMetric]);
+  const rData=useMemo(()=>{
+    const merged=[];
+    loadedDates.forEach(d=>{const rows=dashRatingsCache[`${d}|${demoMetric}`];if(rows)merged.push(...rows);});
+    merged.sort((a,b)=>a.minute-b.minute);
+    return merged;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[loadedDatesKey,demoMetric,dashRatingsCache]);
   const sData=useMemo(()=>rData.map(e=>{const t=ST.reduce((s,st)=>s+(e[st.id]||0),0);const o={time:e.time,minute:e.minute};ST.forEach(s=>{o[s.id]=t>0?(e[s.id]/t)*100:0;});return o;}),[rData]);
   const dData=metric==="share"?sData:rData;
 
-  // Dashboard実データ: 選択中の日付の番組表(epg-all)と実分析コーナー(daily_corners)を取得
+  // Dashboard実データ: 読み込み済み日付ぶんの番組表(epg-all)と実分析コーナー(daily_corners)を取得
   const[dashEpgCache,setDashEpgCache]=useState({}); // date -> programs[](絶対分)|null(読み込み中)
   const[dashCornerCache,setDashCornerCache]=useState({}); // date -> corners[]|null(読み込み中)
   const[dashLoadErrors,setDashLoadErrors]=useState({}); // date -> {epg, corners}
   const[dashRetryVersion,setDashRetryVersion]=useState(0);
   useEffect(()=>{
-    if(date in dashEpgCache)return;
-    setDashEpgCache(prev=>({...prev,[date]:null}));
-    const yyyymmdd=date.replace(/-/g,'');
-    const isJson=parseInt(yyyymmdd)>=20260616;
-    fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/epg-all/bangumi_${yyyymmdd}.${isJson?'json':'csv'}`)
-      .then(r=>r.ok?(isJson?r.json():r.text()):Promise.reject())
-      .then(raw=>{setDashEpgCache(prev=>({...prev,[date]:parseEpgTimeline(raw,isJson,date)}));setDashLoadErrors(prev=>({...prev,[date]:{...(prev[date]||{}),epg:null}}));})
-      .catch(()=>{setDashEpgCache(prev=>({...prev,[date]:[]}));setDashLoadErrors(prev=>({...prev,[date]:{...(prev[date]||{}),epg:"番組表データを取得できませんでした"}}));});
-  },[date,dashRetryVersion]);
+    loadedDates.forEach(d=>{
+      if(d in dashEpgCache)return;
+      setDashEpgCache(prev=>({...prev,[d]:null}));
+      const yyyymmdd=d.replace(/-/g,'');
+      const isJson=parseInt(yyyymmdd)>=20260616;
+      fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/epg-all/bangumi_${yyyymmdd}.${isJson?'json':'csv'}`)
+        .then(r=>r.ok?(isJson?r.json():r.text()):Promise.reject())
+        .then(raw=>{setDashEpgCache(prev=>({...prev,[d]:parseEpgTimeline(raw,isJson,d)}));setDashLoadErrors(prev=>({...prev,[d]:{...(prev[d]||{}),epg:null}}));})
+        .catch(()=>{setDashEpgCache(prev=>({...prev,[d]:[]}));setDashLoadErrors(prev=>({...prev,[d]:{...(prev[d]||{}),epg:"番組表データを取得できませんでした"}}));});
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[loadedDatesKey,dashRetryVersion]);
   useEffect(()=>{
-    if(date in dashCornerCache)return;
-    setDashCornerCache(prev=>({...prev,[date]:null}));
-    apiClient.annotationListByDate(date)
-      .then(results=>{setDashCornerCache(prev=>({...prev,[date]:results}));setDashLoadErrors(prev=>({...prev,[date]:{...(prev[date]||{}),corners:null}}));})
-      .catch(()=>{setDashCornerCache(prev=>({...prev,[date]:[]}));setDashLoadErrors(prev=>({...prev,[date]:{...(prev[date]||{}),corners:"解析データを取得できませんでした"}}));});
-  },[date,dashRetryVersion]);
+    loadedDates.forEach(d=>{
+      if(d in dashCornerCache)return;
+      setDashCornerCache(prev=>({...prev,[d]:null}));
+      apiClient.annotationListByDate(d)
+        .then(results=>{setDashCornerCache(prev=>({...prev,[d]:results}));setDashLoadErrors(prev=>({...prev,[d]:{...(prev[d]||{}),corners:null}}));})
+        .catch(()=>{setDashCornerCache(prev=>({...prev,[d]:[]}));setDashLoadErrors(prev=>({...prev,[d]:{...(prev[d]||{}),corners:"解析データを取得できませんでした"}}));});
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[loadedDatesKey,dashRetryVersion]);
 
-  // 実番組(epg-all)×実分析コーナー(daily_corners)を、全時間帯(05:00-29:00)で
-  // 突き合わせてtpl形式({[stId]:[[progName,startHHMM,endHHMM,corners[]],...]})に組み立てる。
-  // 分析結果が無い番組はそもそも配列に含めない(=表示されない。分析が無ければ何も出さない仕様)
-  const dashTpl=useMemo(()=>buildDayTpl(dashEpgCache[date],dashCornerCache[date],date,"full"),[dashEpgCache,dashCornerCache,date]);
+  // 実番組(epg-all)×実分析コーナー(daily_corners)を、読み込み済み日付ぶん連続した絶対分のtplに組み立てる
+  // (視聴率の推移・放送内容タイムライン用。分析結果が無い番組はそもそも配列に含めない)
+  const dashTpl=useMemo(()=>buildFullDayAbsTpl(dashEpgCache,dashCornerCache,loadedDates),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dashEpgCache,dashCornerCache,loadedDatesKey]);
   const dashDataLoading=dashEpgCache[date]==null||dashCornerCache[date]==null;
   const dashDataError=[dashLoadErrors[date]?.epg,dashLoadErrors[date]?.corners].filter(Boolean).join("／");
   const retryDashData=()=>{
@@ -3344,13 +3409,20 @@ export default function App(){
     setDashLoadErrors(prev=>{const next={...prev};delete next[date];return next;});
     setDashRetryVersion(v=>v+1);
   };
-  const progCenter=programContext?.center??null;
-  // 視聴率ダッシュボードは全時間帯(05:00-29:00)を常時表示する。朝帯・夕方帯ボタンは
-  // データの取得範囲を制限するのではなく、表示位置をその時間帯にジャンプさせるショートカットとして使う
-  const domainStart=programContext?Math.max(300,programContext.start-30):300;
-  const domainEnd=programContext?Math.min(1740,programContext.end+30):1740;
+  // 「番組表〜コーナー別〜」表示(TimetableView)は従来通り単日・朝夕スロット単位のまま(全時間帯化の対象外)
+  const dashSlotTpl=useMemo(()=>buildDayTpl(dashEpgCache[date],dashCornerCache[date],date,slot),[dashEpgCache,dashCornerCache,date,slot]);
+  const timetableRData=useMemo(()=>getRatings(date,slot),[date,slot,ratingsVersion]);
+  const timetableSData=useMemo(()=>timetableRData.map(e=>{const t=ST.reduce((s,st)=>s+(e[st.id]||0),0);const o={time:e.time,minute:e.minute};ST.forEach(s=>{o[s.id]=t>0?(e[s.id]/t)*100:0;});return o;}),[timetableRData]);
+
+  const dateMid=localMidnightAbsMin(date);
+  const pcDate=programContext?.date;
+  const progCenterAbs=programContext?localMidnightAbsMin(pcDate)+programContext.center:null;
+  // 視聴率ダッシュボードは全時間帯(05:00-29:00)を常時表示し、日をまたいで連続スクロールできる。
+  // 朝帯・夕方帯ボタンはデータ範囲を制限するのではなく、表示位置をその時間帯にジャンプさせるショートカットとして使う
+  const domainStart=programContext?Math.max(localMidnightAbsMin(pcDate)+300,localMidnightAbsMin(pcDate)+programContext.start-30):localMidnightAbsMin(loadedDates[0])+300;
+  const domainEnd=programContext?Math.min(localMidnightAbsMin(pcDate)+1740,localMidnightAbsMin(pcDate)+programContext.end+30):localMidnightAbsMin(loadedDates[loadedDates.length-1])+1740;
   const domainWidth=domainEnd-domainStart;
-  // zoomLevel=0(未操作の初期状態)は必ず「全時間帯を表示」になるよう、朝・夕方帯ジャンプ幅(210/180分)も
+  // zoomLevel(デフォルト値は下のuseState初期値)は3時間(180分)表示になるよう、朝・夕方帯ジャンプ幅(210/180分)も
   // 含めた実効zoom段階リストを都度組み立てる
   const effectiveZoomWidths=useMemo(()=>{
     const extra=[210,180].filter(w=>w<domainWidth);
@@ -3358,7 +3430,7 @@ export default function App(){
   },[domainWidth]);
   const viewWidth=effectiveZoomWidths[Math.min(zoomLevel,effectiveZoomWidths.length-1)];
   const minCenter=domainStart+viewWidth/2,maxCenter=domainEnd-viewWidth/2;
-  const effectiveCenter=Math.max(minCenter,Math.min(maxCenter,panCenter??progCenter??Math.floor((domainStart+domainEnd)/2)));
+  const effectiveCenter=Math.max(minCenter,Math.min(maxCenter,panCenter??progCenterAbs??(dateMid+1020)));
   const winStart=effectiveCenter-viewWidth/2;
   const winEnd=effectiveCenter+viewWidth/2;
   const chartData=useMemo(()=>{
@@ -3366,24 +3438,24 @@ export default function App(){
     const filtered=dData.filter(d=>d.minute>=winStart&&d.minute<winEnd);
     return filtered.length>0?filtered:dData;
   },[dData,winStart,winEnd]);
-  // 表示範囲の端に達した状態でさらに同方向へパンすると、日付を進め／戻して続けてスクロールできる
-  // (programContext=番組表からの深リンク時は日付を跨がせない)
+  // panCenterは絶対分のまま保持するので、日付境界(5時)をまたいでも位置が飛ばず連続的にスクロールできる
   const handlePan=useCallback((deltaMin)=>{
-    setPanCenter(c=>{
-      const base=c??progCenter??Math.floor((domainStart+domainEnd)/2);
-      const next=base+deltaMin;
-      if(!programContext&&next>maxCenter&&date<GUIDE_DATE_MAX){setDate(d=>shiftDateStr(d,1));return Math.max(minCenter,Math.min(maxCenter,next-1440));}
-      if(!programContext&&next<minCenter&&date>GUIDE_DATE_MIN){setDate(d=>shiftDateStr(d,-1));return Math.max(minCenter,Math.min(maxCenter,next+1440));}
-      return Math.max(minCenter,Math.min(maxCenter,next));
-    });
-  },[progCenter,domainStart,domainEnd,minCenter,maxCenter,programContext,date]);
+    setPanCenter(c=>Math.max(minCenter,Math.min(maxCenter,(c??progCenterAbs??(dateMid+1020))+deltaMin)));
+  },[progCenterAbs,dateMid,minCenter,maxCenter]);
+  // 表示中心が現在の日付の放送日(05:00-29:00)からはみ出したら、左上のカレンダー表示(date)を追従させる
+  useEffect(()=>{
+    if(programContext)return;
+    const rel=effectiveCenter-dateMid;
+    if(rel<300&&date>GUIDE_DATE_MIN)setDate(d=>shiftDateStr(d,-1));
+    else if(rel>=1740&&date<GUIDE_DATE_MAX)setDate(d=>shiftDateStr(d,1));
+  },[effectiveCenter,dateMid,programContext,date]);
   // 朝帯・夕方帯ボタン: データ範囲は変えず、表示位置だけその時間帯にジャンプさせる
   const jumpToSlot=s=>{
     setSlot(s);setSelMin(null);setHL(null);
     const sStart=s==='morning'?330:930,sEnd=s==='morning'?510:1140;
     const idx=effectiveZoomWidths.indexOf(sEnd-sStart);
     if(idx>=0)setZoomLevel(idx);
-    setPanCenter(Math.floor((sStart+sEnd)/2));
+    setPanCenter(dateMid+Math.floor((sStart+sEnd)/2));
   };
   const tog=id=>setSel(p=>p.includes(id)?p.filter(s=>s!==id):[...p,id]);
   const click=m=>{setSelMin(m);const r=rData.find(d=>d.minute===m),s=sData.find(d=>d.minute===m);setSelData({rating:r,share:s});setHL(null);};
@@ -3411,11 +3483,11 @@ export default function App(){
       return;
     }
     if(date==="2026-04-17"&&slot==="morning"&&selMin!==null){
-      if(videoRef.current){const offset=(selMin-360)*60+77;if(offset>=0)videoRef.current.currentTime=offset;}
+      if(videoRef.current){const offset=(selMin-dateMid-360)*60+77;if(offset>=0)videoRef.current.currentTime=offset;}
       return;
     }
     if(!videoFiles||selMin===null)return;
-    const tgt=selMin*60;let found=null;
+    const tgt=(selMin-dateMid)*60;let found=null;
     for(let i=0;i<videoFiles.length;i++){
       if(videoFiles[i].startSec<=tgt&&(i===videoFiles.length-1||videoFiles[i+1].startSec>tgt)){found=videoFiles[i];break;}
     }
@@ -3534,7 +3606,7 @@ export default function App(){
       </div>
       {selMin!==null&&<div style={{display:"flex",alignItems:"center",gap:6,padding:"3px 10px",borderRadius:8,background:"#f5f5f7"}}>
         <span style={{fontSize:10,color:"#7a7a7a"}}>選択時刻</span>
-        <span style={{fontSize:11.5,color:"#0066cc",fontFamily:"monospace",fontWeight:600}}>{m2t(selMin)}</span>
+        <span style={{fontSize:11.5,color:"#0066cc",fontFamily:"monospace",fontWeight:600}}>{wrapClock(selMin)}</span>
       </div>}
       {programContext&&<div style={{display:"flex",alignItems:"center",gap:6,padding:"3px 10px",borderRadius:8,background:"#f5f5f7"}}>
         <span style={{fontSize:11,color:"#1d1d1f",fontWeight:600}}>{programContext.name}</span>
@@ -3542,7 +3614,7 @@ export default function App(){
       </div>}
     </div>
     {dashMode==="chart"&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 18px",background:"#e5f2fa",borderBottom:"1px solid #9fc5dd",flexWrap:"wrap"}}>
-      <span style={{fontSize:10.5,color:"#56778e",fontWeight:700}}>表示範囲 {m2t(Math.round(winStart))}–{m2t(Math.round(winEnd))}</span>
+      <span style={{fontSize:10.5,color:"#56778e",fontWeight:700}}>表示範囲 {wrapClock(Math.round(winStart))}–{wrapClock(Math.round(winEnd))}</span>
       <button onClick={()=>handlePan(-viewWidth*.25)} disabled={winStart<=domainStart} style={{width:28,height:24,border:"1px solid #9fc5dd",background:"#fff",color:"#173b5d",cursor:winStart<=domainStart?"default":"pointer",opacity:winStart<=domainStart ? .35 : 1}}>◀</button>
       <button onClick={()=>handlePan(viewWidth*.25)} disabled={winEnd>=domainEnd} style={{width:28,height:24,border:"1px solid #9fc5dd",background:"#fff",color:"#173b5d",cursor:winEnd>=domainEnd?"default":"pointer",opacity:winEnd>=domainEnd ? .35 : 1}}>▶</button>
       <span style={{fontSize:10,color:"#56778e",marginLeft:"auto"}}>zoom</span>
@@ -3571,14 +3643,14 @@ export default function App(){
         {date==="2026-04-17"&&slot==="morning"&&<div style={{padding:"10px 10px 12px",borderBottom:"1px solid #D7E5EE",background:"#F7FBFE"}}>
           <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:7,flexWrap:"wrap"}}>
             <span style={{fontSize:11,fontWeight:700,color:"#173B5D"}}>4/17 ドデスカ! 放送動画</span>
-            {selMin!==null&&<span style={{fontSize:9.5,color:"#6B7280",fontFamily:"monospace",marginLeft:"auto"}}>{m2t(selMin)} にシーク済み</span>}
+            {selMin!==null&&<span style={{fontSize:9.5,color:"#6B7280",fontFamily:"monospace",marginLeft:"auto"}}>{wrapClock(selMin)} にシーク済み</span>}
           </div>
           <video ref={videoRef} src="https://dodesca-video.s3.ap-northeast-1.amazonaws.com/0417.mp4" controls style={{display:"block",width:"100%",aspectRatio:"16 / 9",objectFit:"contain",borderRadius:5,background:"#000"}}/>
         </div>}
         {date>="2026-06-17"&&videoFiles!==null&&<div style={{padding:"10px 10px 12px",borderBottom:"1px solid #D7E5EE",background:"#F7FBFE"}}>
           <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:7,flexWrap:"wrap"}}>
             <span style={{fontSize:11,fontWeight:700,color:"#173B5D"}}>放送動画（{VIDEO_CH_TO_STATION[videoCh]||videoCh}）</span>
-            {videoUrl&&selMin!==null&&<span style={{fontSize:9.5,color:"#6B7280",fontFamily:"monospace",marginLeft:"auto"}}>{m2t(selMin)} にシーク済み</span>}
+            {videoUrl&&selMin!==null&&<span style={{fontSize:9.5,color:"#6B7280",fontFamily:"monospace",marginLeft:"auto"}}>{wrapClock(selMin)} にシーク済み</span>}
           </div>
           <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #D7E5EE",marginBottom:7}}>
             {VIDEO_CHANNELS.map(ch=><button key={ch} onClick={()=>setVideoCh(ch)} style={{flex:1,padding:"3px 0",border:"none",background:videoCh===ch?"#0066cc":"#fff",color:videoCh===ch?"#fff":"#61788A",cursor:"pointer",fontSize:9.5,fontWeight:700,fontFamily:"monospace"}}>{ch}</button>)}
@@ -3593,7 +3665,7 @@ export default function App(){
     </div>:<div style={{padding:"8px 18px 16px"}}>
       <div style={{marginBottom:8}}><Toggle sel={sel} onT={tog}/></div>
       <div style={{marginBottom:10}}><SegmentLegend/></div>
-      <TimetableView slot={slot} sel={sel} allR={rData} allS={sData} metric={metric} date={date} tpl={dashTpl} loading={dashDataLoading} onCornerClick={(corner,navList,idx)=>setTimetableModal({corner,navList,idx})}/>
+      <TimetableView slot={slot} sel={sel} allR={timetableRData} allS={timetableSData} metric={metric} date={date} tpl={dashSlotTpl} loading={dashDataLoading} onCornerClick={(corner,navList,idx)=>setTimetableModal({corner,navList,idx})}/>
     </div>}
     {timetableModal&&<CornerModal corner={timetableModal.corner} cache={ratingsCache} onClose={()=>setTimetableModal(null)} navList={timetableModal.navList} navIdx={timetableModal.idx} onNavigate={c=>{const idx=timetableModal.navList.findIndex(item=>item.title===c.title&&item.startMin===c.startMin);setTimetableModal({...timetableModal,corner:c,idx});}} guideMode={true}/>}
   </div>;
