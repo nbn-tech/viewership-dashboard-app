@@ -954,7 +954,7 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
               <div>{sid==="NBN"?"メ～テレ":st.nm}</div>
               {hasAnalysis&&<button onClick={ev=>{ev.stopPropagation();setCornerView(prev=>({...prev,[sid]:!prev[sid]}));}}
                 style={{marginTop:6,padding:"1px 6px",fontSize:7.5,fontWeight:600,border:`1px solid ${showCorners?st.c:"#9fc5dd"}`,borderRadius:9999,background:showCorners?st.c:"#fff",color:showCorners?"#fff":"#56778e",cursor:"pointer"}}>
-                {showCorners?"コーナー表示":"番組表示"}
+                {showCorners?"番組表示":"コーナー表示"}
               </button>}
             </div>
             <div style={{position:"relative",flex:1,minWidth:0}} onClick={e=>{const r=e.currentTarget.getBoundingClientRect();onClickMinute(Math.round(rangeStart+(e.clientX-r.left)/r.width*total));}}>
