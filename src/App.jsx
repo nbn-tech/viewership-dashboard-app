@@ -3408,7 +3408,7 @@ function DataDownloadPage(){
 export default function App(){
   const[date,setDate]=useState(PROGRAM_MODE?PM_DATE:GUIDE_DATE_MAX);
   const[slot,setSlot]=useState(PROGRAM_MODE?PM_SLOT:"morning");
-  const[sel,setSel]=useState(PROGRAM_MODE?[...new Set([PM_STATION,"NBN","THK","CTV","CBC","NHK"])]:ST.map(s=>s.id));
+  const[sel,setSel]=useState(ST.map(s=>s.id));
   const[selMin,setSelMin]=useState(null);
   const[selData,setSelData]=useState(null);
   const[hl,setHL]=useState(null);
@@ -3423,10 +3423,9 @@ export default function App(){
   // 放送内容タイムラインでコーナー(分析結果)ブロックを押した時だけ使う、正確な動画URL＋開始秒(分単位ではなく秒単位)
   const cornerSeekRef=useRef(null);
   const[page,setPage]=useState(PROGRAM_MODE?"dashboard":"guide");
-  const[programContext]=useState(PROGRAM_MODE?{name:PM_NAME,stId:PM_STATION,date:PM_DATE,start:PM_START,end:PM_END,center:Math.floor((PM_START+PM_END)/2),slot:PM_SLOT}:null);
   // 2 = 実効zoom段階リストの3番目(=180分/3時間)。デフォルトの視聴率表示時間は3時間
   const[zoomLevel,setZoomLevel]=useState(2);
-  const[panCenter,setPanCenter]=useState(null);
+  const[panCenter,setPanCenter]=useState(PROGRAM_MODE?localMidnightAbsMin(PM_DATE)+Math.floor((PM_START+PM_END)/2):null);
   const[metric,setMetric]=useState("rating");
   const[dashMode,setDashMode]=useState("chart");
   const[timetableModal,setTimetableModal]=useState(null);
@@ -3551,12 +3550,10 @@ export default function App(){
   const timetableSData=useMemo(()=>timetableRData.map(e=>{const t=ST.reduce((s,st)=>s+(e[st.id]||0),0);const o={time:e.time,minute:e.minute};ST.forEach(s=>{o[s.id]=t>0?(e[s.id]/t)*100:0;});return o;}),[timetableRData]);
 
   const dateMid=localMidnightAbsMin(date);
-  const pcDate=programContext?.date;
-  const progCenterAbs=programContext?localMidnightAbsMin(pcDate)+programContext.center:null;
   // 視聴率ダッシュボードは全時間帯(05:00-29:00)を常時表示し、日をまたいで連続スクロールできる。
   // 朝帯・夕方帯ボタンはデータ範囲を制限するのではなく、表示位置をその時間帯にジャンプさせるショートカットとして使う
-  const domainStart=programContext?Math.max(localMidnightAbsMin(pcDate)+300,localMidnightAbsMin(pcDate)+programContext.start-30):localMidnightAbsMin(loadedDates[0])+300;
-  const domainEnd=programContext?Math.min(localMidnightAbsMin(pcDate)+1740,localMidnightAbsMin(pcDate)+programContext.end+30):localMidnightAbsMin(loadedDates[loadedDates.length-1])+1740;
+  const domainStart=localMidnightAbsMin(loadedDates[0])+300;
+  const domainEnd=localMidnightAbsMin(loadedDates[loadedDates.length-1])+1740;
   const domainWidth=domainEnd-domainStart;
   // zoomLevel(デフォルト値は下のuseState初期値)は3時間(180分)表示になるよう、朝・夕方帯ジャンプ幅(210/180分)も
   // 含めた実効zoom段階リストを都度組み立てる
@@ -3568,7 +3565,7 @@ export default function App(){
   const minCenter=domainStart+viewWidth/2,maxCenter=domainEnd-viewWidth/2;
   // 未操作時のデフォルト位置は朝帯(slotの初期値="morning")の中心。夕方帯ボタンを押した後はそちら中心になる
   const defaultCenter=dateMid+(slot==='morning'?420:1035);
-  const effectiveCenter=Math.max(minCenter,Math.min(maxCenter,panCenter??progCenterAbs??defaultCenter));
+  const effectiveCenter=Math.max(minCenter,Math.min(maxCenter,panCenter??defaultCenter));
   const winStart=effectiveCenter-viewWidth/2;
   const winEnd=effectiveCenter+viewWidth/2;
   const chartData=useMemo(()=>{
@@ -3579,15 +3576,22 @@ export default function App(){
   },[dData,winStart,winEnd]);
   // panCenterは絶対分のまま保持するので、日付境界(5時)をまたいでも位置が飛ばず連続的にスクロールできる
   const handlePan=useCallback((deltaMin)=>{
-    setPanCenter(c=>Math.max(minCenter,Math.min(maxCenter,(c??progCenterAbs??defaultCenter)+deltaMin)));
-  },[progCenterAbs,defaultCenter,minCenter,maxCenter]);
+    setPanCenter(c=>Math.max(minCenter,Math.min(maxCenter,(c??defaultCenter)+deltaMin)));
+  },[defaultCenter,minCenter,maxCenter]);
+  // 日付を直接選んだ時は、現在の表示時刻を新しい日付へそのまま引き継ぐ。
+  // 朝・夕方帯への移動は専用ボタンを押した時だけ行う。
+  const changeDashboardDate=useCallback(d=>{
+    setDate(d);
+    setSelMin(null);
+    setHL(null);
+    setPanCenter(localMidnightAbsMin(d)+(effectiveCenter-dateMid));
+  },[effectiveCenter,dateMid]);
   // 表示中心が現在の日付の放送日(05:00-29:00)からはみ出したら、左上のカレンダー表示(date)を追従させる
   useEffect(()=>{
-    if(programContext)return;
     const rel=effectiveCenter-dateMid;
     if(rel<300&&date>GUIDE_DATE_MIN)setDate(d=>shiftDateStr(d,-1));
     else if(rel>=1740&&date<GUIDE_DATE_MAX)setDate(d=>shiftDateStr(d,1));
-  },[effectiveCenter,dateMid,programContext,date]);
+  },[effectiveCenter,dateMid,date]);
   // 朝帯・夕方帯ボタン: データ範囲は変えず、表示位置だけその時間帯にジャンプさせる
   const jumpToSlot=s=>{
     setSlot(s);setSelMin(null);setHL(null);
@@ -3735,7 +3739,7 @@ export default function App(){
     <NavBar/>
     <div style={{position:"sticky",top:"var(--topbar-height)",zIndex:90,boxShadow:"0 2px 8px rgba(23,59,93,.12)"}}>
     <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",padding:"10px 18px",borderBottom:"1px solid #F3F4F6",background:"#fff"}}>
-      <CalendarPicker value={date} onChange={d=>{setDate(d);setSelMin(null);setHL(null);setPanCenter(null);}} dates={dates}/>
+      <CalendarPicker value={date} onChange={changeDashboardDate} dates={dates}/>
       <WeatherBadge weather={weatherData[date]}/>
       <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
         {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 15:30–19:00"}].map(s=><button key={s.id} onClick={()=>jumpToSlot(s.id)} style={seg(slot===s.id)}>{s.l}</button>)}
@@ -3746,10 +3750,6 @@ export default function App(){
       {selMin!==null&&<div style={{display:"flex",alignItems:"center",gap:6,padding:"3px 10px",borderRadius:8,background:"#f5f5f7"}}>
         <span style={{fontSize:10,color:"#7a7a7a"}}>選択時刻</span>
         <span style={{fontSize:11.5,color:"#0066cc",fontFamily:"monospace",fontWeight:600}}>{wrapClock(selMin)}</span>
-      </div>}
-      {programContext&&<div style={{display:"flex",alignItems:"center",gap:6,padding:"3px 10px",borderRadius:8,background:"#f5f5f7"}}>
-        <span style={{fontSize:11,color:"#1d1d1f",fontWeight:600}}>{programContext.name}</span>
-        <span style={{fontSize:10,color:"#7a7a7a",fontFamily:"monospace"}}>{m2t(programContext.start)}–{m2t(programContext.end)}</span>
       </div>}
     </div>
     {dashMode==="chart"&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 18px",background:"#e5f2fa",borderBottom:"1px solid #9fc5dd",flexWrap:"wrap"}}>
