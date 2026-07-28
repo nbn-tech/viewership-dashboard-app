@@ -798,18 +798,18 @@ async function fetchFullDayRatingObjects(date){
 // S3のconsolidated.xlsxが持つ視聴率の属性区分(局コード_属性 の後半)。
 // 局コードは RATING_HEADER_STATION（NBN/THK/CTV/CBC/TVA/NHK/ETV）を使う。
 const RATING_ATTRS=[
-  {id:"ALL",lb:"世帯",desc:"世帯視聴率"},
-  {id:"U49",lb:"個人49歳以下",desc:"コア層(4〜49歳)"},
-  {id:"C", lb:"子供",    desc:"4〜12歳"},
-  {id:"T", lb:"ティーン", desc:"13〜19歳"},
-  {id:"M1",lb:"男性 20〜34歳"},
-  {id:"M2",lb:"男性 35〜49歳"},
-  {id:"M3",lb:"男性 50〜64歳"},
-  {id:"M4",lb:"男性 65歳以上"},
-  {id:"F1",lb:"女性 20〜34歳"},
-  {id:"F2",lb:"女性 35〜49歳"},
-  {id:"F3",lb:"女性 50〜64歳"},
-  {id:"F4",lb:"女性 65歳以上"},
+  {id:"ALL",lb:"個人全体 4才以上",desc:"個人全体（4才以上）"},
+  {id:"U49",lb:"男女 4〜49才",desc:"コア"},
+  {id:"C", lb:"男女 4〜12才"},
+  {id:"T", lb:"男女 13〜19才"},
+  {id:"M1",lb:"男 20〜34才"},
+  {id:"M2",lb:"男 35〜49才"},
+  {id:"M3",lb:"男 50〜64才"},
+  {id:"M4",lb:"男 65才以上"},
+  {id:"F1",lb:"女 20〜34才"},
+  {id:"F2",lb:"女 35〜49才"},
+  {id:"F3",lb:"女 50〜64才"},
+  {id:"F4",lb:"女 65才以上"},
 ];
 // consolidated.xlsxをそのまま(全属性列)取得し、ヘッダー行と1分刻みデータ行を返す
 async function fetchRawRatingTable(date){
@@ -3057,18 +3057,23 @@ function parseStations(text){
 // 年代→男女属性ID(M1〜M4/F1〜F4)。20-34=1,35-49=2,50-64=3,65+=4
 const ageToMF=(g,a)=>a<20?null:`${g}${a<=34?1:a<=49?2:a<=64?3:4}`;
 function parseAttrs(text){
-  const raw=text.normalize("NFKC");
+  const raw=text.normalize("NFKC"); // 〜・才 を保持(年代レンジ判定に使う)
   const n=normJa(text);
   if(/(全属性|全ての属性|すべての属性|全部の属性)/.test(n))return RATING_ATTRS.map(a=>a.id);
   const set=new Set();
-  if(/世帯|せたい/.test(n))set.add("ALL");
-  if(/こあ|core|49歳以下|49さいいか|u49|個人49/.test(n))set.add("U49");
-  if(/子供|こども|kids|きっず/.test(n))set.add("C");
-  if(/てぃーん|teen|中高生/.test(n)||/10代|１０代/.test(raw))set.add("T");
-  const ages=[...raw.matchAll(/(\d{1,2})\s*(?:代|歳)/g)].map(m=>+m[1]);
+  // ALL=個人全体(4才以上)。「世帯」も全体系の言い換えとして許容
+  if(/個人全体|全体|世帯|せたい/.test(raw))set.add("ALL");
+  // 男女括り: U49(4〜49)/C(4〜12)/T(13〜19)
+  if(/コア|4\s*[〜~\-]\s*49|49\s*(?:才|歳)以下|u49/i.test(raw))set.add("U49");
+  if(/子供|こども|kids|きっず|4\s*[〜~\-]\s*12/i.test(raw))set.add("C");
+  if(/ティーン|てぃーん|teen|中高生|13\s*[〜~\-]\s*19|10\s*代|１０代/i.test(raw))set.add("T");
+  // 男/女 + 年代。「男女」括りのときは男女分割属性(M/F)は付けない
+  const ages=[...raw.matchAll(/(\d{1,2})\s*(?:代|歳|才)/g)].map(m=>+m[1]);
   const addGender=g=>{ if(ages.length)ages.forEach(a=>{const k=ageToMF(g,a);if(k)set.add(k);}); else [1,2,3,4].forEach(i=>set.add(`${g}${i}`)); };
-  if(/男性|男|male/.test(raw)||/male/.test(n))addGender("M");
-  if(/女性|女|female/.test(raw)||/female/.test(n))addGender("F");
+  if(!/男女/.test(raw)){
+    if(/男性|男|male/i.test(raw))addGender("M");
+    if(/女性|女|female/i.test(raw))addGender("F");
+  }
   return RATING_ATTRS.map(a=>a.id).filter(id=>set.has(id));
 }
 // 日付を抽出し、利用可能日(dates=昇順)の中の実在日に解決する。年省略時は月日一致の最新日を採用
@@ -3116,7 +3121,7 @@ function extractProgramQuery(text){
 function DataDownloadPage(){
   const DOW=ds=>["日","月","火","水","木","金","土"][new Date(ds).getDay()];
   const DATES=useMemo(()=>[...DASHBOARD_DATES].sort(),[]);
-  const GREETING="こんにちは。視聴率データをExcelでダウンロードします。\nダッシュボードと同じデータ（名古屋地区・1分刻み）から、指定した条件だけを抜き出したExcelを作成します。\n\nご希望を文章で入力してください（例:「7月15日のメ〜テレ ドデスカを世帯で」）。\n1つずつ選んで指定することもできます。";
+  const GREETING="こんにちは。視聴率データをExcelでダウンロードします。\nダッシュボードと同じデータ（名古屋地区・1分刻み）から、指定した条件だけを抜き出したExcelを作成します。\n\nご希望を文章で入力してください（例:「7月15日のメ〜テレ ドデスカを個人全体で」）。\n1つずつ選んで指定することもできます。";
   const initialCond={date:null,stations:[],attrs:[],range:null};
   const[log,setLog]=useState([{role:"bot",text:GREETING}]);
   const[cond,setCond]=useState(initialCond);            // {date, stations[], attrs[], range:{startTv,endTv,label}}
@@ -3138,7 +3143,7 @@ function DataDownloadPage(){
   const PROMPT={
     date:"日付を選ぶか、「7月15日」のように入力してください。",
     station:"対象の放送局は？（例:「メ〜テレ」「全局」／複数選択できます）",
-    attr:"視聴率の属性は？（例:「世帯」「男性40代」「全属性」／複数選択できます）",
+    attr:"視聴率の属性は？（例:「個人全体」「男40代」「全属性」／複数選択できます）",
     range:"時間帯は？ 時刻（例:「6時〜8時」）か、番組名（例:「ドデスカ」）で指定できます。",
     confirm:"以下の条件でExcelを作成します。内容を確認してダウンロードしてください。",
   };
@@ -3249,7 +3254,7 @@ function DataDownloadPage(){
 
   return <div style={{maxWidth:820,margin:"0 auto",padding:"20px 18px 40px",display:"flex",flexDirection:"column",minHeight:"calc(100vh - var(--topbar-height))"}}>
     <div style={{marginBottom:14}}>
-      <h1 style={{fontSize:22,fontWeight:600,color:"#1d1d1f",letterSpacing:"-0.374px"}}>データダウンロード</h1>
+      <h1 style={{fontSize:22,fontWeight:600,color:"#1d1d1f",letterSpacing:"-0.374px"}}>視聴率データダウンロード</h1>
       <p style={{fontSize:13,color:"#7a7a7a",marginTop:4,letterSpacing:"-0.2px"}}>チャットで条件を伝えると、該当する毎分の視聴率をExcelでダウンロードできます。文章でまとめて指定しても、1つずつ選んでもOKです。</p>
     </div>
 
@@ -3270,7 +3275,7 @@ function DataDownloadPage(){
       {/* いつでも使える自由文入力 */}
       {focus!=="done"&&<div style={{display:"flex",gap:8,marginBottom:14}}>
         <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")handleSend();}}
-          placeholder="条件を入力（例: 7月15日 メ〜テレ ドデスカ 世帯）" disabled={busy}
+          placeholder="条件を入力（例: 7月15日 メ〜テレ ドデスカ 個人全体）" disabled={busy}
           style={{flex:1,padding:"9px 15px",borderRadius:9999,border:"1px solid #e0e0e0",fontSize:14,outline:"none",color:"#1d1d1f"}}/>
         {cta(handleSend,busy||!input.trim(),"送信")}
       </div>}
@@ -3302,7 +3307,7 @@ function DataDownloadPage(){
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           {cta(confirmAttrs,!cond.attrs.length,"次へ")}
-          {ghost(()=>setCond(c=>({...c,attrs:["ALL"]})),"世帯のみ")}
+          {ghost(()=>setCond(c=>({...c,attrs:["ALL"]})),"個人全体のみ")}
           {ghost(()=>setCond(c=>({...c,attrs:RATING_ATTRS.map(a=>a.id)})),"全属性")}
         </div>
       </div>}
