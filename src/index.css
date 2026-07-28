@@ -174,6 +174,47 @@ body {
 
 .tvp-zoom-range { accent-color: var(--metele-accent); width: 150px; }
 
+.tvp-time-jumps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tvp-time-jump-label {
+  margin-right: 2px;
+  color: #7a7a7a;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tvp-time-jump-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid #d2d2d7;
+  border-radius: 8px;
+  background: #fff;
+  color: #0066cc;
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color .15s ease, border-color .15s ease;
+}
+
+.tvp-time-jump-button:hover {
+  border-color: #0066cc;
+  background: #f0f7ff;
+}
+
+.tvp-time-jump-button:focus-visible {
+  outline: 2px solid #0066cc;
+  outline-offset: 2px;
+}
+
 @media (max-width: 900px) {
   :root { --sidebar-width: 188px; }
 }

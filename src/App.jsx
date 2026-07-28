@@ -3132,6 +3132,18 @@ function parseConditionDate(text,dates){
   const cand=dates.filter(x=>x.slice(5)===`${mm}-${dd}`);
   return cand.length?cand[cand.length-1]:null;
 }
+// 「先週末」は直近の月曜より前の土日として解決する。番組名と一緒に指定された場合、
+// 土日の両方を検索して、実際に番組が見つかった日をダウンロード対象日にする。
+function parseConditionDates(text,dates){
+  const n=normJa(text);
+  if(/先週末|先週の週末|せんしゅうまつ/.test(n)){
+    const latest=dates[dates.length-1];
+    const currentMonday=mondayOf(latest);
+    return[shiftDateStr(currentMonday,-2),shiftDateStr(currentMonday,-1)].filter(d=>dates.includes(d));
+  }
+  const single=parseConditionDate(text,dates);
+  return single?[single]:[];
+}
 // 「6時〜8時」「06:00-08:00」「18時30分〜19時」などから開始・終了のtv分を抽出
 function parseTimeRange(text){
   const n=text.normalize("NFKC");
@@ -3143,17 +3155,38 @@ function parseTimeRange(text){
 }
 // 自由文から番組名候補を取り出す。「」『』引用を優先し、無ければ日付/時刻/局/属性/助詞を除いた残余を使う
 const DL_STATION_WORDS=["メ〜テレ","メ～テレ","メーテレ","名古屋テレビ","東海テレビ","中京テレビ","CBCテレビ","CBC","テレビ愛知","NHK総合","NHKEテレ","Eテレ","ｅテレ","教育テレビ","教育","NHKE","NHK","THK","CTV","TVA","ETV"];
-const DL_STOP_WORDS=["視聴率","データ","ダウンロード","エクセル","excel","ください","下さい","お願いします","お願い","欲しい","ほしい","見たい","みたい","教えて","グラフ","毎分","放送","番組名","番組","全局","属性","世帯","個人","コア","子供","こども","ティーン","男性","女性","男","女","全属性","最新","分","時","から","まで","の","で","を","は","が","と","に","、","。"];
+const DL_STOP_WORDS=["視聴率","データ","ダウンロード","エクセル","excel","ください","下さい","お願いします","お願い","欲しい","ほしい","見たい","みたい","教えて","グラフ","毎分","放送","番組名","番組","全局","個人全体","全属性","属性","世帯","個人","男女","全体","コア","子供","こども","ティーン","男性","女性","男","女","先週の週末","先週末","せんしゅうまつ","最新","分","時","から","まで","の","で","を","は","が","と","に","、","。"];
 function extractProgramQuery(text){
   const q=text.match(/[「『]([^」』]+)[」』]/);
   if(q&&q[1].trim())return q[1].trim();
   let s=text.normalize("NFKC");
   s=s.replace(/(\d{4})[-\/年](\d{1,2})[-\/月](\d{1,2})日?/g,"").replace(/(\d{1,2})[\/月](\d{1,2})日?/g,"");
-  s=s.replace(/(\d{1,2})\s*(?::|時)\s*(\d{1,2})?\s*分?/g,"").replace(/\d{1,2}\s*(?:代|歳)(?:以上|以下)?/g,"");
+  s=s.replace(/(\d{1,2})\s*(?::|時)\s*(\d{1,2})?\s*分?/g,"");
+  s=s.replace(/\d{1,2}\s*[〜~\-–—－]\s*\d{1,2}\s*(?:代|歳|才)(?:以上|以下)?/g,"").replace(/\d{1,2}\s*(?:代|歳|才)(?:以上|以下)?/g,"");
   for(const w of DL_STATION_WORDS)s=s.replace(new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"gi"),""); // 局名は大小無視で除去
-  for(const w of DL_STOP_WORDS)s=s.split(w).join("");
+  for(const w of [...DL_STOP_WORDS].sort((a,b)=>b.length-a.length))s=s.split(w).join("");
   s=s.replace(/[〜~\-–—・,，、。\s　:：]/g,"").trim();
   return s.length>=2?s:null;
+}
+
+// 略称を含む番組検索用。完全な部分一致を最優先し、3文字以上の入力は
+// 「チョコサム」→「チョコレートサムネット」のような順序一致も許容する。
+function fuzzyProgramScore(title,query){
+  const nt=normJa(title),nq=normJa(query);
+  if(!nq||!nt)return null;
+  const direct=nt.indexOf(nq);
+  if(direct>=0)return direct;
+  if(nq.length<3)return null;
+  let qi=0,first=-1,last=-1;
+  for(let i=0;i<nt.length&&qi<nq.length;i++){
+    if(nt[i]===nq[qi]){
+      if(first<0)first=i;
+      last=i;
+      qi++;
+    }
+  }
+  if(qi!==nq.length)return null;
+  return 100+(last-first+1-nq.length);
 }
 
 // ============= データダウンロードページ(チャット形式) =============
@@ -3183,7 +3216,7 @@ function DataDownloadPage(){
   const stLabel=ids=>ids.length===ST.length?"全局":ids.map(id=>ST.find(s=>s.id===id).nm).join("、");
   const attrLabel=ids=>ids.map(id=>RATING_ATTRS.find(a=>a.id===id).lb).join("、");
   const PROMPT={
-    date:"日付を選ぶか、「7月15日」のように入力してください。",
+    date:"日付を選ぶか、「7月15日」「先週末」のように入力してください。",
     station:"対象の放送局は？（例:「メ〜テレ」「全局」／複数選択できます）",
     attr:"視聴率の属性は？（例:「個人全体」「男40代」「全属性」／複数選択できます）",
     range:"時間帯は？ 時刻（例:「6時〜8時」）か、番組名（例:「ドデスカ」）で指定できます。",
@@ -3195,19 +3228,22 @@ function DataDownloadPage(){
   const reset=()=>{setLog([{role:"bot",text:GREETING}]);setCond(initialCond);setFocus("date");setInput("");setCalDate(GUIDE_DATE_MAX);setProgMatches(null);setPendingProgram("");setTimeStart("06:00");setTimeEnd("08:00");setErr("");};
 
   // 番組名でEPGを検索(表記ゆれ吸収)。選択中の局があれば局で絞り込む
-  const runProgramSearch=async(query,c)=>{
+  const runProgramSearch=async(query,c,searchDates)=>{
     setBusy(true);setErr("");setProgMatches(null);setFocus("program");
     try{
-      const dayMid=localMidnightAbsMin(c.date);
-      const nq=normJa(query);
-      const progs=await fetchEpgPrograms(c.date);
+      const targetDates=(searchDates?.length?searchDates:[c.date]).filter(Boolean);
+      const programsByDate=await Promise.all(targetDates.map(async date=>({date,progs:await fetchEpgPrograms(date)})));
       const seen=new Set();
-      const hit=progs
-        .filter(p=>(c.stations.length?c.stations.includes(p.stId):true)&&p.title&&normJa(p.title).includes(nq))
-        .map(p=>{let s=p.startAbs-dayMid;if(s<300)s+=1440;let e=p.endAbs-dayMid;if(e<300)e+=1440;return{stId:p.stId,title:p.title,startTv:s,endTv:e};})
+      const hit=programsByDate
+        .flatMap(({date,progs})=>{
+          const dayMid=localMidnightAbsMin(date);
+          return progs.map(p=>({...p,date,dayMid,matchScore:fuzzyProgramScore(p.title,query)}));
+        })
+        .filter(p=>(c.stations.length?c.stations.includes(p.stId):true)&&p.title&&p.matchScore!=null)
+        .map(p=>{let s=p.startAbs-p.dayMid;if(s<300)s+=1440;let e=p.endAbs-p.dayMid;if(e<300)e+=1440;return{date:p.date,stId:p.stId,title:p.title,startTv:s,endTv:e,matchScore:p.matchScore};})
         .filter(p=>p.startTv>=300&&p.startTv<=1739)
-        .sort((a,b)=>a.startTv-b.startTv)
-        .filter(p=>{const k=`${p.stId}|${p.startTv}|${p.title}`;if(seen.has(k))return false;seen.add(k);return true;});
+        .sort((a,b)=>a.matchScore-b.matchScore||a.date.localeCompare(b.date)||a.startTv-b.startTv)
+        .filter(p=>{const k=`${p.date}|${p.stId}|${p.startTv}|${p.title}`;if(seen.has(k))return false;seen.add(k);return true;});
       setProgMatches(hit);
       if(hit.length)say("bot",`「${query}」に一致する番組が${hit.length}件見つかりました。放送時間を使う番組を選んでください。`);
       else say("bot",`「${query}」に一致する番組が見つかりませんでした。別の番組名を入力するか、時刻で指定してください。`);
@@ -3220,20 +3256,37 @@ function DataDownloadPage(){
     const text=input.trim();if(!text||busy)return;
     setInput("");setErr("");
     say("user",text);
-    const p={date:parseConditionDate(text,DATES),stations:parseStations(text),attrs:parseAttrs(text),range:parseTimeRange(text),programQuery:extractProgramQuery(text)};
+    const dateCandidates=parseConditionDates(text,DATES);
+    const p={dateCandidates,stations:parseStations(text),attrs:parseAttrs(text),range:parseTimeRange(text),programQuery:extractProgramQuery(text)};
     const c={...cond};const got=[];
-    if(p.date&&p.date!==c.date){c.date=p.date;setCalDate(p.date);got.push(`日付=${p.date}`);}
+    if(p.dateCandidates.length===1){
+      const d=p.dateCandidates[0];
+      if(d!==c.date){c.date=d;setCalDate(d);got.push(`日付=${d}`);}
+    }else if(p.dateCandidates.length>1){
+      got.push(`検索期間=${p.dateCandidates[0]}〜${p.dateCandidates[p.dateCandidates.length-1]}（先週末）`);
+      if(!p.programQuery&&!pendingProgram){
+        const d=p.dateCandidates[p.dateCandidates.length-1];
+        c.date=d;setCalDate(d);
+      }
+    }
     if(p.stations.length){c.stations=p.stations;got.push(`局=${stLabel(p.stations)}`);}
     if(p.attrs.length){c.attrs=p.attrs;got.push(`属性=${attrLabel(p.attrs)}`);}
     if(p.range){c.range={...p.range,label:`${tvToClock(p.range.startTv)}〜${tvToClock(p.range.endTv)}`};got.push(`時間帯=${c.range.label}`);}
     setCond(c);
     if(got.length)say("bot",`承知しました。${got.join(" / ")} で認識しました。`);
+    if(pendingProgram&&p.dateCandidates.length){
+      const q=pendingProgram;
+      setPendingProgram("");
+      await runProgramSearch(q,c,p.dateCandidates);
+      return;
+    }
     // 時刻未確定 かつ (番組名らしき入力 or 時間帯を尋ねている最中) → 番組検索へ
     const wantProg=!c.range&&(p.programQuery||focus==="range"||focus==="program");
     const query=p.programQuery||((focus==="range"||focus==="program")?text:null);
     if(wantProg&&query){
-      if(!c.date){setPendingProgram(query);setFocus("date");say("bot","番組を検索するには日付が必要です。先に日付を指定してください。");return;}
-      await runProgramSearch(query,c);return;
+      const searchDates=p.dateCandidates.length?p.dateCandidates:(c.date?[c.date]:[]);
+      if(!searchDates.length){setPendingProgram(query);setFocus("date");say("bot","番組を検索するには日付が必要です。「7月15日」や「先週末」のように指定してください。");return;}
+      await runProgramSearch(query,c,searchDates);return;
     }
     advance(c);
   };
@@ -3244,7 +3297,7 @@ function DataDownloadPage(){
     advance(c);};
   const confirmStations=()=>{if(!cond.stations.length)return;say("user",stLabel(cond.stations));advance(cond);};
   const confirmAttrs=()=>{if(!cond.attrs.length)return;say("user",attrLabel(cond.attrs));advance(cond);};
-  const pickProgram=p=>{const st=ST.find(s=>s.id===p.stId);const range={startTv:p.startTv,endTv:Math.min(p.endTv,1739),label:`${p.title}（${st.nm} ${tvToClock(p.startTv)}〜${tvToClock(p.endTv)}）`};const c={...cond,range};setCond(c);say("user",range.label);setProgMatches(null);advance(c);};
+  const pickProgram=p=>{const st=ST.find(s=>s.id===p.stId);const range={startTv:p.startTv,endTv:Math.min(p.endTv,1739),label:`${p.title}（${st.nm} ${tvToClock(p.startTv)}〜${tvToClock(p.endTv)}）`};const c={...cond,date:p.date,range};setCalDate(p.date);setCond(c);say("user",`${p.date}（${DOW(p.date)}） ${range.label}`);setProgMatches(null);advance(c);};
   const confirmTime=()=>{
     const ms=timeStart.match(/^(\d{1,2}):(\d{2})$/),me=timeEnd.match(/^(\d{1,2}):(\d{2})$/);
     if(!ms||!me){setErr("時刻は HH:MM 形式で入力してください。");return;}
@@ -3317,7 +3370,7 @@ function DataDownloadPage(){
       {/* いつでも使える自由文入力 */}
       {focus!=="done"&&<div style={{display:"flex",gap:8,marginBottom:14}}>
         <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")handleSend();}}
-          placeholder="条件を入力（例: 7月15日 メ〜テレ ドデスカ 個人全体）" disabled={busy}
+          placeholder="条件を入力（例: 先週末のチョコサムを個人全体で）" disabled={busy}
           style={{flex:1,padding:"9px 15px",borderRadius:9999,border:"1px solid #e0e0e0",fontSize:14,outline:"none",color:"#1d1d1f"}}/>
         {cta(handleSend,busy||!input.trim(),"送信")}
       </div>}
@@ -3370,7 +3423,7 @@ function DataDownloadPage(){
           {progMatches.map((p,i)=><button key={i} onClick={()=>pickProgram(p)} style={{textAlign:"left",padding:"10px 14px",borderRadius:12,border:"1px solid #e0e0e0",background:"#fff",cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
             <span style={{width:8,height:8,borderRadius:"50%",background:ST.find(s=>s.id===p.stId).c,flexShrink:0}}/>
             <span style={{fontSize:13.5,color:"#1d1d1f",fontWeight:600,flex:1}}>{p.title}</span>
-            <span style={{fontSize:12,color:"#7a7a7a",fontFamily:"monospace"}}>{ST.find(s=>s.id===p.stId).nm} {tvToClock(p.startTv)}〜{tvToClock(p.endTv)}</span>
+            <span style={{fontSize:12,color:"#7a7a7a",fontFamily:"monospace"}}>{p.date.slice(5).replace("-","/")}（{DOW(p.date)}） {ST.find(s=>s.id===p.stId).nm} {tvToClock(p.startTv)}〜{tvToClock(p.endTv)}</span>
           </button>)}
         </div>}
         {progMatches&&progMatches.length===0&&<div style={{fontSize:12.5,color:"#7a7a7a",marginBottom:10}}>別の番組名を上の入力欄へ、または時刻で指定してください。</div>}
@@ -3741,8 +3794,9 @@ export default function App(){
     <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",padding:"10px 18px",borderBottom:"1px solid #F3F4F6",background:"#fff"}}>
       <CalendarPicker value={date} onChange={changeDashboardDate} dates={dates}/>
       <WeatherBadge weather={weatherData[date]}/>
-      <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
-        {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 15:30–19:00"}].map(s=><button key={s.id} onClick={()=>jumpToSlot(s.id)} style={seg(slot===s.id)}>{s.l}</button>)}
+      <div className="tvp-time-jumps" aria-label="時間帯へ移動">
+        <span className="tvp-time-jump-label">時間へ移動</span>
+        {[{id:"morning",l:"朝 5:30–8:30"},{id:"evening",l:"夕方 15:30–19:00"}].map(s=><button key={s.id} className="tvp-time-jump-button" onClick={()=>jumpToSlot(s.id)}>{s.l}<span aria-hidden="true">→</span></button>)}
       </div>
       <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
         {[{id:"chart",l:"グラフ表示"},{id:"timetable",l:"番組表〜コーナー別〜"}].map(m=><button key={m.id} onClick={()=>{setDashMode(m.id);setSelMin(null);setHL(null);}} style={seg(dashMode===m.id)}>{m.l}</button>)}
