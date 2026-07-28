@@ -867,7 +867,7 @@ function buildDayTpl(programs,corners,date,slot){
       const cEndAbs=Math.max(cStartAbs+1,localMidnightAbsMin(c.date)+t2m(c.endMin||c.startMin));
       return cStartAbs<p.endAbs&&cEndAbs>p.startAbs;
     }).sort((a,b)=>t2m(a.startMin)-t2m(b.startMin))
-      .map(c=>[c.title,c.startMin,c.endMin,(c.segment&&SEG[c.segment])?c.segment:classifySegment(c.title,c.tags),c.tags,c.summary]);
+      .map(c=>[c.title,c.startMin,c.endMin,(c.segment&&SEG[c.segment])?c.segment:classifySegment(c.title,c.tags),c.tags,c.summary,c.object_key,c.start_sec,c.end_sec]);
     result[p.stId].push([p.title,fmtT(new Date(p.startAbs*60000)),fmtT(new Date(p.endAbs*60000)),stCorners]);
   });
   Object.keys(result).forEach(sid=>result[sid].sort((a,b)=>t2m(a[1])-t2m(b[1])));
@@ -902,7 +902,10 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
     const canExpand=isCorner&&!major;
     const blockKey=`${sid}-${key}`;
     const isHovered=hoveredBlock===blockKey;
-    return <button key={blockKey} onClick={ev=>{ev.stopPropagation();const minute=VIDEO_STATION_TO_CH[sid]?t2m(item.start):(isCorner?t2m(item.start):Math.round((s+e)/2));if(onTimelineBlockClick)onTimelineBlockClick(minute,sid);else onClickMinute(minute);if(isCorner)onHighlight?.({start:t2m(item.start),end:t2m(item.end),stationId:sid});if(canExpand)setExpandedCorner(prev=>prev?.key===blockKey?null:{...item,key:blockKey,sid});}} title={`${item.title} ${item.start}–${item.end}`}
+    return <button key={blockKey} onClick={ev=>{ev.stopPropagation();const minute=VIDEO_STATION_TO_CH[sid]?t2m(item.start):(isCorner?t2m(item.start):Math.round((s+e)/2));
+      // コーナー(分析結果)ブロックを押した場合のみ、分単位ではなくそのコーナーの録画チャンク内の正確な開始秒にシークする
+      const exactSeek=(isCorner&&VIDEO_STATION_TO_CH[sid]&&item.objectKey!=null&&item.startSec!=null)?{objectKey:item.objectKey,startSec:item.startSec}:null;
+      if(onTimelineBlockClick)onTimelineBlockClick(minute,sid,exactSeek);else onClickMinute(minute);if(isCorner)onHighlight?.({start:t2m(item.start),end:t2m(item.end),stationId:sid});if(canExpand)setExpandedCorner(prev=>prev?.key===blockKey?null:{...item,key:blockKey,sid});}} title={`${item.title} ${item.start}–${item.end}`}
       onMouseEnter={()=>setHoveredBlock(blockKey)} onMouseLeave={()=>setHoveredBlock(null)}
       style={{position:"absolute",left:`${left}%`,width:`${width}%`,top,bottom,minWidth:isCm?3:8,overflow:"hidden",border:`1px solid ${isHovered?st.c:"rgba(255,255,255,.78)"}`,borderRadius:1,background:isCm?(isHovered?"#647784":"#8aa0af"):isHovered?st.c:major?`${st.c}38`:`${st.c}20`,color:isCm||isHovered?"#fff":st.c,cursor:"pointer",padding:major?"3px 6px":"2px 5px",textAlign:"left",whiteSpace:"nowrap",zIndex:isHovered?4:1,boxShadow:isHovered?`0 0 0 1px ${st.c}, 0 2px 6px rgba(0,0,0,.16)`:"none",transition:"background .12s ease,color .12s ease,box-shadow .12s ease"}}>
       <span style={{display:"block",fontSize:major?10.5:9.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis"}}>{isCm?"CM":item.title}</span>
@@ -939,7 +942,7 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
         const hasAnalysis=programs.some(([, , ,corners])=>corners.length>0);
         const showCorners=hasAnalysis&&!!cornerView[sid];
         const fineCorners=showCorners?programs.flatMap(([name,s,e,corners],pi)=>corners.length
-          ?corners.map(([title,cs,ce,segment,tags,summary],ci)=>({title,start:cs,end:ce,segment,tags:tags||[],summary:summary||"",key:`${pi}-${ci}`}))
+          ?corners.map(([title,cs,ce,segment,tags,summary,objectKey,cStartSec,cEndSec],ci)=>({title,start:cs,end:ce,segment,tags:tags||[],summary:summary||"",objectKey,startSec:cStartSec,endSec:cEndSec,key:`${pi}-${ci}`}))
           :[{title:name,start:s,end:e,segment:"other",tags:[],summary:"",noAnalysis:true,key:`${pi}-empty`}]
         ):[];
         const majorGroups=[];
@@ -2977,6 +2980,8 @@ export default function App(){
   const prevVideoUrlRef=useRef(null);
   const pendingSeekRef=useRef(null);
   const suppressVideoSeekRef=useRef(false);
+  // 放送内容タイムラインでコーナー(分析結果)ブロックを押した時だけ使う、正確な動画URL＋開始秒(分単位ではなく秒単位)
+  const cornerSeekRef=useRef(null);
   const[page,setPage]=useState(PROGRAM_MODE?"dashboard":"guide");
   const[programContext]=useState(PROGRAM_MODE?{name:PM_NAME,stId:PM_STATION,date:PM_DATE,start:PM_START,end:PM_END,center:Math.floor((PM_START+PM_END)/2),slot:PM_SLOT}:null);
   const[zoomLevel,setZoomLevel]=useState(0);
@@ -3107,15 +3112,29 @@ export default function App(){
   useEffect(()=>{setPanCenter(null);},[slot,date]);
   const tog=id=>setSel(p=>p.includes(id)?p.filter(s=>s!==id):[...p,id]);
   const click=m=>{setSelMin(m);const r=rData.find(d=>d.minute===m),s=sData.find(d=>d.minute===m);setSelData({rating:r,share:s});setHL(null);};
-  const timelineBlockClick=(m,sid)=>{
+  const timelineBlockClick=(m,sid,exactSeek)=>{
     const mappedCh=VIDEO_STATION_TO_CH[sid];
     if(mappedCh)setVideoCh(mappedCh);
     else if(m!==selMin)suppressVideoSeekRef.current=true;
+    if(exactSeek&&mappedCh){
+      const yyyymmdd=date.replace(/-/g,'');
+      cornerSeekRef.current={url:`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/movie/${mappedCh}/${yyyymmdd}/${exactSeek.objectKey}`,sec:exactSeek.startSec};
+    }else{
+      cornerSeekRef.current=null;
+    }
     click(m);
   };
   useEffect(()=>{setVideoUrl(null);setNoVideoForTime(false);prevVideoUrlRef.current=null;},[date,slot]);
   useEffect(()=>{
-    if(suppressVideoSeekRef.current){suppressVideoSeekRef.current=false;return;}
+    if(suppressVideoSeekRef.current){suppressVideoSeekRef.current=false;cornerSeekRef.current=null;return;}
+    if(cornerSeekRef.current){
+      const{url,sec}=cornerSeekRef.current;
+      cornerSeekRef.current=null;
+      setNoVideoForTime(false);
+      if(url===prevVideoUrlRef.current){if(videoRef.current)videoRef.current.currentTime=sec;}
+      else{pendingSeekRef.current=sec;prevVideoUrlRef.current=url;setVideoUrl(url);}
+      return;
+    }
     if(date==="2026-04-17"&&slot==="morning"&&selMin!==null){
       if(videoRef.current){const offset=(selMin-360)*60+77;if(offset>=0)videoRef.current.currentTime=offset;}
       return;
