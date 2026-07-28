@@ -3770,7 +3770,7 @@ export default function App(){
           selMin={selMin} onClickMinute={click} onTimelineBlockClick={timelineBlockClick} onHighlight={setHL} data={dData} metric={metric}
           loading={dashDataLoading} error={dashDataError} onRetry={retryDashData}/>
       </div>
-      <div style={{width:340,minWidth:290,flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column",position:"sticky",top:"calc(var(--topbar-height) + 76px)",maxHeight:"calc(100vh - var(--topbar-height) - 76px)",overflowY:"auto"}}>
+      <div style={{width:"clamp(260px, 16.6667vw, 420px)",flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column",position:"sticky",top:"calc(var(--topbar-height) + 76px)",maxHeight:"calc(100vh - var(--topbar-height) - 76px)",overflowY:"auto"}}>
         {date==="2026-04-17"&&slot==="morning"&&<div style={{padding:"10px 10px 12px",borderBottom:"1px solid #D7E5EE",background:"#F7FBFE"}}>
           <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:7,flexWrap:"wrap"}}>
             <span style={{fontSize:11,fontWeight:700,color:"#173B5D"}}>4/17 ドデスカ! 放送動画</span>
