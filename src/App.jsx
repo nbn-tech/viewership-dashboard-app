@@ -3804,7 +3804,7 @@ function DataDownloadPage(){
       </div>}
 
       {/* 現在の認識状況(サマリ) */}
-      {focus!=="done"&&(cond.date||cond.stations.length||cond.attrs.length||cond.range||cond.targets.length||condHistory.length)&&<div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center",marginBottom:14}}>
+      {focus!=="done"&&Boolean(cond.date||cond.stations.length||cond.attrs.length||cond.range||cond.targets.length||condHistory.length)&&<div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center",marginBottom:14}}>
         {cond.targets.length>0&&conditionPill(`対象番組: ${cond.targets.length}件`,()=>removeCondition("targets"))}
         {!cond.targets.length&&cond.date&&conditionPill(`日付: ${cond.date}`,()=>removeCondition("date"))}
         {!cond.targets.length&&cond.stations.length>0&&conditionPill(`局: ${stLabel(cond.stations)}`,()=>removeCondition("stations"))}
