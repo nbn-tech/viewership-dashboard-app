@@ -3443,7 +3443,7 @@ function DataDownloadPage(){
       const programsByDate=fetched.filter(r=>r.status==="fulfilled").map(r=>r.value);
       if(!programsByDate.length)throw new Error("番組表データを取得できませんでした");
       const seen=new Set();
-      const hit=programsByDate
+      const candidates=programsByDate
         .flatMap(({date,progs})=>{
           const dayMid=localMidnightAbsMin(date);
           return progs.map(p=>({...p,date,dayMid,matchScore:fuzzyProgramScore(p.title,query)}));
@@ -3453,11 +3453,19 @@ function DataDownloadPage(){
         .filter(p=>p.startTv>=300&&p.startTv<=1739)
         .sort((a,b)=>a.matchScore-b.matchScore||a.date.localeCompare(b.date)||a.startTv-b.startTv)
         .filter(p=>{const k=`${p.date}|${p.stId}|${p.startTv}|${p.title}`;if(seen.has(k))return false;seen.add(k);return true;});
+      const bestScore=candidates[0]?.matchScore;
+      // 文字列として一致する番組がある場合、文字が偶然散らばって並んだだけの曖昧一致は候補から除く。
+      // 略称検索しか一致しない場合も、最良候補に近いものだけを残す。
+      const hit=bestScore==null?[]:bestScore<100
+        ?candidates.filter(p=>p.matchScore<100)
+        :candidates.filter(p=>p.matchScore<=bestScore+4);
       if(!hit.length){
         setProgMatches([]);
         say("bot",`「${query}」に一致する番組が見つかりませんでした。別の番組名を入力するか、時刻で指定してください。`);
       }else if(selectAll){
-        applyProgramTargets(hit,c);
+        setProgMatches(hit);
+        setSelectedProgramKeys(new Set(hit.map(programKey)));
+        say("bot",`「${query}」に一致する番組が${hit.length}件見つかりました。すべて選択しています。不要な放送回のチェックを外してから進んでください。`);
       }else{
         setProgMatches(hit);
         setSelectedProgramKeys(new Set());
