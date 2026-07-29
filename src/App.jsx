@@ -1644,8 +1644,8 @@ function TargetComparison({date,stId,startMin,endMin}){
     return()=>{alive=false;};
   },[date,stId,startMin,endMin]);
 
-  if(error)return <div style={{marginTop:16,padding:"14px",border:"1px solid #FECACA",borderRadius:10,background:"#FEF2F2",fontSize:11,color:"#B91C1C"}}>{error}</div>;
-  if(!data)return <div style={{marginTop:16,padding:"20px",border:"1px solid #E5E7EB",borderRadius:10,background:"#F8FAFC",fontSize:11,color:"#64748B",textAlign:"center"}}>属性別データを読み込み中…</div>;
+  if(error)return <div style={{marginBottom:16,padding:"14px",border:"1px solid #FECACA",borderRadius:10,background:"#FEF2F2",fontSize:11,color:"#B91C1C"}}>{error}</div>;
+  if(!data)return <div style={{marginBottom:16,padding:"20px",border:"1px solid #E5E7EB",borderRadius:10,background:"#F8FAFC",fontSize:11,color:"#64748B",textAlign:"center"}}>属性別データを読み込み中…</div>;
 
   const byId=Object.fromEntries(data.map(x=>[x.id,x]));
   const combine=(id,label,ids,color)=>({id,label,color,value:ids.reduce((s,key)=>s+(byId[key]?.viewers||0),0)});
@@ -1660,7 +1660,7 @@ function TargetComparison({date,stId,startMin,endMin}){
   const allItems=TARGET_LEAF_IDS.map(id=>({id,label:byId[id].label,color:byId[id].color,value:byId[id].viewers||0}));
   const maxAvg=Math.max(...data.map(x=>x.avg||0),1);
 
-  return <section style={{marginTop:16,border:"1px solid #DCE6EE",borderRadius:10,overflow:"hidden",background:"#F8FBFD"}}>
+  return <section style={{marginBottom:16,border:"1px solid #DCE6EE",borderRadius:10,overflow:"hidden",background:"#F8FBFD"}}>
     <div style={{padding:"11px 14px",borderBottom:"1px solid #DCE6EE",display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
       <div style={{fontSize:12,fontWeight:800,color:"#173B5D"}}>ターゲットで比べる</div>
       <div style={{fontSize:9,color:"#7892A3"}}>構成比は平均視聴率 × サンプル数による推定値</div>
@@ -1810,6 +1810,7 @@ function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,
                 </div>
               </div>
             </div>
+            <TargetComparison date={corner.date} stId={corner.stId} startMin={corner.startMin} endMin={corner.endMin}/>
             <div style={{background:"#FAFBFC",borderRadius:8,padding:"14px 14px 10px",border:"1px solid #F3F4F6"}}>
               <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:10,flexWrap:"wrap"}}>
                 <span style={{fontSize:10,color:"#6B7280",fontWeight:600}}>推移グラフ（{corner.startMin} – {corner.endMin}）</span>
@@ -1824,7 +1825,6 @@ function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,
               </div>
               <ModalChart rData={rData} sData={sData} mainStId={corner.stId} mainStColor={st.c} sM={sM} eM={eM} activeRivals={[]} rivals={[]}/>
             </div>
-            <TargetComparison date={corner.date} stId={corner.stId} startMin={corner.startMin} endMin={corner.endMin}/>
           </div>
           {dashboardUrl&&<div style={{padding:"12px 20px",borderTop:"1px solid #F3F4F6",flexShrink:0}}>
             <button onClick={()=>window.open(dashboardUrl,'_blank')}
