@@ -759,23 +759,34 @@ const DEMO_LIST=[
   {key:"F3",label:"女 50－64才"},
   {key:"F4",label:"女 65才以上"},
 ];
+// 同じ日付のExcelを複数機能（グラフ・属性比較・ダウンロード）で再利用する。
+// Promise自体をキャッシュして、同時に開いた場合の重複リクエストも防ぐ。
+const RATING_TABLE_CACHE={};
+async function fetchRatingTable(date){
+  if(!RATING_TABLE_CACHE[date]){
+    RATING_TABLE_CACHE[date]=(async()=>{
+      const yyyymmdd=date.replace(/-/g,'');
+      const res=await fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/rating/${yyyymmdd}_consolidated.xlsx`);
+      if(!res.ok)throw new Error(`HTTP ${res.status}`);
+      const buf=await res.arrayBuffer();
+      const wb=XLSX.read(buf,{type:"array"});
+      const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:null});
+      return{header:rows[0],rows:rows.slice(1).filter(r=>r&&r[0])};
+    })().catch(e=>{delete RATING_TABLE_CACHE[date];throw e;});
+  }
+  return RATING_TABLE_CACHE[date];
+}
 async function fetchAndParseRatingXlsx(date,demo="ALL"){
-  const yyyymmdd=date.replace(/-/g,'');
-  const res=await fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/rating/${yyyymmdd}_consolidated.xlsx`);
-  if(!res.ok)throw new Error(`HTTP ${res.status}`);
-  const buf=await res.arrayBuffer();
-  const wb=XLSX.read(buf,{type:"array"});
-  const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:null});
-  const header=rows[0];
+  const{header,rows}=await fetchRatingTable(date);
   const colIdx={};
   REAL_RATINGS_COLS.forEach(sid=>{colIdx[sid]=header.indexOf(`${RATING_HEADER_STATION[sid]}_${demo}`);});
   if(Object.values(colIdx).some(i=>i===-1))throw new Error(`${demo}列が見つかりません`);
-  const[h0,m0]=rows[1][0].split(':').map(Number);
+  const[h0,m0]=rows[0][0].split(':').map(Number);
   const startMin=h0*60+m0; // 通常は300(05:00)始まり
   const buildSlot=(sm,em)=>{
     const out=[];
     for(let min=sm;min<=em;min++){
-      const rowIdx=1+(min-startMin);
+      const rowIdx=min-startMin;
       const row=rows[rowIdx];
       if(!row)return null;
       out.push(REAL_RATINGS_COLS.map(sid=>{
@@ -817,13 +828,7 @@ const RATING_ATTRS=[
 ];
 // consolidated.xlsxをそのまま(全属性列)取得し、ヘッダー行と1分刻みデータ行を返す
 async function fetchRawRatingTable(date){
-  const yyyymmdd=date.replace(/-/g,'');
-  const res=await fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/rating/${yyyymmdd}_consolidated.xlsx`);
-  if(!res.ok)throw new Error(`HTTP ${res.status}`);
-  const buf=await res.arrayBuffer();
-  const wb=XLSX.read(buf,{type:"array"});
-  const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:null});
-  return{header:rows[0],rows:rows.slice(1).filter(r=>r&&r[0])};
+  return fetchRatingTable(date);
 }
 // 指定日の番組表(epg-all)を絶対分付きで取得(番組名→放送時間の逆引き用)
 async function fetchEpgPrograms(date){
@@ -1578,6 +1583,108 @@ function ModalChart({rData,sData,mainStId,mainStColor,sM,eM,activeRivals,rivals}
   </svg>;
 }
 
+const TARGET_ATTR_COLORS={
+  ALL:"#475569",U49:"#0EA5E9",C:"#06B6D4",T:"#14B8A6",
+  M1:"#93C5FD",M2:"#60A5FA",M3:"#3B82F6",M4:"#1D4ED8",
+  F1:"#FDA4AF",F2:"#FB7185",F3:"#F43F5E",F4:"#BE123C",
+};
+const TARGET_SHORT_LABELS={ALL:"個人全体",U49:"U49",C:"4–12才",T:"13–19才",M1:"男20–34",M2:"男35–49",M3:"男50–64",M4:"男65+",F1:"女20–34",F2:"女35–49",F3:"女50–64",F4:"女65+"};
+const TARGET_LEAF_IDS=["C","T","M1","M2","M3","M4","F1","F2","F3","F4"];
+
+function TargetDonut({title,items}){
+  const total=items.reduce((s,x)=>s+(x.value||0),0);
+  let cursor=0;
+  const stops=items.map(item=>{
+    const start=cursor;
+    cursor+=total>0?item.value/total*100:0;
+    return`${item.color} ${start}% ${cursor}%`;
+  });
+  return <div style={{border:"1px solid #E5E7EB",borderRadius:10,padding:"12px",background:"#fff",minWidth:0}}>
+    <div style={{fontSize:11,fontWeight:700,color:"#334155",marginBottom:10}}>{title}</div>
+    {total>0?<div style={{display:"flex",alignItems:"center",gap:12}}>
+      <div style={{width:92,height:92,borderRadius:"50%",background:`conic-gradient(${stops.join(",")})`,position:"relative",flexShrink:0}}>
+        <div style={{position:"absolute",inset:22,borderRadius:"50%",background:"#fff",display:"flex",alignItems:"center",justifyContent:"center",textAlign:"center",fontSize:8,color:"#94A3B8",lineHeight:1.2}}>推定<br/>構成比</div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:5,minWidth:0,flex:1}}>
+        {items.map(item=><div key={item.id} style={{display:"grid",gridTemplateColumns:"8px minmax(0,1fr) auto",alignItems:"center",gap:5,fontSize:8.5,color:"#64748B"}}>
+          <span style={{width:7,height:7,borderRadius:2,background:item.color}}/>
+          <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.label}</span>
+          <span style={{fontFamily:"monospace",color:"#334155"}}>{(item.value/total*100).toFixed(1)}%</span>
+        </div>)}
+      </div>
+    </div>:<div style={{height:92,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:"#94A3B8"}}>視聴データがありません</div>}
+  </div>;
+}
+
+function TargetComparison({date,stId,startMin,endMin}){
+  const[data,setData]=useState(null);
+  const[error,setError]=useState("");
+  useEffect(()=>{
+    let alive=true;
+    setData(null);setError("");
+    fetchRatingTable(date).then(({header,rows})=>{
+      const sM=t2m(startMin),eM=t2m(endMin);
+      const sampleRow=rows.find(r=>String(r[0]).toLowerCase()==="sample_number");
+      const minuteRows=rows.filter(r=>{
+        const m=String(r[0]).match(/^(\d{1,2}):(\d{2})/);
+        if(!m)return false;
+        const tv=clockToTv(+m[1],+m[2]);
+        return tv>=sM&&tv<eM;
+      });
+      if(!sampleRow||!minuteRows.length)throw new Error("属性データがありません");
+      const stats=RATING_ATTRS.map(attr=>{
+        const idx=header.indexOf(`${RATING_HEADER_STATION[stId]}_${attr.id}`);
+        const values=idx>=0?minuteRows.map(r=>r[idx]).filter(v=>typeof v==="number"):[];
+        const avg=values.length?values.reduce((s,v)=>s+v,0)/values.length:null;
+        const sample=idx>=0&&typeof sampleRow[idx]==="number"?sampleRow[idx]:null;
+        return{id:attr.id,label:TARGET_SHORT_LABELS[attr.id],avg,sample,viewers:avg!=null&&sample!=null?avg*sample/100:null,color:TARGET_ATTR_COLORS[attr.id]};
+      });
+      if(alive)setData(stats);
+    }).catch(()=>{if(alive)setError("属性別データを取得できませんでした");});
+    return()=>{alive=false;};
+  },[date,stId,startMin,endMin]);
+
+  if(error)return <div style={{marginTop:16,padding:"14px",border:"1px solid #FECACA",borderRadius:10,background:"#FEF2F2",fontSize:11,color:"#B91C1C"}}>{error}</div>;
+  if(!data)return <div style={{marginTop:16,padding:"20px",border:"1px solid #E5E7EB",borderRadius:10,background:"#F8FAFC",fontSize:11,color:"#64748B",textAlign:"center"}}>属性別データを読み込み中…</div>;
+
+  const byId=Object.fromEntries(data.map(x=>[x.id,x]));
+  const combine=(id,label,ids,color)=>({id,label,color,value:ids.reduce((s,key)=>s+(byId[key]?.viewers||0),0)});
+  const ageItems=[
+    combine("age1","20–34才",["M1","F1"],"#0F766E"),combine("age2","35–49才",["M2","F2"],"#0D9488"),
+    combine("age3","50–64才",["M3","F3"],"#14B8A6"),combine("age4","65才以上",["M4","F4"],"#5EEAD4"),
+  ];
+  const genderItems=[
+    combine("child","子供・10代",["C","T"],"#A855F7"),combine("male","男20才以上",["M1","M2","M3","M4"],"#0284C7"),
+    combine("female","女20才以上",["F1","F2","F3","F4"],"#E11D48"),
+  ];
+  const allItems=TARGET_LEAF_IDS.map(id=>({id,label:byId[id].label,color:byId[id].color,value:byId[id].viewers||0}));
+  const maxAvg=Math.max(...data.map(x=>x.avg||0),1);
+
+  return <section style={{marginTop:16,border:"1px solid #DCE6EE",borderRadius:10,overflow:"hidden",background:"#F8FBFD"}}>
+    <div style={{padding:"11px 14px",borderBottom:"1px solid #DCE6EE",display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+      <div style={{fontSize:12,fontWeight:800,color:"#173B5D"}}>ターゲットで比べる</div>
+      <div style={{fontSize:9,color:"#7892A3"}}>構成比は平均視聴率 × サンプル数による推定値</div>
+    </div>
+    <div style={{padding:"14px"}}>
+      <div style={{fontSize:10.5,fontWeight:700,color:"#475569",marginBottom:8}}>属性別の平均視聴率</div>
+      <div style={{display:"flex",alignItems:"stretch",gap:5,height:154,overflowX:"auto",padding:"16px 2px 0",borderBottom:"1px solid #CBD5E1"}}>
+        {data.map(item=><div key={item.id} title={`${item.label}: 平均 ${item.avg?.toFixed(1)??"—"}% / サンプル ${item.sample??"—"}人`} style={{width:47,minWidth:47,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end"}}>
+          <div style={{fontSize:10,fontWeight:800,color:item.color,fontFamily:"monospace",marginBottom:3}}>{item.avg!=null?item.avg.toFixed(1):"—"}</div>
+          <div style={{width:18,height:Math.max(2,(item.avg||0)/maxAvg*76),borderRadius:"3px 3px 0 0",background:item.color}}/>
+          <div style={{height:29,display:"flex",alignItems:"flex-start",justifyContent:"center",paddingTop:4,fontSize:8,color:"#475569",lineHeight:1.15,textAlign:"center"}}>{item.label}</div>
+          <div style={{fontSize:7.5,color:"#94A3B8",fontFamily:"monospace",whiteSpace:"nowrap"}}>n={item.sample??"—"}</div>
+        </div>)}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:10,marginTop:14}}>
+        <TargetDonut title="年齢比較（20才以上）" items={ageItems}/>
+        <TargetDonut title="子供・男女比較" items={genderItems}/>
+        <TargetDonut title="全ターゲット比較" items={allItems}/>
+      </div>
+      <div style={{fontSize:8.5,color:"#94A3B8",marginTop:10,lineHeight:1.5}}>人数は小数第1位の視聴率から算出したサンプル換算の推定値です。実際の視聴人数と完全には一致しません。</div>
+    </div>
+  </section>;
+}
+
 function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,weatherData,dashboardUrl,guideMode,fullDayRatings}){
   const[activeRivals,setActiveRivals]=useState(new Set());
   const st=ST.find(s=>s.id===corner.stId);
@@ -1649,7 +1756,7 @@ function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,
   const toggleRival=key=>setActiveRivals(prev=>{const n=new Set(prev);n.has(key)?n.delete(key):n.add(key);return n;});
 
   return <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-    <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:guideMode?660:900,maxHeight:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 20px 60px rgba(0,0,0,0.25)"}}>
+    <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:guideMode?960:900,maxHeight:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 20px 60px rgba(0,0,0,0.25)"}}>
       {/* Header */}
       <div style={{padding:"13px 18px",borderBottom:"1px solid #F3F4F6",display:"flex",alignItems:"flex-start",gap:10,position:"sticky",top:0,background:"#fff",zIndex:2,borderRadius:"12px 12px 0 0",flexShrink:0}}>
         <div style={{flex:1,minWidth:0}}>
@@ -1717,6 +1824,7 @@ function CornerModal({corner,cache,onClose,onNavigate,navList,navIdx:navListIdx,
               </div>
               <ModalChart rData={rData} sData={sData} mainStId={corner.stId} mainStColor={st.c} sM={sM} eM={eM} activeRivals={[]} rivals={[]}/>
             </div>
+            <TargetComparison date={corner.date} stId={corner.stId} startMin={corner.startMin} endMin={corner.endMin}/>
           </div>
           {dashboardUrl&&<div style={{padding:"12px 20px",borderTop:"1px solid #F3F4F6",flexShrink:0}}>
             <button onClick={()=>window.open(dashboardUrl,'_blank')}
