@@ -3256,28 +3256,31 @@ function parseConditionDate(text,dates){
 function parseConditionDates(text,dates){
   const n=normJa(text);
   const latest=dates[dates.length-1];
+  const found=new Set();
   if(/今月|こんげつ/.test(n)){
-    return dates.filter(d=>d.slice(0,7)===latest.slice(0,7));
+    dates.filter(d=>d.slice(0,7)===latest.slice(0,7)).forEach(d=>found.add(d));
   }
   if(/先月|せんげつ/.test(n)){
     const[y,m]=latest.split("-").map(Number);
     const prev=new Date(y,m-2,1);
     const prefix=`${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,"0")}`;
-    return dates.filter(d=>d.slice(0,7)===prefix);
+    dates.filter(d=>d.slice(0,7)===prefix).forEach(d=>found.add(d));
   }
-  if(/先週末|先週の週末|せんしゅうまつ/.test(n)){
+  const hasLastWeekend=/先週末|先週の週末|せんしゅうまつ/.test(n);
+  if(hasLastWeekend){
     const currentMonday=mondayOf(latest);
-    return[shiftDateStr(currentMonday,-2),shiftDateStr(currentMonday,-1)].filter(d=>dates.includes(d));
+    [shiftDateStr(currentMonday,-2),shiftDateStr(currentMonday,-1)].filter(d=>dates.includes(d)).forEach(d=>found.add(d));
   }
   if(/今週|こんしゅう/.test(n)){
     const start=mondayOf(latest);
-    return dates.filter(d=>d>=start&&d<=latest);
+    dates.filter(d=>d>=start&&d<=latest).forEach(d=>found.add(d));
   }
-  if(/先週|せんしゅう/.test(n)){
+  if(!hasLastWeekend&&/先週|せんしゅう/.test(n)){
     const currentMonday=mondayOf(latest);
     const start=shiftDateStr(currentMonday,-7),end=shiftDateStr(currentMonday,-1);
-    return dates.filter(d=>d>=start&&d<=end);
+    dates.filter(d=>d>=start&&d<=end).forEach(d=>found.add(d));
   }
+  if(found.size)return[...found].sort();
   const single=parseConditionDate(text,dates);
   return single?[single]:[];
 }
@@ -3543,8 +3546,15 @@ function DataDownloadPage(){
       programQuery:aiProgram||fallback.programQuery,
     };
     const requestedWeekdays=parseConditionWeekdays(text);
-    if(requestedWeekdays.length&&p.dateCandidates.length){
-      p.dateCandidates=p.dateCandidates.filter(d=>requestedWeekdays.includes(new Date(`${d}T00:00:00`).getDay()));
+    const hasRelativeDateExpression=/(今月|こんげつ|先月|せんげつ|今週|こんしゅう|先週|せんしゅう)/.test(normJa(text));
+    // AIには表現の理解を任せるが、相対日付と曜日の暦計算はコード側で再計算する。
+    // AIが曜日を1日ずらした場合も、正しい候補日を失わないようにする。
+    if(hasRelativeDateExpression&&fallback.dateCandidates.length)p.dateCandidates=fallback.dateCandidates;
+    if(requestedWeekdays.length){
+      const matchesWeekday=d=>requestedWeekdays.includes(new Date(`${d}T00:00:00`).getDay());
+      const validated=p.dateCandidates.filter(matchesWeekday);
+      const deterministic=fallback.dateCandidates.filter(matchesWeekday);
+      p.dateCandidates=deterministic.length?deterministic:validated;
     }
     p.programQuery=stripProgramWeekdays(p.programQuery)||null;
     const hasAllWord=/(全部|すべて|全て)/.test(text);
