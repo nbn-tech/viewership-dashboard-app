@@ -3337,6 +3337,8 @@ function DataDownloadPage(){
   const initialCond={date:null,stations:[],attrs:[],range:null,targets:[]};
   const[log,setLog]=useState([{role:"bot",text:GREETING}]);
   const[cond,setCond]=useState(initialCond);            // {date, stations[], attrs[], range:{startTv,endTv,label}}
+  const[condHistory,setCondHistory]=useState([]);
+  const condRef=useRef(initialCond);
   const[focus,setFocus]=useState("date");                // date|station|attr|range|program|confirm|done
   const[input,setInput]=useState("");
   const[calDate,setCalDate]=useState(GUIDE_DATE_MAX);
@@ -3364,8 +3366,41 @@ function DataDownloadPage(){
   const hasTargets=c=>Array.isArray(c.targets)&&c.targets.length>0;
   const nextMissing=c=>!c.date&&!hasTargets(c)?"date":!c.stations.length?"station":!c.attrs.length?"attr":!c.range&&!hasTargets(c)?"range":"confirm";
   const advance=c=>{const miss=nextMissing(c);setFocus(miss);setProgMatches(null);setSelectedProgramKeys(new Set());say("bot",PROMPT[miss]);};
+  const commitCond=nextOrUpdater=>{
+    const current=condRef.current;
+    const next=typeof nextOrUpdater==="function"?nextOrUpdater(current):nextOrUpdater;
+    if(JSON.stringify(next)===JSON.stringify(current))return current;
+    setCondHistory(h=>[...h,current].slice(-30));
+    condRef.current=next;
+    setCond(next);
+    return next;
+  };
 
-  const reset=()=>{setLog([{role:"bot",text:GREETING}]);setCond(initialCond);setFocus("date");setInput("");setCalDate(GUIDE_DATE_MAX);setProgMatches(null);setSelectedProgramKeys(new Set());setPendingProgram("");setPendingAllChoice(null);setTimeStart("06:00");setTimeEnd("08:00");setErr("");};
+  const reset=()=>{setLog([{role:"bot",text:GREETING}]);condRef.current=initialCond;setCond(initialCond);setCondHistory([]);setFocus("date");setInput("");setCalDate(GUIDE_DATE_MAX);setProgMatches(null);setSelectedProgramKeys(new Set());setPendingProgram("");setPendingAllChoice(null);setTimeStart("06:00");setTimeEnd("08:00");setErr("");};
+  const restorePreviousCondition=()=>{
+    if(!condHistory.length)return;
+    const previous=condHistory[condHistory.length-1];
+    setCondHistory(h=>h.slice(0,-1));
+    condRef.current=previous;
+    setCond(previous);
+    if(previous.date)setCalDate(previous.date);
+    setProgMatches(null);setSelectedProgramKeys(new Set());setPendingAllChoice(null);setErr("");
+    setFocus(nextMissing(previous));
+    say("bot","1つ前の条件に戻しました。");
+  };
+  const removeCondition=kind=>{
+    const current=condRef.current;
+    let next=current,label="";
+    if(kind==="targets"){next={...current,date:null,range:null,targets:[]};label="対象番組";}
+    if(kind==="date"){next={...current,date:null};label="日付";}
+    if(kind==="stations"){next={...current,stations:[]};label="放送局";}
+    if(kind==="attrs"){next={...current,attrs:[]};label="属性";}
+    if(kind==="range"){next={...current,range:null};label="時間帯";}
+    commitCond(next);
+    setProgMatches(null);setSelectedProgramKeys(new Set());setPendingAllChoice(null);setErr("");
+    setFocus(nextMissing(next));
+    say("bot",`${label}の条件を外しました。`);
+  };
 
   const programKey=p=>`${p.date}|${p.stId}|${p.startTv}|${p.title}`;
   const applyProgramTargets=(programs,baseCond)=>{
@@ -3378,7 +3413,7 @@ function DataDownloadPage(){
     const range=single?{startTv:single.startTv,endTv:single.endTv,label:`${single.title}（${ST.find(s=>s.id===single.stId).nm} ${tvToClock(single.startTv)}〜${tvToClock(single.endTv)}）`}:null;
     const c={...baseCond,date:single?.date||null,stations:baseCond.stations.length?baseCond.stations:targetStations,range,targets};
     if(single)setCalDate(single.date);
-    setCond(c);
+    commitCond(c);
     setProgMatches(null);
     setSelectedProgramKeys(new Set());
     const list=targets.map(t=>`・${t.date}（${DOW(t.date)}） ${ST.find(s=>s.id===t.stId).nm}「${t.title}」 ${tvToClock(t.startTv)}〜${tvToClock(t.endTv)}`).join("\n");
@@ -3425,7 +3460,7 @@ function DataDownloadPage(){
     let c={...pending.baseCond};
     if(choice==="attributes"){
       c.attrs=RATING_ATTRS.map(a=>a.id);
-      setCond(c);
+      commitCond(c);
       say("bot","「全部」は、すべての属性として設定しました。放送回は検索結果から選んでください。");
     }else{
       say("bot","「全部」は、条件に該当するすべての放送回として検索します。");
@@ -3508,7 +3543,7 @@ function DataDownloadPage(){
     if(p.stations.length){c.stations=p.stations;got.push(`局=${stLabel(p.stations)}`);}
     if(p.attrs.length&&acceptParsedAttrs){c.attrs=p.attrs;got.push(`属性=${attrLabel(p.attrs)}`);}
     if(p.range){c.range={...p.range,label:`${tvToClock(p.range.startTv)}〜${tvToClock(p.range.endTv)}`};got.push(`時間帯=${c.range.label}`);}
-    setCond(c);
+    commitCond(c);
     if(got.length)say("bot",`${ai?"AIで条件を整理しました。":"承知しました。"}${got.join(" / ")} で認識しました。`);
     if(needsAllClarification){
       setPendingAllChoice({programQuery:ambiguityProgram,dateCandidates:p.dateCandidates,baseCond:c});
@@ -3535,7 +3570,7 @@ function DataDownloadPage(){
   };
 
   // チップ/カレンダーでの明示選択(自由入力と同じ状態に流し込む)
-  const confirmDate=d=>{const c={...cond,date:d};setCond(c);say("user",`${d}（${DOW(d)}）`);
+  const confirmDate=d=>{const c={...cond,date:d};commitCond(c);say("user",`${d}（${DOW(d)}）`);
     if(pendingProgram){const q=pendingProgram;setPendingProgram("");runProgramSearch(q,c);return;}
     advance(c);};
   const confirmStations=()=>{if(!cond.stations.length)return;say("user",stLabel(cond.stations));advance(cond);};
@@ -3550,11 +3585,11 @@ function DataDownloadPage(){
     if(!ms||!me){setErr("時刻は HH:MM 形式で入力してください。");return;}
     const s=clockToTv(+ms[1],+ms[2]),e=clockToTv(+me[1],+me[2]);
     if(e<=s){setErr("終了時刻は開始時刻より後にしてください。");return;}
-    setErr("");const range={startTv:s,endTv:e,label:`${tvToClock(s)}〜${tvToClock(e)}`};const c={...cond,range};setCond(c);say("user",range.label);advance(c);
+    setErr("");const range={startTv:s,endTv:e,label:`${tvToClock(s)}〜${tvToClock(e)}`};const c={...cond,range};commitCond(c);say("user",range.label);advance(c);
   };
-  const toggleStation=id=>setCond(c=>({...c,stations:c.stations.includes(id)?c.stations.filter(x=>x!==id):[...c.stations,id]}));
-  const toggleAttr=id=>setCond(c=>({...c,attrs:c.attrs.includes(id)?c.attrs.filter(x=>x!==id):[...c.attrs,id]}));
-  const setAllStations=()=>setCond(c=>({...c,stations:c.stations.length===ST.length?[]:ST.map(s=>s.id)}));
+  const toggleStation=id=>commitCond(c=>({...c,stations:c.stations.includes(id)?c.stations.filter(x=>x!==id):[...c.stations,id]}));
+  const toggleAttr=id=>commitCond(c=>({...c,attrs:c.attrs.includes(id)?c.attrs.filter(x=>x!==id):[...c.attrs,id]}));
+  const setAllStations=()=>commitCond(c=>({...c,stations:c.stations.length===ST.length?[]:ST.map(s=>s.id)}));
 
   const doDownload=async()=>{
     setBusy(true);setErr("");
@@ -3627,6 +3662,9 @@ function DataDownloadPage(){
   const chip=(active,onClick,key,children)=><button key={key} onClick={onClick} style={{padding:"7px 15px",borderRadius:9999,border:`1px solid ${active?"#0066cc":"#e0e0e0"}`,background:active?"#0066cc":"#fff",color:active?"#fff":"#1d1d1f",cursor:"pointer",fontSize:13,fontWeight:active?600:400,letterSpacing:"-0.2px"}}>{children}</button>;
   const cta=(onClick,disabled,children)=><button onClick={onClick} disabled={disabled} style={{padding:"9px 22px",borderRadius:9999,border:"none",background:disabled?"#c7c7cc":"#0066cc",color:"#fff",cursor:disabled?"default":"pointer",fontSize:14,fontWeight:600,letterSpacing:"-0.2px"}}>{children}</button>;
   const ghost=(onClick,children)=><button onClick={onClick} style={{padding:"9px 16px",borderRadius:9999,border:"1px solid #e0e0e0",background:"#fff",color:"#0066cc",cursor:"pointer",fontSize:13,fontWeight:600}}>{children}</button>;
+  const conditionPill=(label,onRemove)=><span style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:11,color:"#0066cc",background:"#eaf2fb",borderRadius:9999,padding:"3px 6px 3px 10px"}}>
+    {label}<button onClick={onRemove} aria-label={`${label}を外す`} title="この条件を外す" style={{width:18,height:18,border:"none",borderRadius:"50%",background:"transparent",color:"#0066cc",cursor:"pointer",fontSize:15,lineHeight:1,padding:0}}>×</button>
+  </span>;
 
   return <div style={{maxWidth:820,margin:"0 auto",padding:"20px 18px 40px",display:"flex",flexDirection:"column",minHeight:"calc(100vh - var(--topbar-height))"}}>
     <div style={{marginBottom:14}}>
@@ -3657,12 +3695,13 @@ function DataDownloadPage(){
       </div>}
 
       {/* 現在の認識状況(サマリ) */}
-      {focus!=="done"&&(cond.date||cond.stations.length||cond.attrs.length||cond.range||cond.targets.length)&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
-        {cond.targets.length>0&&<span style={{fontSize:11,color:"#0066cc",background:"#eaf2fb",borderRadius:9999,padding:"3px 10px"}}>対象番組: {cond.targets.length}件</span>}
-        {cond.date&&<span style={{fontSize:11,color:"#0066cc",background:"#eaf2fb",borderRadius:9999,padding:"3px 10px"}}>日付: {cond.date}</span>}
-        {cond.stations.length>0&&<span style={{fontSize:11,color:"#0066cc",background:"#eaf2fb",borderRadius:9999,padding:"3px 10px"}}>局: {stLabel(cond.stations)}</span>}
-        {cond.attrs.length>0&&<span style={{fontSize:11,color:"#0066cc",background:"#eaf2fb",borderRadius:9999,padding:"3px 10px"}}>属性: {attrLabel(cond.attrs)}</span>}
-        {cond.range&&<span style={{fontSize:11,color:"#0066cc",background:"#eaf2fb",borderRadius:9999,padding:"3px 10px"}}>時間帯: {cond.range.label}</span>}
+      {focus!=="done"&&(cond.date||cond.stations.length||cond.attrs.length||cond.range||cond.targets.length||condHistory.length)&&<div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center",marginBottom:14}}>
+        {cond.targets.length>0&&conditionPill(`対象番組: ${cond.targets.length}件`,()=>removeCondition("targets"))}
+        {!cond.targets.length&&cond.date&&conditionPill(`日付: ${cond.date}`,()=>removeCondition("date"))}
+        {!cond.targets.length&&cond.stations.length>0&&conditionPill(`局: ${stLabel(cond.stations)}`,()=>removeCondition("stations"))}
+        {cond.attrs.length>0&&conditionPill(`属性: ${attrLabel(cond.attrs)}`,()=>removeCondition("attrs"))}
+        {!cond.targets.length&&cond.range&&conditionPill(`時間帯: ${cond.range.label}`,()=>removeCondition("range"))}
+        {condHistory.length>0&&<button onClick={restorePreviousCondition} style={{marginLeft:"auto",padding:"4px 9px",border:"1px solid #d8d8dc",borderRadius:9999,background:"#fff",color:"#555",fontSize:11.5,fontWeight:600,cursor:"pointer"}}>↶ 1つ戻る</button>}
       </div>}
 
       {focus==="allMeaning"&&<div>
@@ -3692,8 +3731,8 @@ function DataDownloadPage(){
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           {cta(confirmAttrs,!cond.attrs.length,"次へ")}
-          {ghost(()=>setCond(c=>({...c,attrs:["ALL"]})),"個人全体のみ")}
-          {ghost(()=>setCond(c=>({...c,attrs:RATING_ATTRS.map(a=>a.id)})),"全属性")}
+          {ghost(()=>commitCond(c=>({...c,attrs:["ALL"]})),"個人全体のみ")}
+          {ghost(()=>commitCond(c=>({...c,attrs:RATING_ATTRS.map(a=>a.id)})),"全属性")}
         </div>
       </div>}
 
