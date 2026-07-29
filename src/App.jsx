@@ -1667,8 +1667,8 @@ function TargetComparison({date,stId,startMin,endMin}){
     </div>
     <div style={{padding:"14px"}}>
       <div style={{fontSize:10.5,fontWeight:700,color:"#475569",marginBottom:8}}>属性別の平均視聴率</div>
-      <div style={{display:"flex",alignItems:"stretch",gap:5,height:154,overflowX:"auto",padding:"16px 2px 0",borderBottom:"1px solid #CBD5E1"}}>
-        {data.map(item=><div key={item.id} title={`${item.label}: 平均 ${item.avg?.toFixed(1)??"—"}% / サンプル ${item.sample??"—"}人`} style={{width:47,minWidth:47,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end"}}>
+      <div style={{display:"flex",alignItems:"stretch",justifyContent:"space-around",gap:4,height:154,overflowX:"auto",padding:"16px 2px 0",borderBottom:"1px solid #CBD5E1"}}>
+        {data.map(item=><div key={item.id} title={`${item.label}: 平均 ${item.avg?.toFixed(1)??"—"}% / サンプル ${item.sample??"—"}人`} style={{flex:"1 1 0",minWidth:52,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end"}}>
           <div style={{fontSize:10,fontWeight:800,color:item.color,fontFamily:"monospace",marginBottom:3}}>{item.avg!=null?item.avg.toFixed(1):"—"}</div>
           <div style={{width:18,height:Math.max(2,(item.avg||0)/maxAvg*76),borderRadius:"3px 3px 0 0",background:item.color}}/>
           <div style={{height:29,display:"flex",alignItems:"flex-start",justifyContent:"center",paddingTop:4,fontSize:8,color:"#475569",lineHeight:1.15,textAlign:"center"}}>{item.label}</div>
