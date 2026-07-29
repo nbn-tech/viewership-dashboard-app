@@ -3281,6 +3281,21 @@ function parseConditionDates(text,dates){
     dates.filter(d=>d>=start&&d<=end).forEach(d=>found.add(d));
   }
   if(found.size)return[...found].sort();
+  // 「7月」「2026年7月」のような月単位指定。日まで続く「7月20日」はここでは扱わない。
+  const yearMonth=n.match(/(\d{4})年(\d{1,2})月(?!\d)/);
+  const monthOnly=yearMonth?null:n.match(/(?:^|[^\d])(\d{1,2})月(?!\d)/);
+  if(yearMonth||monthOnly){
+    const month=Number(yearMonth?.[2]||monthOnly?.[1]);
+    if(month>=1&&month<=12){
+      const mm=String(month).padStart(2,"0");
+      let prefix=yearMonth?`${yearMonth[1]}-${mm}`:null;
+      if(!prefix){
+        const matchingMonths=[...new Set(dates.filter(d=>d.slice(5,7)===mm).map(d=>d.slice(0,7)))].sort();
+        prefix=matchingMonths[matchingMonths.length-1]||null;
+      }
+      if(prefix)return dates.filter(d=>d.slice(0,7)===prefix);
+    }
+  }
   const single=parseConditionDate(text,dates);
   return single?[single]:[];
 }
@@ -3302,6 +3317,17 @@ function parseConditionWeekdays(text){
   const labels=["日","月","火","水","木","金","土"];
   return labels.map((label,dow)=>({label,dow})).filter(x=>new RegExp(`${x.label}(?:曜|曜日)`).test(n)).map(x=>x.dow);
 }
+function parseMonthMissingYear(text){
+  const n=text.normalize("NFKC");
+  if(/\d{4}年\d{1,2}月/.test(n))return null;
+  const match=n.match(/(?:^|[^\d])(\d{1,2})月(?!\d)/);
+  const month=match?Number(match[1]):null;
+  return month>=1&&month<=12?month:null;
+}
+function availableYearsForMonth(month,dates){
+  const mm=String(month).padStart(2,"0");
+  return[...new Set(dates.filter(d=>d.slice(5,7)===mm).map(d=>Number(d.slice(0,4))))].sort((a,b)=>a-b);
+}
 function stripProgramWeekdays(query){
   let value=String(query||"");
   for(const word of DL_WEEKDAY_WORDS)value=value.split(word).join("");
@@ -3312,6 +3338,7 @@ function extractProgramQuery(text){
   if(q&&q[1].trim())return q[1].trim();
   let s=text.normalize("NFKC");
   s=s.replace(/(\d{4})[-\/年](\d{1,2})[-\/月](\d{1,2})日?/g,"").replace(/(\d{1,2})[\/月](\d{1,2})日?/g,"");
+  s=s.replace(/(?:\d{4}年)?\d{1,2}月(?:分)?/g,"");
   s=s.replace(/(\d{1,2})\s*(?::|時)\s*(\d{1,2})?\s*分?/g,"");
   s=s.replace(/\d{1,2}\s*[〜~\-–—－]\s*\d{1,2}\s*(?:代|歳|才)(?:以上|以下)?/g,"").replace(/\d{1,2}\s*(?:代|歳|才)(?:以上|以下)?/g,"");
   for(const w of DL_STATION_WORDS)s=s.replace(new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"gi"),""); // 局名は大小無視で除去
@@ -3360,6 +3387,7 @@ function DataDownloadPage(){
   const[selectedProgramKeys,setSelectedProgramKeys]=useState(new Set());
   const[pendingProgram,setPendingProgram]=useState("");  // 日付未指定で番組検索を保留した語
   const[pendingAllChoice,setPendingAllChoice]=useState(null);
+  const[pendingYearChoice,setPendingYearChoice]=useState(null);
   const[activeSearchDates,setActiveSearchDates]=useState([]);
   const[timeStart,setTimeStart]=useState("06:00");
   const[timeEnd,setTimeEnd]=useState("08:00");
@@ -3380,7 +3408,17 @@ function DataDownloadPage(){
   };
   const hasTargets=c=>Array.isArray(c.targets)&&c.targets.length>0;
   const nextMissing=c=>!c.date&&!hasTargets(c)?"date":!c.stations.length?"station":!c.attrs.length?"attr":!c.range&&!hasTargets(c)?"range":"confirm";
-  const advance=c=>{const miss=nextMissing(c);setFocus(miss);setProgMatches(null);setSelectedProgramKeys(new Set());say("bot",PROMPT[miss]);};
+  const promptForMissing=(miss,c)=>{
+    if(miss==="confirm")return PROMPT.confirm;
+    const known=[
+      hasTargets(c)?`対象番組${c.targets.length}件`:c.date?`日付「${c.date}」`:null,
+      c.stations.length?`放送局「${stLabel(c.stations)}」`:null,
+      c.attrs.length?`属性「${attrLabel(c.attrs)}」`:null,
+      c.range?`時間帯「${c.range.label}」`:null,
+    ].filter(Boolean);
+    return`${known.length?`${known.join("、")}までは認識できています。\n`:""}${PROMPT[miss]}\n回答すると、今までの条件へ追加して続けます。`;
+  };
+  const advance=c=>{const miss=nextMissing(c);setFocus(miss);setProgMatches(null);setSelectedProgramKeys(new Set());say("bot",promptForMissing(miss,c));};
   const commitCond=nextOrUpdater=>{
     const current=condRef.current;
     const next=typeof nextOrUpdater==="function"?nextOrUpdater(current):nextOrUpdater;
@@ -3391,7 +3429,7 @@ function DataDownloadPage(){
     return next;
   };
 
-  const reset=()=>{setLog([{role:"bot",text:GREETING}]);condRef.current=initialCond;setCond(initialCond);setCondHistory([]);setFocus("date");setInput("");setCalDate(GUIDE_DATE_MAX);setProgMatches(null);setSelectedProgramKeys(new Set());setPendingProgram("");setPendingAllChoice(null);setActiveSearchDates([]);setTimeStart("06:00");setTimeEnd("08:00");setErr("");};
+  const reset=()=>{setLog([{role:"bot",text:GREETING}]);condRef.current=initialCond;setCond(initialCond);setCondHistory([]);setFocus("date");setInput("");setCalDate(GUIDE_DATE_MAX);setProgMatches(null);setSelectedProgramKeys(new Set());setPendingProgram("");setPendingAllChoice(null);setPendingYearChoice(null);setActiveSearchDates([]);setTimeStart("06:00");setTimeEnd("08:00");setErr("");};
   const restorePreviousCondition=()=>{
     if(!condHistory.length)return;
     const previous=condHistory[condHistory.length-1];
@@ -3399,7 +3437,7 @@ function DataDownloadPage(){
     condRef.current=previous;
     setCond(previous);
     if(previous.date)setCalDate(previous.date);
-    setProgMatches(null);setSelectedProgramKeys(new Set());setPendingAllChoice(null);setErr("");
+    setProgMatches(null);setSelectedProgramKeys(new Set());setPendingAllChoice(null);setPendingYearChoice(null);setErr("");
     setFocus(nextMissing(previous));
     say("bot","1つ前の条件に戻しました。");
   };
@@ -3412,7 +3450,7 @@ function DataDownloadPage(){
     if(kind==="attrs"){next={...current,attrs:[]};label="属性";}
     if(kind==="range"){next={...current,range:null};label="時間帯";}
     commitCond(next);
-    setProgMatches(null);setSelectedProgramKeys(new Set());setPendingAllChoice(null);setErr("");
+    setProgMatches(null);setSelectedProgramKeys(new Set());setPendingAllChoice(null);setPendingYearChoice(null);setErr("");
     setFocus(nextMissing(next));
     say("bot",`${label}の条件を外しました。`);
   };
@@ -3462,9 +3500,11 @@ function DataDownloadPage(){
       const hit=bestScore==null?[]:bestScore<100
         ?candidates.filter(p=>p.matchScore<100)
         :candidates.filter(p=>p.matchScore<=bestScore+4);
+      const dateScope=targetDates.length===1?targetDates[0]:`${targetDates[0]}〜${targetDates[targetDates.length-1]}`;
+      const stationScope=c.stations.length?stLabel(c.stations):"全局";
       if(!hit.length){
         setProgMatches([]);
-        say("bot",`「${query}」に一致する番組が見つかりませんでした。別の番組名を入力するか、時刻で指定してください。`);
+        say("bot",`期間「${dateScope}」・放送局「${stationScope}」までは認識できています。\nただし、番組表の正式タイトルから「${query}」に一致する番組を確認できませんでした。\n\n次のどれかを教えてください。\n・番組名の別の呼び方や、タイトルの一部\n・放送局（未指定の場合）\n・番組名が分からなければ放送時刻\n\n期間の条件は保持しているので、もう一度入力する必要はありません。`);
       }else if(selectAll){
         setProgMatches(hit);
         setSelectedProgramKeys(new Set(hit.map(programKey)));
@@ -3474,7 +3514,12 @@ function DataDownloadPage(){
         setSelectedProgramKeys(new Set());
         say("bot",`「${query}」に一致する番組が${hit.length}件見つかりました。ダウンロードする放送回を選んでください。複数選択できます。`);
       }
-    }catch(e){setErr("番組表データを取得できませんでした。時刻で指定してください。");setProgMatches([]);}
+    }catch(e){
+      const targetDates=(searchDates?.length?searchDates:[c.date]).filter(Boolean);
+      const dateScope=targetDates.length>1?`${targetDates[0]}〜${targetDates[targetDates.length-1]}`:targetDates[0]||"指定期間";
+      setErr(`${dateScope}の番組表データを取得できませんでした。入力した条件は保持しています。少し待って再検索するか、分かる場合は放送時刻を入力してください。`);
+      setProgMatches([]);
+    }
     finally{setBusy(false);}
   };
 
@@ -3506,10 +3551,31 @@ function DataDownloadPage(){
 
   // 自由文をAIで構造化し、取得失敗・不足項目は従来のルール解析で補う。
   // AIが返した番組名や日付は、この後で利用可能日・実際のEPGに照合して確定する。
-  const handleSend=async()=>{
-    const text=input.trim();if(!text||busy)return;
+  const handleSend=async forcedText=>{
+    const enteredText=(typeof forcedText==="string"?forcedText:input).trim();if(!enteredText||busy)return;
+    let text=enteredText;
     setInput("");setErr("");
-    say("user",text);
+    say("user",enteredText);
+    if(pendingYearChoice){
+      const directYear=enteredText.match(/(20\d{2})/)?.[1];
+      const latestYear=Number(GUIDE_DATE_MAX.slice(0,4));
+      const resolvedYear=directYear?Number(directYear):/今年|ことし/.test(enteredText)?latestYear:/去年|きょねん/.test(enteredText)?latestYear-1:null;
+      if(!resolvedYear||!pendingYearChoice.years.includes(resolvedYear)){
+        say("bot",`${pendingYearChoice.month}月は何年ですか？ ${pendingYearChoice.years.map(y=>`${y}年`).join("、")}から選んでください。`);
+        return;
+      }
+      text=`${resolvedYear}年${pendingYearChoice.month}月 ${pendingYearChoice.originalText}`;
+      setPendingYearChoice(null);
+    }else{
+      const missingYearMonth=parseMonthMissingYear(text);
+      const yearOptions=missingYearMonth?availableYearsForMonth(missingYearMonth,DATES):[];
+      if(yearOptions.length>1){
+        setPendingYearChoice({month:missingYearMonth,years:yearOptions,originalText:text});
+        setFocus("year");
+        say("bot",`${missingYearMonth}月は複数年のデータがあります。何年のデータですか？\n${yearOptions.map(y=>`・${y}年${missingYearMonth}月`).join("\n")}`);
+        return;
+      }
+    }
     if(pendingAllChoice){
       if(/^(1|１)$|放送回|放送分|番組の回|日付|日程/.test(text)){await resolveAllMeaning("episodes");return;}
       if(/^(2|２)$|属性/.test(text)){await resolveAllMeaning("attributes");return;}
@@ -3601,7 +3667,12 @@ function DataDownloadPage(){
     if(wantProg&&query){
       let searchDates=p.dateCandidates.length?p.dateCandidates:activeSearchDates.length?activeSearchDates:(c.date?[c.date]:[]);
       if(requestedWeekdays.length)searchDates=searchDates.filter(d=>requestedWeekdays.includes(new Date(`${d}T00:00:00`).getDay()));
-      if(!searchDates.length){setPendingProgram(query);setFocus("date");say("bot","番組を検索するには日付が必要です。「7月15日」や「先週末」のように指定してください。");return;}
+      if(!searchDates.length){
+        setPendingProgram(query);setFocus("date");
+        const known=[c.stations.length?`放送局「${stLabel(c.stations)}」`:null,c.attrs.length?`属性「${attrLabel(c.attrs)}」`:null].filter(Boolean);
+        say("bot",`番組名「${query}」${known.length?`・${known.join("・")}`:""}までは認識できています。\n検索する期間だけがまだ決まっていません。\n\n「今月」「2026年7月」「先週と今週」「7月20日」のように、日付または期間を教えてください。ほかの条件はそのまま保持します。`);
+        return;
+      }
       await runProgramSearch(query,c,searchDates,{selectAll:wantsAllMatches});return;
     }
     advance(c);
@@ -3742,6 +3813,13 @@ function DataDownloadPage(){
         {condHistory.length>0&&<button onClick={restorePreviousCondition} style={{marginLeft:"auto",padding:"4px 9px",border:"1px solid #d8d8dc",borderRadius:9999,background:"#fff",color:"#555",fontSize:11.5,fontWeight:600,cursor:"pointer"}}>↶ 1つ戻る</button>}
       </div>}
 
+      {focus==="year"&&pendingYearChoice&&<div>
+        <div style={{fontSize:12,color:"#7a7a7a",marginBottom:10}}>{pendingYearChoice.month}月の年を選んでください。</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {pendingYearChoice.years.map(year=><span key={year}>{cta(()=>handleSend(String(year)),false,`${year}年`)}</span>)}
+        </div>
+      </div>}
+
       {focus==="allMeaning"&&<div>
         <div style={{fontSize:12,color:"#7a7a7a",marginBottom:10}}>「全部」の対象を選んでください。</div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -3800,7 +3878,7 @@ function DataDownloadPage(){
           </button>})}
           <div style={{marginTop:4}}>{cta(confirmPrograms,!selectedProgramKeys.size,selectedProgramKeys.size?`選択した${selectedProgramKeys.size}件で進む`:"放送回を選んでください")}</div>
         </div>}
-        {progMatches&&progMatches.length===0&&<div style={{fontSize:12.5,color:"#7a7a7a",marginBottom:10}}>別の番組名を上の入力欄へ、または時刻で指定してください。</div>}
+        {progMatches&&progMatches.length===0&&<div style={{fontSize:12.5,color:"#7a7a7a",marginBottom:10}}>期間など、すでに認識した条件は保持しています。番組名の別表記・放送局・放送時刻のうち、分かるものだけ追加してください。</div>}
         <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"center",marginTop:12,paddingTop:12,borderTop:"1px solid #f0f0f0"}}>
           <span style={{fontSize:12,color:"#7a7a7a"}}>時刻で指定:</span>
           <input type="time" value={timeStart} onChange={e=>setTimeStart(e.target.value)} style={{padding:"8px 12px",borderRadius:8,border:"1px solid #e0e0e0",fontSize:14,color:"#1d1d1f"}}/>
