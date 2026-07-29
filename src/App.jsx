@@ -1430,6 +1430,17 @@ async function _annotationListRequest({ dateFrom, dateTo, limit = 1000 }) {
 }
 
 const apiClient = {
+  // 視聴率データダウンロードの自由文をClaudeで構造化
+  async parseDownloadConditions(text, today, minDate, maxDate) {
+    const { conditions } = await _callBackend("/api/download/parse", {
+      text,
+      today,
+      minDate,
+      maxDate,
+    });
+    return conditions||null;
+  },
+
   // 部分一致検索（実データ、Athena経由）
   async annotationSearch(query, dateFrom, dateTo) {
     return _annotationSearchRequest({ query, dateFrom, dateTo });
@@ -3304,7 +3315,7 @@ function fuzzyProgramScore(title,query){
 function DataDownloadPage(){
   const DOW=ds=>["日","月","火","水","木","金","土"][new Date(ds).getDay()];
   const DATES=useMemo(()=>[...DASHBOARD_DATES].sort(),[]);
-  const GREETING="こんにちは。視聴率データをExcelでダウンロードします。\nダッシュボードと同じデータ（名古屋地区・1分刻み）から、指定した条件だけを抜き出したExcelを作成します。\n\nご希望を文章で入力してください（例:「7月15日のメ〜テレ ドデスカを個人全体で」）。\n1つずつ選んで指定することもできます。";
+  const GREETING="こんにちは。視聴率データをExcelでダウンロードします。\nAIが文章から日付・放送局・番組名または時間帯・属性を整理し、ダッシュボードと同じデータ（名古屋地区・1分刻み）からExcelを作成します。\n\nご希望を文章で入力してください（例:「先週末のメ〜テレのチョコサムを個人全体で」）。\n足りない条件は続けて指定できます。";
   const initialCond={date:null,stations:[],attrs:[],range:null};
   const[log,setLog]=useState([{role:"bot",text:GREETING}]);
   const[cond,setCond]=useState(initialCond);            // {date, stations[], attrs[], range:{startTv,endTv,label}}
@@ -3359,13 +3370,41 @@ function DataDownloadPage(){
     finally{setBusy(false);}
   };
 
-  // 自由文を解釈して条件を埋める(表記ゆれ吸収)。足りない項目は聞き返す
+  // 自由文をAIで構造化し、取得失敗・不足項目は従来のルール解析で補う。
+  // AIが返した番組名や日付は、この後で利用可能日・実際のEPGに照合して確定する。
   const handleSend=async()=>{
     const text=input.trim();if(!text||busy)return;
     setInput("");setErr("");
     say("user",text);
-    const dateCandidates=parseConditionDates(text,DATES);
-    const p={dateCandidates,stations:parseStations(text),attrs:parseAttrs(text),range:parseTimeRange(text),programQuery:extractProgramQuery(text)};
+    const fallback={
+      dateCandidates:parseConditionDates(text,DATES),
+      stations:parseStations(text),
+      attrs:parseAttrs(text),
+      range:parseTimeRange(text),
+      programQuery:extractProgramQuery(text),
+    };
+    let ai=null;
+    setBusy(true);
+    try{
+      ai=await apiClient.parseDownloadConditions(text,GUIDE_DATE_MAX,GUIDE_DATE_MIN,GUIDE_DATE_MAX);
+    }catch{
+      // AI APIが利用できない時も、既存のルール解析で入力を継続できるようにする
+    }finally{
+      setBusy(false);
+    }
+    const aiDates=Array.isArray(ai?.dates)?[...new Set(ai.dates.map(String).filter(d=>DATES.includes(d)))]:[];
+    const aiExpressionDates=aiDates.length?[]:parseConditionDates(String(ai?.date_expression||""),DATES);
+    const aiStations=Array.isArray(ai?.stations)?[...new Set(ai.stations.map(String).filter(id=>ST.some(s=>s.id===id)))]:[];
+    const aiAttrs=Array.isArray(ai?.attributes)?[...new Set(ai.attributes.map(String).filter(id=>RATING_ATTRS.some(a=>a.id===id)))]:[];
+    const aiRange=ai?.start_time&&ai?.end_time?parseTimeRange(`${ai.start_time}〜${ai.end_time}`):null;
+    const aiProgram=typeof ai?.program_query==="string"&&ai.program_query.trim()&&ai.program_query!=="null"?ai.program_query.trim():null;
+    const p={
+      dateCandidates:aiDates.length?aiDates:aiExpressionDates.length?aiExpressionDates:fallback.dateCandidates,
+      stations:aiStations.length?aiStations:fallback.stations,
+      attrs:aiAttrs.length?aiAttrs:fallback.attrs,
+      range:aiRange||fallback.range,
+      programQuery:aiProgram||fallback.programQuery,
+    };
     const c={...cond};const got=[];
     if(p.dateCandidates.length===1){
       const d=p.dateCandidates[0];
@@ -3381,7 +3420,7 @@ function DataDownloadPage(){
     if(p.attrs.length){c.attrs=p.attrs;got.push(`属性=${attrLabel(p.attrs)}`);}
     if(p.range){c.range={...p.range,label:`${tvToClock(p.range.startTv)}〜${tvToClock(p.range.endTv)}`};got.push(`時間帯=${c.range.label}`);}
     setCond(c);
-    if(got.length)say("bot",`承知しました。${got.join(" / ")} で認識しました。`);
+    if(got.length)say("bot",`${ai?"AIで条件を整理しました。":"承知しました。"}${got.join(" / ")} で認識しました。`);
     if(pendingProgram&&p.dateCandidates.length){
       const q=pendingProgram;
       setPendingProgram("");
