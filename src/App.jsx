@@ -3311,7 +3311,7 @@ function parseTimeRange(text){
 // 自由文から番組名候補を取り出す。「」『』引用を優先し、無ければ日付/時刻/局/属性/助詞を除いた残余を使う
 const DL_STATION_WORDS=["メ〜テレ","メ～テレ","メーテレ","名古屋テレビ","東海テレビ","中京テレビ","CBCテレビ","CBC","テレビ愛知","NHK総合","NHKEテレ","Eテレ","ｅテレ","教育テレビ","教育","NHKE","NHK","THK","CTV","TVA","ETV"];
 const DL_WEEKDAY_WORDS=["日曜日","月曜日","火曜日","水曜日","木曜日","金曜日","土曜日","日曜","月曜","火曜","水曜","木曜","金曜","土曜"];
-const DL_STOP_WORDS=["視聴率","データ","ダウンロード","エクセル","excel","ください","下さい","お願いします","お願い","欲しい","ほしい","見たい","みたい","教えて","グラフ","毎分","放送","番組名","番組","全局","個人全体","全属性","属性","世帯","個人","男女","全体","コア","子供","こども","ティーン","男性","女性","男","女","先週の週末","先週末","せんしゅうまつ","今月","こんげつ","先月","せんげつ","今週","こんしゅう","先週","せんしゅう","最新",...DL_WEEKDAY_WORDS,"分","時","から","まで","の","で","を","は","が","と","に","、","。"];
+const DL_STOP_WORDS=["視聴率","データ","ダウンロード","エクセル","excel","ください","下さい","お願いします","お願い","欲しい","ほしい","見たい","みたい","教えて","グラフ","毎分","放送","番組名","番組","全局","個人全体","全属性","属性","世帯","個人","男女","全体","コア","子供","こども","ティーン","男性","女性","男","女","間違えた","間違い","訂正","修正","変更","変えて","じゃなく","ではなく","でなく","先週の週末","先週末","せんしゅうまつ","今月","こんげつ","先月","せんげつ","今週","こんしゅう","先週","せんしゅう","最新",...DL_WEEKDAY_WORDS,"分","時","から","まで","の","で","を","は","が","と","に","、","。"];
 function parseConditionWeekdays(text){
   const n=text.normalize("NFKC");
   const labels=["日","月","火","水","木","金","土"];
@@ -3389,7 +3389,9 @@ function DataDownloadPage(){
   const[pendingAllChoice,setPendingAllChoice]=useState(null);
   const[pendingYearChoice,setPendingYearChoice]=useState(null);
   const[activeSearchDates,setActiveSearchDates]=useState([]);
+  const[activePeriodDates,setActivePeriodDates]=useState([]);
   const[activeProgramQuery,setActiveProgramQuery]=useState("");
+  const[activeSelectAll,setActiveSelectAll]=useState(false);
   const[timeStart,setTimeStart]=useState("06:00");
   const[timeEnd,setTimeEnd]=useState("08:00");
   const[busy,setBusy]=useState(false);
@@ -3431,7 +3433,7 @@ function DataDownloadPage(){
     return next;
   };
 
-  const reset=()=>{setLog([{role:"bot",text:GREETING}]);condRef.current=initialCond;setCond(initialCond);setCondHistory([]);setFocus("date");setInput("");setCalDate(GUIDE_DATE_MAX);setProgMatches(null);setSelectedProgramKeys(new Set());setPendingProgram("");setPendingAllChoice(null);setPendingYearChoice(null);setActiveSearchDates([]);setActiveProgramQuery("");setTimeStart("06:00");setTimeEnd("08:00");setErr("");};
+  const reset=()=>{setLog([{role:"bot",text:GREETING}]);condRef.current=initialCond;setCond(initialCond);setCondHistory([]);setFocus("date");setInput("");setCalDate(GUIDE_DATE_MAX);setProgMatches(null);setSelectedProgramKeys(new Set());setPendingProgram("");setPendingAllChoice(null);setPendingYearChoice(null);setActiveSearchDates([]);setActivePeriodDates([]);setActiveProgramQuery("");setActiveSelectAll(false);setTimeStart("06:00");setTimeEnd("08:00");setErr("");};
   const restorePreviousCondition=()=>{
     if(!condHistory.length)return;
     const previous=condHistory[condHistory.length-1];
@@ -3446,8 +3448,8 @@ function DataDownloadPage(){
   const removeCondition=kind=>{
     const current=condRef.current;
     let next=current,label="";
-    if(kind==="targets"){next={...current,date:null,range:null,targets:[]};setActiveSearchDates([]);label="対象番組";}
-    if(kind==="date"){next={...current,date:null};setActiveSearchDates([]);label="日付";}
+    if(kind==="targets"){next={...current,date:null,range:null,targets:[]};setActiveSearchDates([]);setActivePeriodDates([]);label="対象番組";}
+    if(kind==="date"){next={...current,date:null};setActiveSearchDates([]);setActivePeriodDates([]);label="日付";}
     if(kind==="stations"){next={...current,stations:[]};label="放送局";}
     if(kind==="attrs"){next={...current,attrs:[]};label="属性";}
     if(kind==="range"){next={...current,range:null};label="時間帯";}
@@ -3481,6 +3483,7 @@ function DataDownloadPage(){
   const runProgramSearch=async(query,c,searchDates,{selectAll=false}={})=>{
     setBusy(true);setErr("");setProgMatches(null);setFocus("program");
     setActiveProgramQuery(query);
+    setActiveSelectAll(selectAll);
     try{
       const targetDates=(searchDates?.length?searchDates:[c.date]).filter(Boolean);
       setActiveSearchDates(targetDates);
@@ -3629,11 +3632,20 @@ function DataDownloadPage(){
       range:aiRange||fallback.range,
       programQuery:aiProgram||fallback.programQuery,
     };
-    const requestedWeekdays=parseConditionWeekdays(text);
+    const correctionIntent=/(間違えた|間違い|訂正|修正|変更|変えて|じゃなく|ではなく|でなく)/.test(text);
+    let requestedWeekdays=parseConditionWeekdays(text);
+    if(correctionIntent&&/(じゃなく|ではなく|でなく)/.test(text)){
+      const weekdayMap={日:0,月:1,火:2,水:3,木:4,金:5,土:6};
+      const mentioned=[...text.matchAll(/([日月火水木金土])(?:曜|曜日)/g)].map(m=>weekdayMap[m[1]]);
+      if(mentioned.length>1)requestedWeekdays=[mentioned[mentioned.length-1]];
+    }
     const hasRelativeDateExpression=/(今月|こんげつ|先月|せんげつ|今週|こんしゅう|先週|せんしゅう)/.test(normJa(text));
     // AIには表現の理解を任せるが、相対日付と曜日の暦計算はコード側で再計算する。
     // AIが曜日を1日ずらした場合も、正しい候補日を失わないようにする。
     if(hasRelativeDateExpression&&fallback.dateCandidates.length)p.dateCandidates=fallback.dateCandidates;
+    const explicitPeriodDates=[...p.dateCandidates];
+    if(explicitPeriodDates.length)setActivePeriodDates(explicitPeriodDates);
+    if(correctionIntent&&!p.dateCandidates.length&&activePeriodDates.length)p.dateCandidates=[...activePeriodDates];
     if(requestedWeekdays.length){
       const matchesWeekday=d=>requestedWeekdays.includes(new Date(`${d}T00:00:00`).getDay());
       const validated=p.dateCandidates.filter(matchesWeekday);
@@ -3641,14 +3653,35 @@ function DataDownloadPage(){
       p.dateCandidates=deterministic.length?deterministic:validated;
     }
     p.programQuery=stripProgramWeekdays(p.programQuery)||null;
+    if(correctionIntent&&!fallback.programQuery&&activeProgramQuery)p.programQuery=null;
+    if(correctionIntent&&p.programQuery&&/^(間違えた|間違い|訂正|修正|変更|変えて|ほしい|欲しい)$/.test(normJa(p.programQuery)))p.programQuery=null;
     const hasAllWord=/(全部|すべて|全て)/.test(text);
     const explicitAttributeAll=/(全属性|属性.{0,4}(全部|すべて|全て)|(全部|すべて|全て).{0,4}属性)/.test(text);
     const explicitEpisodeAll=/(放送回|放送分|放送日|該当回).{0,5}(全部|すべて|全て)|(全部|すべて|全て).{0,5}(放送回|放送分|放送日|該当回)/.test(text);
-    const wantsAllMatches=/(まとめて|一括)/.test(text)||explicitEpisodeAll;
+    const wantsAllMatches=/(まとめて|一括)/.test(text)||explicitEpisodeAll||(correctionIntent&&activeSelectAll);
     const ambiguityProgram=pendingProgram||p.programQuery;
     const needsAllClarification=hasAllWord&&!explicitAttributeAll&&!explicitEpisodeAll&&!!ambiguityProgram;
     const acceptParsedAttrs=!hasAllWord||explicitAttributeAll||fallback.attrs.length>0;
     const dateExpression=typeof ai?.date_expression==="string"&&ai.date_expression.trim()?ai.date_expression.trim():null;
+    const explicitCorrectionCount=[
+      explicitPeriodDates.length,
+      requestedWeekdays.length,
+      p.stations.length,
+      p.attrs.length,
+      p.range?1:0,
+      p.programQuery?1:0,
+    ].filter(Boolean).length;
+    if(correctionIntent&&!explicitCorrectionCount){
+      const current=[
+        activeProgramQuery?`番組名「${activeProgramQuery}」`:null,
+        activePeriodDates.length?`期間「${activePeriodDates[0]}〜${activePeriodDates[activePeriodDates.length-1]}」`:null,
+        cond.weekdays?.length?`曜日「${cond.weekdays.map(d=>["日","月","火","水","木","金","土"][d]).join("・")}曜」`:null,
+        cond.range?`時間「${cond.range.label}」`:null,
+        cond.stations.length?`局「${stLabel(cond.stations)}」`:null,
+      ].filter(Boolean).join("、");
+      say("bot",`${current||"現在の検索条件"}のどこを訂正したいか特定できませんでした。\n「土曜ではなく木曜」「時間を00:20〜00:52に変更」「番組名をドデスカに変更」のように、変えたい項目と新しい条件を教えてください。ほかの条件は保持します。`);
+      return;
+    }
     const c={...cond};const got=[];
     if(p.dateCandidates.length)setActiveSearchDates(p.dateCandidates);
     if(p.dateCandidates.length===1){
@@ -3669,7 +3702,18 @@ function DataDownloadPage(){
     if(p.attrs.length&&acceptParsedAttrs){c.attrs=p.attrs;got.push(`属性=${attrLabel(p.attrs)}`);}
     if(p.range){c.range={...p.range,label:`${tvToClock(p.range.startTv)}〜${tvToClock(p.range.endTv)}`};got.push(`時間帯=${c.range.label}`);}
     commitCond(c);
-    if(got.length)say("bot",`${ai?"AIで条件を整理しました。":"承知しました。"}${got.join(" / ")} で認識しました。`);
+    if(correctionIntent){
+      const changes=[
+        explicitPeriodDates.length?`期間を「${explicitPeriodDates[0]}〜${explicitPeriodDates[explicitPeriodDates.length-1]}」へ変更`:null,
+        requestedWeekdays.length?`曜日を「${cond.weekdays?.length?`${cond.weekdays.map(d=>["日","月","火","水","木","金","土"][d]).join("・")}曜`:"未指定"}」から「${requestedWeekdays.map(d=>["日","月","火","水","木","金","土"][d]).join("・")}曜」へ変更`:null,
+        p.range?`放送時間を「${c.range.label}」へ変更`:null,
+        p.stations.length?`放送局を「${stLabel(p.stations)}」へ変更`:null,
+        p.attrs.length?`属性を「${attrLabel(p.attrs)}」へ変更`:null,
+        p.programQuery?`番組名を「${p.programQuery}」へ変更`:null,
+      ].filter(Boolean);
+      const kept=[activeProgramQuery&&!p.programQuery?`番組名「${activeProgramQuery}」`:null,activePeriodDates.length&&!explicitPeriodDates.length?`期間「${activePeriodDates[0]}〜${activePeriodDates[activePeriodDates.length-1]}」`:null,wantsAllMatches?"全放送回の指定":null].filter(Boolean);
+      say("bot",`${changes.join("、")}します。${kept.length?`${kept.join("・")}は保持して再検索します。`:""}`);
+    }else if(got.length)say("bot",`${ai?"AIで条件を整理しました。":"承知しました。"}${got.join(" / ")} で認識しました。`);
     if(needsAllClarification){
       setPendingAllChoice({programQuery:ambiguityProgram,dateCandidates:p.dateCandidates.length?p.dateCandidates:activeSearchDates,baseCond:c});
       setPendingProgram("");
