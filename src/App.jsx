@@ -1243,6 +1243,59 @@ function Chart({data,sel,onClick,selMin,hl,metric,onPan}){
   </div>;
 }
 
+// 【お試し】視聴質パネル調査による実測流入流出データの可視化。中央の基準線から上に流入、下に流出を
+// 局別に積み上げ棒で表示する。Chart/BroadcastTimelineと同じ左マージン(TIMELINE_LABEL_WIDTH)・
+// 時間軸(winStart-winEnd)を共有し、位置が揃うようにしている
+function InoutFlowChart({points,dayMid,winStart,winEnd}){
+  const cRef=useRef(null);
+  const[w,setW]=useState(900);
+  useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setW(e.contentRect.width);});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
+  const h=110,p={l:TIMELINE_LABEL_WIDTH,r:0};
+  const cW=Math.max(1,w-p.l-p.r);
+  const total=Math.max(1,winEnd-winStart);
+  const xAt=absMin=>p.l+((absMin-winStart)/total)*cW;
+  const barW=Math.max(1,cW/total);
+  const colorFor=key=>key==="OFF"?"#9CA3AF":key==="OTHER"?"#D1D5DB":(ST.find(s=>s.id===key)?.c||"#999");
+  const visible=useMemo(()=>points
+    .map(pt=>({...pt,absMin:dayMid+pt.minute}))
+    .filter(pt=>pt.absMin>=winStart&&pt.absMin<winEnd),[points,dayMid,winStart,winEnd]);
+  const maxVal=useMemo(()=>{
+    let m=0.3;
+    visible.forEach(pt=>{
+      const sumIn=Object.entries(pt.inflow).filter(([k])=>k!=="NBN").reduce((s,[,v])=>s+(v||0),0);
+      const sumOut=Object.entries(pt.outflow).filter(([k])=>k!=="NBN").reduce((s,[,v])=>s+(v||0),0);
+      m=Math.max(m,sumIn,sumOut);
+    });
+    return m;
+  },[visible]);
+  const yScale=(h/2-14)/maxVal;
+  if(!visible.length)return null;
+  return <div style={{padding:"0 18px",marginBottom:6}}>
+    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3,flexWrap:"wrap"}}>
+      <span style={{fontSize:10,fontWeight:700,color:"#173b5d"}}>【お試し】NBN流入流出（視聴質パネル実測・分単位）</span>
+      <span style={{fontSize:8.5,color:"#9CA3AF"}}>上=流入 下=流出</span>
+      {[...ST.map(s=>({id:s.id,c:s.c})),{id:"OFF",c:"#9CA3AF"}].map(s=><span key={s.id} style={{display:"inline-flex",alignItems:"center",gap:2,fontSize:8.5,color:"#6B7280"}}><span style={{width:6,height:6,borderRadius:"50%",background:s.c}}/>{s.id}</span>)}
+    </div>
+    <div ref={cRef} style={{width:"100%",height:h,background:"#FAFBFC",border:"1px solid #E5E7EB",borderRadius:4,position:"relative"}}>
+      <svg width={w} height={h}>
+        <line x1={p.l} x2={w} y1={h/2} y2={h/2} stroke="#D1D5DB"/>
+        <text x={p.l-4} y={8} textAnchor="end" fontSize={7.5} fill="#9CA3AF">+{maxVal.toFixed(1)}%</text>
+        <text x={p.l-4} y={h-3} textAnchor="end" fontSize={7.5} fill="#9CA3AF">-{maxVal.toFixed(1)}%</text>
+        {visible.map(pt=>{
+          const x=xAt(pt.absMin);
+          let yUp=h/2,yDown=h/2;
+          const inEntries=Object.entries(pt.inflow).filter(([k,v])=>k!=="NBN"&&v>0);
+          const outEntries=Object.entries(pt.outflow).filter(([k,v])=>k!=="NBN"&&v>0);
+          return <g key={pt.absMin}>
+            {inEntries.map(([k,v])=>{const hgt=v*yScale,y=yUp-hgt;yUp=y;return <rect key={k} x={x} y={y} width={barW} height={hgt} fill={colorFor(k)}/>;})}
+            {outEntries.map(([k,v])=>{const hgt=v*yScale,y=yDown;yDown=y+hgt;return <rect key={k} x={x} y={y} width={barW} height={hgt} fill={colorFor(k)} opacity={0.55}/>;})}
+          </g>;
+        })}
+      </svg>
+    </div>
+  </div>;
+}
+
 function Toggle({sel,onT}){
   return <div style={{display:"flex",flexWrap:"wrap",gap:5,alignItems:"center"}}>
     <span style={{color:"#9CA3AF",fontSize:10,fontFamily:"monospace",marginRight:2}}>表示設定</span>
@@ -4273,6 +4326,16 @@ export default function App(){
   const timetableRData=useMemo(()=>getRatings(date,slot),[date,slot,ratingsVersion]);
   const timetableSData=useMemo(()=>timetableRData.map(e=>{const t=ST.reduce((s,st)=>s+(e[st.id]||0),0);const o={time:e.time,minute:e.minute};ST.forEach(s=>{o[s.id]=t>0?(e[s.id]/t)*100:0;});return o;}),[timetableRData]);
 
+  // 【お試し】視聴質パネル流入流出データの可視化。今のところ7/27朝帯ぶんしか実測ファイルが無いため
+  // その日だけ限定で試験的に表示する(ダメなら日付条件ごと削除すればOK)
+  const[inoutFlowPoints,setInoutFlowPoints]=useState(null);
+  useEffect(()=>{
+    if(date!=="2026-07-27"){setInoutFlowPoints(null);return;}
+    let cancelled=false;
+    fetchInoutFlow(date,"morning","NBN").then(pts=>{if(!cancelled)setInoutFlowPoints(pts);}).catch(()=>{if(!cancelled)setInoutFlowPoints(null);});
+    return()=>{cancelled=true;};
+  },[date]);
+
   const dateMid=localMidnightAbsMin(date);
   // 視聴率ダッシュボードは全時間帯(05:00-29:00)を常時表示し、日をまたいで連続スクロールできる。
   // 朝帯・夕方帯ボタンはデータ範囲を制限するのではなく、表示位置をその時間帯にジャンプさせるショートカットとして使う
@@ -4497,6 +4560,7 @@ export default function App(){
           </select>
         </div>
         <div style={{padding:"0 18px",height:360,flexShrink:0}}><Chart data={chartData} sel={sel} onClick={click} selMin={selMin} hl={hl} metric={metric} onPan={handlePan}/></div>
+        {inoutFlowPoints&&<InoutFlowChart points={inoutFlowPoints} dayMid={dateMid} winStart={winStart} winEnd={winEnd}/>}
         <BroadcastTimeline tpl={dashTpl}
           startMin={chartData.length?chartData[0].minute:winStart}
           endMin={chartData.length?chartData[chartData.length-1].minute+1:winEnd}
