@@ -2318,9 +2318,11 @@ function AnnotationResultModal({result,progName,onClose}){
 // ============================================================
 
 // titleにキーワードが含まれるかで対象番組を判定する(EPGの番組名は日によって末尾のサブタイトルが変わるため部分一致)
+// 「ドデスカ」は日中の再放送特集(例:「ドデスカ！メ〜ロメロ！セレクション」)等、タイトルの
+// どこかに"ドデスカ"を含むだけの別番組が他にもあるため、includesではなくstartsWithで本編だけに絞る
 const PROGRAM_DEFS=[
-  {key:"dodesuka",label:"ドデスカ",match:t=>t.includes("ドデスカ")&&!t.includes("＋")&&!t.includes("+")},
-  {key:"dodesukaplus",label:"ドデスカ+",match:t=>t.includes("ドデスカ")&&(t.includes("＋")||t.includes("+"))},
+  {key:"dodesuka",label:"ドデスカ",match:t=>t.startsWith("ドデスカ！")},
+  {key:"dodesukaplus",label:"ドデスカ+",match:t=>t.startsWith("ドデスカ＋")||t.startsWith("ドデスカ+")},
   {key:"choco",label:"チョコレートサムネット",match:t=>t.includes("チョコレートサムネット")},
 ];
 const PROGRAM_COMPARE_OFFSETS=[

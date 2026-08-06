@@ -6,7 +6,11 @@
       "Bash(python -c ' *)",
       "Read(//c/Users/NBN/AppData/Local/Temp/**)",
       "Bash(npm run *)",
-      "PowerShell($p = Start-Process npx -ArgumentList \"vite\",\"--port\",\"5199\" -PassThru -RedirectStandardOutput \"$env:TEMP\\\\vitedev.log\" -RedirectStandardError \"$env:TEMP\\\\vitedeverr.log\" -NoNewWindow; Start-Sleep -Seconds 6; try { $r = Invoke-WebRequest \"http://localhost:5199/\" -UseBasicParsing -TimeoutSec 5; \"HTTP $\\($r.StatusCode\\)\" } catch { \"REQ ERR: $_\" }; Get-Content \"$env:TEMP\\\\vitedeverr.log\" -ErrorAction SilentlyContinue | Select-Object -Last 15; Stop-Process -Id $p.Id -Force)"
+      "PowerShell($p = Start-Process npx -ArgumentList \"vite\",\"--port\",\"5199\" -PassThru -RedirectStandardOutput \"$env:TEMP\\\\vitedev.log\" -RedirectStandardError \"$env:TEMP\\\\vitedeverr.log\" -NoNewWindow; Start-Sleep -Seconds 6; try { $r = Invoke-WebRequest \"http://localhost:5199/\" -UseBasicParsing -TimeoutSec 5; \"HTTP $\\($r.StatusCode\\)\" } catch { \"REQ ERR: $_\" }; Get-Content \"$env:TEMP\\\\vitedeverr.log\" -ErrorAction SilentlyContinue | Select-Object -Last 15; Stop-Process -Id $p.Id -Force)",
+      "Bash(rm -f \"C:\\\\Users\\\\NBN\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-NBN-Desktop-viewership-dashboard-app\\\\533fdcb0-394d-4918-9c38-6131247dfdd6\\\\scratchpad\\\\epg_2026080\"*.json)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\NBN\\AppData\\Local\\Temp\\claude\\c--Users-NBN-Desktop-viewership-dashboard-app\\533fdcb0-394d-4918-9c38-6131247dfdd6\\scratchpad"
     ]
   }
 }
