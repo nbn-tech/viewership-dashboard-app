@@ -863,6 +863,17 @@ async function fetchInoutFlow(date,slot,baseStId){
   const startMin=sh*60+sm;
   return points.map((p,i)=>({minute:startMin+i,...p}));
 }
+// 実測データの中で特に動きが大きかった時点(局・方向別)を上位N件抽出する。
+// AIレポートに「実際にこのデータを見た」と分かる具体的な時刻・数値を引用させるために使う
+function extractTopInoutMoments(points,n=3){
+  const events=[];
+  points.forEach(p=>{
+    Object.entries(p.inflow).forEach(([rid,v])=>{if(rid!=="NBN"&&typeof v==="number"&&v>0)events.push({minute:p.minute,rid,dir:"in",v});});
+    Object.entries(p.outflow).forEach(([rid,v])=>{if(rid!=="NBN"&&typeof v==="number"&&v>0)events.push({minute:p.minute,rid,dir:"out",v});});
+  });
+  events.sort((a,b)=>b.v-a.v);
+  return events.slice(0,n);
+}
 // 指定分区間[sM,eM)ぶんの平均流入・流出率(%/分)を局ごとに算出する(実測パネルデータ版)
 function summarizeInoutFlow(points,sM,eM){
   const seg=points.filter(p=>p.minute>=sM&&p.minute<eM);
@@ -2245,7 +2256,19 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
     // 既存の占拠率ベース推定にフォールバックする
     let inoutPoints=null;
     try{inoutPoints=await fetchInoutFlow(date,slot,"NBN");}catch{}
-    if(inoutPoints)lines.push("(NBNの流入流出は視聴質パネル調査による実測データを使用)");
+    if(inoutPoints){
+      lines.push("(NBNの流入流出は視聴質パネル調査による実測データを使用)");
+      const topMoments=extractTopInoutMoments(inoutPoints,3);
+      if(topMoments.length){
+        lines.push("【実測データの具体例(視聴質パネル調査による実測値。推定ではない)】");
+        lines.push("以下のうち最低2〜3個を、時刻と数値をそのまま引用する形で本文中に明記してください(例: 「05:47時点でNHKからNBNへ1.2%の視聴者が実測で流入」):");
+        topMoments.forEach(ev=>{
+          const label=ev.rid==="OTHER"?"その他局":ev.rid==="OFF"?"視聴終了(OFF)":ev.rid;
+          const dirTxt=ev.dir==="in"?`${label}からNBNへ流入`:`NBNから${label}へ流出`;
+          lines.push(`  ${m2t(ev.minute)} ${dirTxt} ${ev.v.toFixed(1)}%(実測・1分間)`);
+        });
+      }
+    }
 
     // NBN 詳細（番組ごと → コーナーごと・要約 + 裏局の有意な動き）
     const nbnProgs=tpl["NBN"]||[];
