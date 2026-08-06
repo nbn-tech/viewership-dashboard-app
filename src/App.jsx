@@ -1208,7 +1208,8 @@ function Chart({data,sel,onClick,selMin,hl,metric,onPan}){
   const xS=useCallback(i=>p.l+(i/Math.max(1,data.length))*cW,[data.length,cW]);
   const yS=useCallback(v=>p.t+cH-(v/mx)*cH,[cH,mx]);
   const gi=useCallback(cx=>{const rc=ref.current?.getBoundingClientRect();if(!rc)return-1;return Math.max(0,Math.min(data.length-1,Math.floor(((cx-rc.left-p.l)/cW)*data.length)));},[cW,data.length]);
-  const tL=useMemo(()=>{const l=[];const st=data.length>100?10:5;for(let i=0;i<data.length;i+=st)l.push({i,lb:wrapClock(data[i].minute)});return l;},[data]);
+  // ズームして表示範囲が短い時ほど目盛りを細かくする(短いコーナーを検索結果のグラフで拡大表示する時など)
+  const tL=useMemo(()=>{const l=[];const st=data.length>100?10:data.length>40?5:data.length>15?2:1;for(let i=0;i<data.length;i+=st)l.push({i,lb:wrapClock(data[i].minute)});return l;},[data]);
   const yT=useMemo(()=>{const t=[];const st=metric==="share"?10:2;for(let i=0;i<=mx;i+=st)t.push(i);return t;},[mx,metric]);
   const si=data.findIndex(dt=>dt.minute===selMin);
   let hs=-1,he=-1;if(hl){hs=data.findIndex(dt=>dt.minute===hl.start);he=data.findIndex(dt=>dt.minute===hl.end);}
@@ -2164,18 +2165,38 @@ function AnnotationResultModal({result,progName,onClose}){
   const videoUrl=(chMatch&&yyyymmdd)
     ?`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/movie/ch${chMatch[1]}/${yyyymmdd}/${result.object_key}`
     :null;
-  // 視聴率IN/OUT/DIFF (視聴率オーバーレイがあるのは朝帯5:30-8:30・夕方帯15:30-19:00のみ)
-  const slot=useMemo(()=>{
-    if(!result.startMin)return null;
-    const m=t2m(result.startMin);
-    return(m>=330&&m<510)?"morning":(m>=930&&m<1140)?"evening":null;
-  },[result]);
+  // 視聴率IN/OUT/DIFF・推移: 視聴率は全時間帯ぶんあるので、朝夕帯に限らず終日データを実行時に取得する。
+  // Chart(ダッシュボードと共通)はminuteを絶対分(エポック分)前提でwrapClock表示するため、
+  // fetchFullDayRatingObjectsが返す日内相対分(300-1739)をその日の0時基準の絶対分に変換して渡す
+  const[fullDayRData,setFullDayRData]=useState(null); // null=読み込み中、[]=データなし
+  useEffect(()=>{
+    if(!result.date){setFullDayRData([]);return;}
+    let cancelled=false;
+    setFullDayRData(null);
+    const dayMid=localMidnightAbsMin(result.date);
+    fetchFullDayRatingObjects(result.date)
+      .then(data=>{if(!cancelled)setFullDayRData(data?data.map(d=>({...d,minute:dayMid+d.minute})):[]);})
+      .catch(()=>{if(!cancelled)setFullDayRData([]);});
+    return()=>{cancelled=true;};
+  },[result.date]);
+  // startMin/endMinは"HH:MM"(実時刻)。深夜0-4時台は放送日的には前日の続きなので、tvt2mで+1440してから
+  // その日の0時基準の絶対分に変換する(fullDayRDataのminuteと同じ座標系に揃える)
+  const dayMid=result.date?localMidnightAbsMin(result.date):null;
+  const sM=(result.startMin&&dayMid!=null)?dayMid+tvt2m(result.startMin):null;
+  const eM=(result.endMin&&dayMid!=null)?dayMid+tvt2m(result.endMin):null;
   const stats=useMemo(()=>{
-    if(!result.date||!result.startMin||!result.endMin||!result.stId||!slot)return null;
-    return computeCornerStats({date:result.date,slot,startMin:result.startMin,endMin:result.endMin,stId:result.stId},rCache,"rating");
-  },[result,slot]);
-  // 視聴率の推移(全局)。ダッシュボードと同じChartコンポーネントを流用し、このコーナーの区間をハイライトする
-  const rData=useMemo(()=>(result.date&&slot)?getRatings(result.date,slot):null,[result.date,slot]);
+    if(!fullDayRData||!fullDayRData.length||sM==null||eM==null||!result.stId)return null;
+    const slice=fullDayRData.filter(d=>d.minute>=sM&&d.minute<=eM);
+    if(!slice.length)return null;
+    const iV=slice[0][result.stId]??null,oV=slice[slice.length-1][result.stId]??null;
+    return{iV,oV,df:(iV!=null&&oV!=null)?oV-iV:null};
+  },[fullDayRData,sM,eM,result.stId]);
+  // 視聴率の推移(全局)。ダッシュボードと同じChartコンポーネントを流用し、横軸はこのコーナーの開始〜終了ぴったりに絞る(ズーム表示)
+  const chartData=useMemo(()=>{
+    if(!fullDayRData||sM==null||eM==null)return null;
+    const d=fullDayRData.filter(x=>x.minute>=sM&&x.minute<=eM);
+    return d.length?d:null;
+  },[fullDayRData,sM,eM]);
   const fmt=v=>v!=null?v.toFixed(1)+"%":"—";
 
   return <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
@@ -2205,12 +2226,10 @@ function AnnotationResultModal({result,progName,onClose}){
           <div style={{fontSize:16,fontWeight:700,fontFamily:"monospace",color:stats.df!=null?(stats.df>=0?"#16A34A":"#DC2626"):"#9CA3AF"}}>{stats.df!=null?`${stats.df>=0?"+":""}${stats.df.toFixed(1)}%`:"—"}</div>
         </div>
       </div>}
-      {rData&&<div style={{marginBottom:14}}>
-        <div style={{fontSize:11,color:"#6B7280",fontWeight:600,marginBottom:6}}>視聴率の推移（全局）</div>
+      {chartData&&<div style={{marginBottom:14}}>
+        <div style={{fontSize:11,color:"#6B7280",fontWeight:600,marginBottom:6}}>視聴率の推移（全局・{result.startMin}–{result.endMin}）</div>
         <div style={{height:280}}>
-          <Chart data={rData} sel={ST.map(s=>s.id)} onClick={()=>{}} selMin={null}
-            hl={result.startMin&&result.endMin?{start:t2m(result.startMin),end:t2m(result.endMin),stationId:result.stId}:null}
-            metric="rating"/>
+          <Chart data={chartData} sel={ST.map(s=>s.id)} onClick={()=>{}} selMin={null} hl={null} metric="rating"/>
         </div>
       </div>}
       {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls autoPlay
