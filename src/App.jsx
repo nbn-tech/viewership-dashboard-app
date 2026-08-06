@@ -1250,8 +1250,9 @@ function InoutFlowChart({points,dayMid,winStart,winEnd}){
   const cRef=useRef(null);
   const[w,setW]=useState(900);
   useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setW(e.contentRect.width);});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
-  const h=110,p={l:TIMELINE_LABEL_WIDTH,r:0};
+  const h=126,p={l:TIMELINE_LABEL_WIDTH,r:0,t:8,b:16};
   const cW=Math.max(1,w-p.l-p.r);
+  const midY=p.t+(h-p.t-p.b)/2;
   const total=Math.max(1,winEnd-winStart);
   const xAt=absMin=>p.l+((absMin-winStart)/total)*cW;
   const barW=Math.max(1,cW/total);
@@ -1268,7 +1269,10 @@ function InoutFlowChart({points,dayMid,winStart,winEnd}){
     });
     return m;
   },[visible]);
-  const yScale=(h/2-14)/maxVal;
+  const yScale=((h-p.t-p.b)/2-6)/maxVal;
+  // ダッシュボード本体のタイムライン(BroadcastTimeline)と同じ目盛り間隔ルールで時刻軸を揃える
+  const tickStep=total<=30?5:total<=60?10:total<=120?15:30;
+  const timeTicks=useMemo(()=>{const arr=[];for(let m=Math.ceil(winStart/tickStep)*tickStep;m<winEnd;m+=tickStep)arr.push(m);return arr;},[winStart,winEnd,tickStep]);
   if(!visible.length)return null;
   return <div style={{padding:"0 18px",marginBottom:6}}>
     <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3,flexWrap:"wrap"}}>
@@ -1278,12 +1282,14 @@ function InoutFlowChart({points,dayMid,winStart,winEnd}){
     </div>
     <div ref={cRef} style={{width:"100%",height:h,background:"#FAFBFC",border:"1px solid #E5E7EB",borderRadius:4,position:"relative"}}>
       <svg width={w} height={h}>
-        <line x1={p.l} x2={w} y1={h/2} y2={h/2} stroke="#D1D5DB"/>
-        <text x={p.l-4} y={8} textAnchor="end" fontSize={7.5} fill="#9CA3AF">+{maxVal.toFixed(1)}%</text>
-        <text x={p.l-4} y={h-3} textAnchor="end" fontSize={7.5} fill="#9CA3AF">-{maxVal.toFixed(1)}%</text>
+        {timeTicks.map(m=><line key={m} x1={xAt(m)} x2={xAt(m)} y1={p.t} y2={h-p.b} stroke="#E5E7EB" strokeDasharray="2,3"/>)}
+        <line x1={p.l} x2={w} y1={midY} y2={midY} stroke="#1d1d1f" strokeWidth={1.25}/>
+        <text x={p.l-4} y={p.t+6} textAnchor="end" fontSize={7.5} fill="#9CA3AF">+{maxVal.toFixed(1)}%</text>
+        <text x={p.l-4} y={h-p.b-2} textAnchor="end" fontSize={7.5} fill="#9CA3AF">-{maxVal.toFixed(1)}%</text>
+        {timeTicks.map(m=><text key={m} x={xAt(m)} y={h-4} textAnchor="middle" fontSize={7.5} fontFamily="monospace" fill="#9CA3AF">{wrapClock(m)}</text>)}
         {visible.map(pt=>{
           const x=xAt(pt.absMin);
-          let yUp=h/2,yDown=h/2;
+          let yUp=midY,yDown=midY;
           const inEntries=Object.entries(pt.inflow).filter(([k,v])=>k!=="NBN"&&v>0);
           const outEntries=Object.entries(pt.outflow).filter(([k,v])=>k!=="NBN"&&v>0);
           return <g key={pt.absMin}>
