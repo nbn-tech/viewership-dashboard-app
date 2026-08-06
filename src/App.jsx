@@ -2354,8 +2354,7 @@ function ProgramCompareChart({series}){
   </div>;
 }
 
-function ProgramTrackerPage(){
-  const[progKey,setProgKey]=useState(PROGRAM_DEFS[0].key);
+function ProgramTrackerPage({progKey}){
   const[refDate,setRefDate]=useState(GUIDE_DATE_MAX);
   const progDef=PROGRAM_DEFS.find(p=>p.key===progKey);
   const compareDates=useMemo(()=>PROGRAM_COMPARE_OFFSETS.map(c=>({...c,date:shiftDateStr(refDate,c.offset)})),[refDate]);
@@ -2418,13 +2417,10 @@ function ProgramTrackerPage(){
 
   return <div style={{maxWidth:960,margin:"0 auto",padding:"20px 18px 40px"}}>
     <div style={{marginBottom:14}}>
-      <h1 style={{fontSize:22,fontWeight:600,color:"#1d1d1f",letterSpacing:"-0.374px"}}>番組別</h1>
-      <p style={{fontSize:13,color:"#7a7a7a",marginTop:4,letterSpacing:"-0.2px"}}>特定番組のNBN視聴率推移を、選択日・前日・1週間前・1か月前で重ねて比較できます。</p>
+      <h1 style={{fontSize:22,fontWeight:600,color:"#1d1d1f",letterSpacing:"-0.374px"}}>番組別 － {progDef.label}</h1>
+      <p style={{fontSize:13,color:"#7a7a7a",marginTop:4,letterSpacing:"-0.2px"}}>NBN視聴率推移を、選択日・前日・1週間前・1か月前で重ねて比較できます。左のメニューから他の番組にも切り替えられます。</p>
     </div>
     <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",marginBottom:14}}>
-      <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
-        {PROGRAM_DEFS.map(pd=><button key={pd.key} onClick={()=>setProgKey(pd.key)} style={seg(progKey===pd.key)}>{pd.label}</button>)}
-      </div>
       <CalendarPicker value={refDate} onChange={setRefDate} dates={DASHBOARD_DATES}/>
     </div>
     <div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:16,marginBottom:16}}>
@@ -4393,6 +4389,8 @@ export default function App(){
   const[aTopicSelected,setATopicSelected]=useState(new Set()); // 選択中のコーナーid
   const[aTopicStep,setATopicStep]=useState(1); // 1=入力 2=選択 3=結果
   const[aLabel,setALabel]=useState("");
+  // 番組別ページ: サイドバーのメニューから直接どの番組を見るか選べるよう、選択状態をここで持つ
+  const[progKey,setProgKey]=useState(PROGRAM_DEFS[0].key);
   // Open-Meteo 過去気象データ (名古屋)
   const[weatherData,setWeatherData]=useState({});
   useEffect(()=>{
@@ -4628,7 +4626,18 @@ export default function App(){
     </header>
     <aside className="tvp-sidebar">
       <div className="tvp-sidebar-label">メニュー</div>
-      {[{id:"guide",l:"番組表"},{id:"dashboard",l:"視聴率ダッシュボード"},{id:"programs",l:"番組別"},{id:"search",l:"番組・放送内容検索"},{id:"analysis",l:"AI分析"},{id:"download",l:"視聴率データダウンロード"}].map(p=><button key={p.id} className={`tvp-nav-button ${page===p.id?"is-active":""}`} onClick={()=>setPage(p.id)}>{p.l}</button>)}
+      {[{id:"guide",l:"番組表"},{id:"dashboard",l:"視聴率ダッシュボード"},{id:"programs",l:"番組別"},{id:"search",l:"番組・放送内容検索"},{id:"analysis",l:"AI分析"},{id:"download",l:"視聴率データダウンロード"}].flatMap(p=>{
+        const items=[<button key={p.id} className={`tvp-nav-button ${page===p.id?"is-active":""}`} onClick={()=>setPage(p.id)}>{p.l}</button>];
+        // 「番組別」を選んでいる間だけ、対象番組を直接切り替えられるようサブメニューを3つ下に出す
+        if(p.id==="programs"&&page==="programs"){
+          PROGRAM_DEFS.forEach(pd=>items.push(
+            <button key={pd.key} className={`tvp-nav-button ${progKey===pd.key?"is-active":""}`}
+              style={{paddingLeft:26,fontSize:11,fontWeight:progKey===pd.key?600:400}}
+              onClick={()=>setProgKey(pd.key)}>{pd.label}</button>
+          ));
+        }
+        return items;
+      })}
       <div className="tvp-info-wrap">
         <button className="tvp-info-button" onClick={()=>setBannerOpen(o=>!o)}>
           <span style={{marginRight:6}}>ⓘ</span>データについて <span style={{float:"right"}}>{bannerOpen?"▲":"▼"}</span>
@@ -4651,7 +4660,7 @@ export default function App(){
     return <div className="app-root" style={{width:"100%",minHeight:"100vh",background:"#f5f5f7",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif",color:"#111827"}}>
       <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}`}</style>
       <NavBar/>
-      <ProgramTrackerPage/>
+      <ProgramTrackerPage progKey={progKey}/>
     </div>;
   }
   if(page==="search"){
