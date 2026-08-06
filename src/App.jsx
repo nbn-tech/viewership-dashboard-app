@@ -841,15 +841,21 @@ async function fetchInoutFlow(date,slot,baseStId){
     else if(v==="OFF")cols.push({colIdx:idx,key:"OFF"});
   });
   // 時点ブロックの行数は可変(空行の有無等)なので、"時点N"ラベル行を区切りとして、
-  // その中の行を1列目のラベル文字列(判定到達率/基準局への流入/基準局からの流出)で判定する
+  // その中の行を1列目のラベル文字列(判定到達率/基準局への流入/基準局からの流出)で判定する。
+  // 注意: このExcelは10分おきに同じ"時点N"(同じ時刻)のブロックが重複して出現する既知のクセがあるため、
+  // 配列のインデックス(何番目のブロックか)から時刻を計算してはいけない。必ず各ブロックの
+  // ラベル行自身に書かれている時刻文字列(例:"2026/07/27(月)\r\n08:13～08:14")をパースして使う
   const points=[];
   let cur=null;
   for(let r=headerRowIdx+1;r<rows.length;r++){
     const row=rows[r];
     if(!row)continue;
     if(typeof row[0]==="string"&&row[0].startsWith("時点")){
-      if(cur)points.push(cur);
-      cur={reach:{},inflow:{},outflow:{}};
+      if(cur&&cur.minute!=null)points.push(cur);
+      const timeLabel=row[1];
+      const tm=typeof timeLabel==="string"?timeLabel.match(/(\d{1,2}):(\d{2})/):null;
+      const minute=tm?tvt2m(`${tm[1].padStart(2,"0")}:${tm[2]}`):null;
+      cur={minute,reach:{},inflow:{},outflow:{}};
       continue;
     }
     if(!cur)continue;
@@ -859,9 +865,11 @@ async function fetchInoutFlow(date,slot,baseStId){
     else if(label==="基準局への流入")apply(cur.inflow);
     else if(label==="基準局からの流出")apply(cur.outflow);
   }
-  if(cur)points.push(cur);
-  const startMin=sh*60+sm;
-  return points.map((p,i)=>({minute:startMin+i,...p}));
+  if(cur&&cur.minute!=null)points.push(cur);
+  // 同じ時刻が重複するブロックは後勝ちでまとめ、時刻順に並べ直す
+  const byMinute=new Map();
+  points.forEach(p=>byMinute.set(p.minute,p));
+  return[...byMinute.values()].sort((a,b)=>a.minute-b.minute);
 }
 // 実測データの中で特に動きが大きかった時点(局・方向別)を上位N件抽出する。
 // AIレポートに「実際にこのデータを見た」と分かる具体的な時刻・数値を引用させるために使う
