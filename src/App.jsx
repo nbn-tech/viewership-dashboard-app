@@ -2165,13 +2165,17 @@ function AnnotationResultModal({result,progName,onClose}){
     ?`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/movie/ch${chMatch[1]}/${yyyymmdd}/${result.object_key}`
     :null;
   // 視聴率IN/OUT/DIFF (視聴率オーバーレイがあるのは朝帯5:30-8:30・夕方帯15:30-19:00のみ)
-  const stats=useMemo(()=>{
-    if(!result.date||!result.startMin||!result.endMin||!result.stId)return null;
+  const slot=useMemo(()=>{
+    if(!result.startMin)return null;
     const m=t2m(result.startMin);
-    const slot=(m>=330&&m<510)?"morning":(m>=930&&m<1140)?"evening":null;
-    if(!slot)return null;
-    return computeCornerStats({date:result.date,slot,startMin:result.startMin,endMin:result.endMin,stId:result.stId},rCache,"rating");
+    return(m>=330&&m<510)?"morning":(m>=930&&m<1140)?"evening":null;
   },[result]);
+  const stats=useMemo(()=>{
+    if(!result.date||!result.startMin||!result.endMin||!result.stId||!slot)return null;
+    return computeCornerStats({date:result.date,slot,startMin:result.startMin,endMin:result.endMin,stId:result.stId},rCache,"rating");
+  },[result,slot]);
+  // 視聴率の推移(全局)。ダッシュボードと同じChartコンポーネントを流用し、このコーナーの区間をハイライトする
+  const rData=useMemo(()=>(result.date&&slot)?getRatings(result.date,slot):null,[result.date,slot]);
   const fmt=v=>v!=null?v.toFixed(1)+"%":"—";
 
   return <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
@@ -2199,6 +2203,14 @@ function AnnotationResultModal({result,progName,onClose}){
         <div style={{flex:1,background:stats.df!=null?(stats.df>=0?"#F0FDF4":"#FEF2F2"):"#F9FAFB",borderRadius:8,padding:"8px 12px",border:`1px solid ${stats.df!=null?(stats.df>=0?"#DCFCE7":"#FEE2E2"):"#F3F4F6"}`}}>
           <div style={{fontSize:9,color:"#9CA3AF",fontFamily:"monospace",marginBottom:3}}>DIFF</div>
           <div style={{fontSize:16,fontWeight:700,fontFamily:"monospace",color:stats.df!=null?(stats.df>=0?"#16A34A":"#DC2626"):"#9CA3AF"}}>{stats.df!=null?`${stats.df>=0?"+":""}${stats.df.toFixed(1)}%`:"—"}</div>
+        </div>
+      </div>}
+      {rData&&<div style={{marginBottom:14}}>
+        <div style={{fontSize:11,color:"#6B7280",fontWeight:600,marginBottom:6}}>視聴率の推移（全局）</div>
+        <div style={{height:280}}>
+          <Chart data={rData} sel={ST.map(s=>s.id)} onClick={()=>{}} selMin={null}
+            hl={result.startMin&&result.endMin?{start:t2m(result.startMin),end:t2m(result.endMin),stationId:result.stId}:null}
+            metric="rating"/>
         </div>
       </div>}
       {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls autoPlay
