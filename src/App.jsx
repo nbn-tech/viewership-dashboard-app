@@ -2265,6 +2265,7 @@ function AnnotationResultModal({result,progName,onClose}){
     return d.length?d:null;
   },[fullDayRData,sM,eM]);
   const fmt=v=>v!=null?v.toFixed(1)+"%":"—";
+  const[showTrend,setShowTrend]=useState(false);
 
   return <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
     <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:12,maxWidth:720,width:"100%",maxHeight:"88vh",overflowY:"auto",padding:24}}>
@@ -2275,7 +2276,10 @@ function AnnotationResultModal({result,progName,onClose}){
             {result.date}{result.date&&`(${dow(result.date)})`} {result.startMin&&result.endMin?`${result.startMin}–${result.endMin}`:""}
           </span>
         </div>
-        <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,color:"#9CA3AF",cursor:"pointer",lineHeight:1,padding:0}}>×</button>
+        <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+          {chartData&&<button onClick={()=>setShowTrend(v=>!v)} style={{padding:"4px 12px",borderRadius:9999,border:`1px solid ${showTrend?"#0066cc":"#e0e0e0"}`,background:showTrend?"#0066cc":"#fff",color:showTrend?"#fff":"#0066cc",cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>{showTrend?"推移を隠す":"推移を表示"}</button>}
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,color:"#9CA3AF",cursor:"pointer",lineHeight:1,padding:0}}>×</button>
+        </div>
       </div>
       {progName&&<div style={{fontSize:12,color:"#0066cc",fontWeight:600,marginBottom:3}}>{progName}</div>}
       <div style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:10}}>{result.title}</div>
@@ -2293,7 +2297,7 @@ function AnnotationResultModal({result,progName,onClose}){
           <div style={{fontSize:16,fontWeight:700,fontFamily:"monospace",color:stats.df!=null?(stats.df>=0?"#16A34A":"#DC2626"):"#9CA3AF"}}>{stats.df!=null?`${stats.df>=0?"+":""}${stats.df.toFixed(1)}%`:"—"}</div>
         </div>
       </div>}
-      {chartData&&<div style={{marginBottom:14}}>
+      {chartData&&showTrend&&<div style={{marginBottom:14}}>
         <div style={{fontSize:11,color:"#6B7280",fontWeight:600,marginBottom:6}}>視聴率の推移（全局・{result.startMin}–{result.endMin}）</div>
         <div style={{height:280}}>
           <Chart data={chartData} sel={ST.map(s=>s.id)} onClick={()=>{}} selMin={null} hl={null} metric="rating"/>
