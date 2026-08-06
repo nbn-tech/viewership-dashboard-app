@@ -809,6 +809,77 @@ async function fetchFullDayRatingObjects(date){
   return allday?rawRowsToRatingObjects(allday,300):null;
 }
 
+// ============= 流入流出パネルデータ(inout/、AI分析用) =============
+// 視聴質パネル調査(個人視聴率メーター)による「基準局への流入／からの流出」実測データ。
+// S3: inout/{yyyymmdd}{startHHMM}{endHHMM}_{局}_inout.xlsx (局はTHK/CTV/CBC/NHK/NBN/NHKE/TVA、
+// NHKEは現状データなし)。現状は朝帯(05:30-08:30)ぶんのみ確認済みで、無い日/局は404/403になるため
+// 呼び出し側は例外を握って占拠率ベースの推定にフォールバックする。
+const INOUT_STATION_JP={THK:"東海テレビ",CTV:"中京テレビ",CBC:"ＣＢＣ",NHK:"ＮＨＫ総合",NBN:"メ～テレ",NHKE:"ＮＨＫＥテレ",TVA:"テレビ愛知"};
+async function fetchInoutFlow(date,slot,baseStId){
+  const yyyymmdd=date.replace(/-/g,'');
+  const[sh,sm,eh,em]=slot==="morning"?[5,30,8,30]:[15,30,19,0];
+  const hhmm=(h,m)=>`${String(h).padStart(2,'0')}${String(m).padStart(2,'0')}`;
+  const url=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/inout/${yyyymmdd}${hhmm(sh,sm)}${hhmm(eh,em)}_${baseStId}_inout.xlsx`;
+  const res=await fetch(url);
+  if(!res.ok)throw new Error(`HTTP ${res.status}`);
+  const buf=await res.arrayBuffer();
+  const wb=XLSX.read(buf,{type:"array"});
+  const sheet=wb.Sheets["流入流出連続グラフ（各ケース）"];
+  if(!sheet)throw new Error("シートが見つかりません");
+  const rows=XLSX.utils.sheet_to_json(sheet,{header:1,defval:null});
+  // 基準局によって局の列順が入れ替わる(基準局が必ず中央の列に来る)ため、ヘッダ行を都度読み取って
+  // 列→局ID(またはOTHER/OFF)の対応を作る
+  const jpToId={};Object.entries(INOUT_STATION_JP).forEach(([id,jp])=>{jpToId[jp]=id;});
+  // "基準局：メ～テレ"等のメタ行にも局名が1つだけ現れるため、局名が複数(実際は7つ)並ぶ本当のヘッダ行だけを対象にする
+  const headerRowIdx=rows.findIndex(r=>r&&r.filter(v=>typeof v==="string"&&jpToId[v]).length>=3);
+  if(headerRowIdx===-1)throw new Error("ヘッダ行が見つかりません");
+  const cols=[];
+  rows[headerRowIdx].forEach((v,idx)=>{
+    if(v==null||v==="")return;
+    if(jpToId[v])cols.push({colIdx:idx,key:jpToId[v]});
+    else if(v==="その他合計")cols.push({colIdx:idx,key:"OTHER"});
+    else if(v==="OFF")cols.push({colIdx:idx,key:"OFF"});
+  });
+  // 時点ブロックの行数は可変(空行の有無等)なので、"時点N"ラベル行を区切りとして、
+  // その中の行を1列目のラベル文字列(判定到達率/基準局への流入/基準局からの流出)で判定する
+  const points=[];
+  let cur=null;
+  for(let r=headerRowIdx+1;r<rows.length;r++){
+    const row=rows[r];
+    if(!row)continue;
+    if(typeof row[0]==="string"&&row[0].startsWith("時点")){
+      if(cur)points.push(cur);
+      cur={reach:{},inflow:{},outflow:{}};
+      continue;
+    }
+    if(!cur)continue;
+    const label=row[1];
+    const apply=obj=>cols.forEach(({colIdx,key})=>{const v=row[colIdx];if(typeof v==="number")obj[key]=v;});
+    if(label==="判定到達率")apply(cur.reach);
+    else if(label==="基準局への流入")apply(cur.inflow);
+    else if(label==="基準局からの流出")apply(cur.outflow);
+  }
+  if(cur)points.push(cur);
+  const startMin=sh*60+sm;
+  return points.map((p,i)=>({minute:startMin+i,...p}));
+}
+// 指定分区間[sM,eM)ぶんの平均流入・流出率(%/分)を局ごとに算出する(実測パネルデータ版)
+function summarizeInoutFlow(points,sM,eM){
+  const seg=points.filter(p=>p.minute>=sM&&p.minute<eM);
+  if(!seg.length)return null;
+  const keys=new Set();
+  seg.forEach(p=>{Object.keys(p.inflow).forEach(k=>keys.add(k));Object.keys(p.outflow).forEach(k=>keys.add(k));});
+  const avg=arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:0;
+  const out={};
+  keys.forEach(key=>{
+    const ins=seg.map(p=>p.inflow[key]).filter(v=>typeof v==="number");
+    const outs=seg.map(p=>p.outflow[key]).filter(v=>typeof v==="number");
+    if(!ins.length&&!outs.length)return;
+    out[key]={avgIn:avg(ins),avgOut:avg(outs)};
+  });
+  return out;
+}
+
 // ============= データダウンロード用 =============
 // S3のconsolidated.xlsxが持つ視聴率の属性区分(局コード_属性 の後半)。
 // 局コードは RATING_HEADER_STATION（NBN/THK/CTV/CBC/TVA/NHK/ETV）を使う。
@@ -2154,7 +2225,7 @@ function computeRivalFlow(sid,sM,eM,sData,tpl){
   return rivals;
 }
 
-function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
+async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
   const SKIP_SEG=new Set(["cm","sponsor","opening","ending","other","kids"]);
   const MAX_CHARS=18000;
   const lines=[];
@@ -2170,6 +2241,11 @@ function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
       lines.push("(この日時は実分析結果がありません)");
       continue;
     }
+    // 視聴質パネル調査による実測流入流出データ(inout/)があれば使う。無い日/局は404/403で単に諦め、
+    // 既存の占拠率ベース推定にフォールバックする
+    let inoutPoints=null;
+    try{inoutPoints=await fetchInoutFlow(date,slot,"NBN");}catch{}
+    if(inoutPoints)lines.push("(NBNの流入流出は視聴質パネル調査による実測データを使用)");
 
     // NBN 詳細（番組ごと → コーナーごと・要約 + 裏局の有意な動き）
     const nbnProgs=tpl["NBN"]||[];
@@ -2192,14 +2268,27 @@ function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
         const iV=slice[0]["NBN"],oV=slice[slice.length-1]["NBN"],df=oV-iV;
         lines.push(`  ・「${title}」(${cs}–${ce}) IN${iV.toFixed(1)}% AVG${avg.toFixed(1)}% OUT${oV.toFixed(1)}% ${df>=0?"+":""}${df.toFixed(1)}pt`);
         if(summary)lines.push(`    内容: ${summary}`);
-        const rivals=computeRivalFlow("NBN",sM,eM,sData,tpl);
-        rivals
-          .filter(r=>Math.abs(r.df)>=1.0)
-          .forEach(r=>{
-            const flow=r.df<=-1.0?`↓${r.df.toFixed(1)}pt(NBNへ流入)`:`↑+${r.df.toFixed(1)}pt(NBNから流出)`;
-            const corner=r.cornerTitle?`「${r.cornerTitle}」`:"";
-            lines.push(`    裏${r.rid}${corner}: ${r.iV.toFixed(1)}→${r.oV.toFixed(1)}% ${flow}`);
-          });
+        const realFlow=inoutPoints?summarizeInoutFlow(inoutPoints,sM,eM):null;
+        if(realFlow){
+          // 実測は1分あたりの流入・流出率(%/分)なので、旧来のdf(コーナー全体でのpt変化)と比較しやすいよう
+          // コーナーの長さ(分)を掛けた「コーナー全体での推定流入・流出量(pt)」も併記する
+          const windowMin=eM-sM;
+          Object.entries(realFlow)
+            .filter(([rid,f])=>rid!=="NBN"&&(f.avgIn*windowMin>=1.0||f.avgOut*windowMin>=1.0))
+            .forEach(([rid,f])=>{
+              const label=rid==="OTHER"?"その他局":rid==="OFF"?"視聴終了(OFF)":rid;
+              lines.push(`    [実測]裏${label}: 流入${(f.avgIn*windowMin).toFixed(1)}pt(${f.avgIn.toFixed(2)}%/分)・流出${(f.avgOut*windowMin).toFixed(1)}pt(${f.avgOut.toFixed(2)}%/分)`);
+            });
+        }else{
+          const rivals=computeRivalFlow("NBN",sM,eM,sData,tpl);
+          rivals
+            .filter(r=>Math.abs(r.df)>=1.0)
+            .forEach(r=>{
+              const flow=r.df<=-1.0?`↓${r.df.toFixed(1)}pt(NBNへ流入)`:`↑+${r.df.toFixed(1)}pt(NBNから流出)`;
+              const corner=r.cornerTitle?`「${r.cornerTitle}」`:"";
+              lines.push(`    裏${r.rid}${corner}: ${r.iV.toFixed(1)}→${r.oV.toFixed(1)}% ${flow}`);
+            });
+        }
       }
     }
 
@@ -2325,7 +2414,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
     setError(null);setLoading(true);setStreaming(true);
     setOverviewText("");setHighlightText("");setConclusionText("");setCachedAt(null);
     setAnalysisLabel(label);
-    const ctx=buildAnalysisContext(activeDates,slot,ratingsCache,tplByDate);
+    const ctx=await buildAnalysisContext(activeDates,slot,ratingsCache,tplByDate);
     const slotLabel=slot==="morning"?"朝帯（5:30-8:30）":"夕方帯（15:30-19:00）";
     const periodLabel=mode==="daily"?`${activeDates[0]} ${slotLabel}`:`${label}`;
 
