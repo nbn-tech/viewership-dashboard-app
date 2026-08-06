@@ -2309,6 +2309,153 @@ function AnnotationResultModal({result,progName,onClose}){
 }
 
 // ============================================================
+// 番組別ページ: 特定番組(NBN)だけを選んで、選択日・前日・1週間前・1か月前の視聴率推移を
+// 「番組開始からの経過分」で正規化して重ね合わせ表示する
+// ============================================================
+
+// titleにキーワードが含まれるかで対象番組を判定する(EPGの番組名は日によって末尾のサブタイトルが変わるため部分一致)
+const PROGRAM_DEFS=[
+  {key:"dodesuka",label:"ドデスカ",match:t=>t.includes("ドデスカ")&&!t.includes("＋")&&!t.includes("+")},
+  {key:"dodesukaplus",label:"ドデスカ+",match:t=>t.includes("ドデスカ")&&(t.includes("＋")||t.includes("+"))},
+  {key:"choco",label:"チョコレートサムネット",match:t=>t.includes("チョコレートサムネット")},
+];
+const PROGRAM_COMPARE_OFFSETS=[
+  {label:"選択日",offset:0,color:"#0066cc"},
+  {label:"前日",offset:-1,color:"#16A34A"},
+  {label:"1週間前",offset:-7,color:"#EA580C"},
+  {label:"1か月前",offset:-30,color:"#9333EA"},
+];
+
+// 複数系列(選択日/前日/1週間前/1か月前)を「番組開始からの経過分」で重ね描きする折れ線グラフ
+function ProgramCompareChart({series}){
+  const cRef=useRef(null);
+  const[w,setW]=useState(900);
+  useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setW(e.contentRect.width);});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
+  const h=320,p={t:20,r:16,b:30,l:40};
+  const cW=Math.max(1,w-p.l-p.r),cH=h-p.t-p.b;
+  const available=series.filter(s=>s.points&&s.points.length);
+  const maxDur=Math.max(1,...available.map(s=>s.points[s.points.length-1].elapsed));
+  const maxVal=Math.max(5,...available.flatMap(s=>s.points.map(pt=>pt.v||0)))+1;
+  const xS=e=>p.l+(e/maxDur)*cW;
+  const yS=v=>p.t+cH-(v/maxVal)*cH;
+  const yT=[];for(let v=0;v<=maxVal;v+=Math.ceil(maxVal/5))yT.push(v);
+  const xT=[];for(let m=0;m<=maxDur;m+=Math.max(5,Math.round(maxDur/8/5)*5))xT.push(m);
+  return <div ref={cRef} style={{width:"100%",height:h}}>
+    <svg width={w} height={h}>
+      <rect x={0} y={0} width={w} height={h} fill="#FAFBFC" rx={8}/>
+      {yT.map(v=><g key={v}><line x1={p.l} x2={w-p.r} y1={yS(v)} y2={yS(v)} stroke="#E5E7EB" strokeDasharray="2,4"/><text x={p.l-6} y={yS(v)+4} fill="#9CA3AF" fontSize="10" textAnchor="end" fontFamily="monospace">{v}%</text></g>)}
+      {xT.map(m=><text key={m} x={xS(m)} y={h-8} fill="#9CA3AF" fontSize="9.5" textAnchor="middle" fontFamily="monospace">+{m}分</text>)}
+      {available.map(s=><path key={s.label} d={s.points.map((pt,i)=>`${i===0?"M":"L"}${xS(pt.elapsed)},${yS(pt.v||0)}`).join(" ")} fill="none" stroke={s.color} strokeWidth={s.offset===0?2.5:1.5} opacity={s.offset===0?1:0.75}/>)}
+    </svg>
+  </div>;
+}
+
+function ProgramTrackerPage(){
+  const[progKey,setProgKey]=useState(PROGRAM_DEFS[0].key);
+  const[refDate,setRefDate]=useState(GUIDE_DATE_MAX);
+  const progDef=PROGRAM_DEFS.find(p=>p.key===progKey);
+  const compareDates=useMemo(()=>PROGRAM_COMPARE_OFFSETS.map(c=>({...c,date:shiftDateStr(refDate,c.offset)})),[refDate]);
+  const datesKey=compareDates.map(c=>c.date).join(",");
+
+  const[epgCache,setEpgCache]=useState({});
+  const[ratingCache,setRatingCache]=useState({});
+  const[cornerCache,setCornerCache]=useState({});
+
+  useEffect(()=>{
+    compareDates.forEach(({date})=>{
+      if(!(date in epgCache)){
+        setEpgCache(prev=>({...prev,[date]:null}));
+        const yyyymmdd=date.replace(/-/g,'');
+        const isJson=parseInt(yyyymmdd)>=20260616;
+        fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/epg-all/bangumi_${yyyymmdd}.${isJson?'json':'csv'}`)
+          .then(r=>r.ok?(isJson?r.json():r.text()):Promise.reject())
+          .then(raw=>setEpgCache(prev=>({...prev,[date]:parseEpgTimeline(raw,isJson,date)})))
+          .catch(()=>setEpgCache(prev=>({...prev,[date]:[]})));
+      }
+      if(!(date in ratingCache)){
+        setRatingCache(prev=>({...prev,[date]:null}));
+        fetchFullDayRatingObjects(date).then(data=>setRatingCache(prev=>({...prev,[date]:data||[]}))).catch(()=>setRatingCache(prev=>({...prev,[date]:[]})));
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[datesKey]);
+  useEffect(()=>{
+    if(!(refDate in cornerCache)){
+      setCornerCache(prev=>({...prev,[refDate]:null}));
+      apiClient.annotationListByDate(refDate).then(r=>setCornerCache(prev=>({...prev,[refDate]:r}))).catch(()=>setCornerCache(prev=>({...prev,[refDate]:[]})));
+    }
+  },[refDate]);
+
+  // 各比較日について、その日のEPGから対象番組の実際の放送時間を探し、NBNの視聴率を
+  // 「番組開始からの経過分」に正規化したseries(points)にする。番組が無い日(週1回番組の平日等)は自然にnull
+  const series=useMemo(()=>compareDates.map(cd=>{
+    const progs=epgCache[cd.date];
+    const ratings=ratingCache[cd.date];
+    if(progs==null||ratings==null)return{...cd,loading:true,points:null,prog:null};
+    const dayMid=localMidnightAbsMin(cd.date);
+    const prog=progs.find(p=>p.stId==="NBN"&&progDef.match(p.title));
+    if(!prog)return{...cd,loading:false,points:null,prog:null};
+    const relStart=prog.startAbs-dayMid,relEnd=prog.endAbs-dayMid;
+    const points=ratings.filter(r=>r.minute>=relStart&&r.minute<relEnd).map(r=>({elapsed:r.minute-relStart,v:r.NBN}));
+    return{...cd,loading:false,points:points.length?points:null,prog};
+  }),[compareDates,epgCache,ratingCache,progKey]);
+
+  const refSeries=series[0];
+  const refCorners=useMemo(()=>{
+    if(!refSeries?.prog||!cornerCache[refDate])return[];
+    const dayMid=localMidnightAbsMin(refDate);
+    const sM=refSeries.prog.startAbs-dayMid,eM=refSeries.prog.endAbs-dayMid;
+    return(cornerCache[refDate]||[])
+      .filter(c=>c.stId==="NBN"&&c.startMin&&t2m(c.startMin)>=sM-2&&t2m(c.startMin)<eM+2)
+      .sort((a,b)=>t2m(a.startMin)-t2m(b.startMin));
+  },[refSeries,cornerCache,refDate]);
+
+  const anyLoading=series.some(s=>s.loading);
+
+  return <div style={{maxWidth:960,margin:"0 auto",padding:"20px 18px 40px"}}>
+    <div style={{marginBottom:14}}>
+      <h1 style={{fontSize:22,fontWeight:600,color:"#1d1d1f",letterSpacing:"-0.374px"}}>番組別</h1>
+      <p style={{fontSize:13,color:"#7a7a7a",marginTop:4,letterSpacing:"-0.2px"}}>特定番組のNBN視聴率推移を、選択日・前日・1週間前・1か月前で重ねて比較できます。</p>
+    </div>
+    <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",marginBottom:14}}>
+      <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
+        {PROGRAM_DEFS.map(pd=><button key={pd.key} onClick={()=>setProgKey(pd.key)} style={seg(progKey===pd.key)}>{pd.label}</button>)}
+      </div>
+      <CalendarPicker value={refDate} onChange={setRefDate} dates={DASHBOARD_DATES}/>
+    </div>
+    <div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:16,marginBottom:16}}>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:10}}>
+        {compareDates.map((cd,i)=>{
+          const s=series[i];
+          return <div key={cd.label} style={{display:"flex",alignItems:"center",gap:6,fontSize:11}}>
+            <span style={{width:10,height:2.5,background:cd.color,display:"inline-block",borderRadius:2}}/>
+            <span style={{color:"#374151",fontWeight:600}}>{cd.label}</span>
+            <span style={{color:"#9CA3AF",fontFamily:"monospace"}}>{cd.date}{s?.loading?"（読込中…）":!s?.points?"（番組なし）":""}</span>
+          </div>;
+        })}
+      </div>
+      {anyLoading&&!series.some(s=>s.points)
+        ?<div style={{padding:"60px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>読み込み中...</div>
+        :series.every(s=>!s.points)
+          ?<div style={{padding:"60px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>該当する放送・視聴率データがありません</div>
+          :<ProgramCompareChart series={series}/>}
+    </div>
+    {refSeries?.prog&&<div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:16}}>
+      <div style={{fontSize:13,fontWeight:600,color:"#1d1d1f",marginBottom:2}}>{refSeries.prog.title}</div>
+      <div style={{fontSize:11,color:"#9CA3AF",fontFamily:"monospace",marginBottom:10}}>{refDate} {m2t(refSeries.prog.startAbs-localMidnightAbsMin(refDate))}–{m2t(refSeries.prog.endAbs-localMidnightAbsMin(refDate))}</div>
+      {refCorners.length===0&&<div style={{padding:"20px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>この日の分析結果はありません</div>}
+      {refCorners.map((c,i)=><div key={i} style={{padding:"9px 0",borderTop:i>0?"1px solid #F3F4F6":"none"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
+          <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace"}}>{c.startMin}–{c.endMin}</span>
+          <span style={{fontSize:12.5,fontWeight:600,color:"#111827"}}>{c.title}</span>
+        </div>
+        {c.summary&&<div style={{fontSize:11.5,color:"#6B7280",lineHeight:1.6}}>{c.summary}</div>}
+      </div>)}
+    </div>}
+  </div>;
+}
+
+// ============================================================
 // Analysis Page
 // ============================================================
 
@@ -4477,7 +4624,7 @@ export default function App(){
     </header>
     <aside className="tvp-sidebar">
       <div className="tvp-sidebar-label">メニュー</div>
-      {[{id:"guide",l:"番組表"},{id:"dashboard",l:"視聴率ダッシュボード"},{id:"search",l:"番組・放送内容検索"},{id:"analysis",l:"AI分析"},{id:"download",l:"視聴率データダウンロード"}].map(p=><button key={p.id} className={`tvp-nav-button ${page===p.id?"is-active":""}`} onClick={()=>setPage(p.id)}>{p.l}</button>)}
+      {[{id:"guide",l:"番組表"},{id:"dashboard",l:"視聴率ダッシュボード"},{id:"programs",l:"番組別"},{id:"search",l:"番組・放送内容検索"},{id:"analysis",l:"AI分析"},{id:"download",l:"視聴率データダウンロード"}].map(p=><button key={p.id} className={`tvp-nav-button ${page===p.id?"is-active":""}`} onClick={()=>setPage(p.id)}>{p.l}</button>)}
       <div className="tvp-info-wrap">
         <button className="tvp-info-button" onClick={()=>setBannerOpen(o=>!o)}>
           <span style={{marginRight:6}}>ⓘ</span>データについて <span style={{float:"right"}}>{bannerOpen?"▲":"▼"}</span>
@@ -4494,6 +4641,13 @@ export default function App(){
       <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}`}</style>
       <NavBar/>
       <ProgramGuidePage metric={metric} weatherData={weatherData}/>
+    </div>;
+  }
+  if(page==="programs"){
+    return <div className="app-root" style={{width:"100%",minHeight:"100vh",background:"#f5f5f7",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif",color:"#111827"}}>
+      <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}`}</style>
+      <NavBar/>
+      <ProgramTrackerPage/>
     </div>;
   }
   if(page==="search"){
