@@ -1616,7 +1616,7 @@ const apiClient = {
 
   // 統括分析
   async generateOverview(periodLabel, ctx){
-    const prompt=`あなたは名古屋テレビ(NBN)の視聴率担当アナリストです。以下は在名7局の${periodLabel}の番組・コーナー別占拠率データです。NBN現場スタッフ向けの視聴率レポートを作成してください。\n\n【データの読み方(必ず守ること)】\n- 指標は占拠率(その時間帯に視聴中のテレビ全世帯のうち何%がその局を見ているか)\n- 「裏局↓マイナス(NBNへ流入)」= 視聴者がNBNに流れてきた\n- 「裏局↑プラス(NBNから流出)」= 視聴者がNBNから他局へ流れた\n\n${ctx}\n\n【出力形式(必ず守ること)】\n・■ で始まる行はセクション見出しとして使用\n・具体的な時刻・番組名・数値を必ず記載(例: 7:03 CTV「ZIP!」終了後に+1.4pt流入)\n・→ を使って流れや因果を表現\n\n以下の2セクションのみ作成してください(他のセクションは含めないこと):\n\n■ NBN各番組の動き\n(番組ごとに冒頭・中盤・終盤の流れ、ピーク・ボトムの時刻と数値、急上昇・急降下した箇所)\n\n■ 競合各局の動き\n(各局の主要番組の概況、NBNへの影響)`;
+    const prompt=`あなたは名古屋テレビ(NBN)の視聴率担当アナリストです。以下は在名7局の${periodLabel}の番組・コーナー別占拠率データです。NBN現場スタッフ向けの視聴率レポートを作成してください。\n\n【データの読み方(必ず守ること)】\n- 指標は占拠率(その時間帯に視聴中のテレビ全世帯のうち何%がその局を見ているか)\n- 「裏局↓マイナス(NBNへ流入)」= 視聴者がNBNに流れてきた\n- 「裏局↑プラス(NBNから流出)」= 視聴者がNBNから他局へ流れた\n\n${ctx}\n\n【出力形式(必ず守ること)】\n・■ で始まる行はセクション見出しとして使用\n・具体的な時刻・番組名・数値を必ず記載(例: 7:03 CTV「ZIP!」終了後に1.4pt流入)\n・pt(ポイント)は占拠率の変化幅(percentage point)を表す。流入・流出という言葉自体が向きを表すので、数値の前に+/-の符号は付けないこと\n・→ を使って流れや因果を表現\n\n以下の2セクションのみ作成してください(他のセクションは含めないこと):\n\n■ NBN各番組の動き\n(番組ごとに冒頭・中盤・終盤の流れ、ピーク・ボトムの時刻と数値、急上昇・急降下した箇所)\n\n■ 競合各局の動き\n(各局の主要番組の概況、NBNへの影響)`;
     if(API_CONFIG.useMock){
       const text=await _callClaudeDirect([{role:"user",content:prompt}],8000);
       return{prompt,text};
@@ -2954,7 +2954,7 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
           rivals
             .filter(r=>Math.abs(r.df)>=1.0)
             .forEach(r=>{
-              const flow=r.df<=-1.0?`↓${r.df.toFixed(1)}pt(NBNへ流入)`:`↑+${r.df.toFixed(1)}pt(NBNから流出)`;
+              const flow=r.df<=-1.0?`↓${Math.abs(r.df).toFixed(1)}pt(NBNへ流入)`:`↑${Math.abs(r.df).toFixed(1)}pt(NBNから流出)`;
               const corner=r.cornerTitle?`「${r.cornerTitle}」`:"";
               lines.push(`    裏${r.rid}${corner}: ${r.iV.toFixed(1)}→${r.oV.toFixed(1)}% ${flow}`);
             });
@@ -3217,9 +3217,9 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
       let txt=`【${sid}】${n}件 占拠率AVG${(s.sumAVG/n).toFixed(1)}% DIFF${(s.sumDIFF/n)>=0?"+":""}${(s.sumDIFF/n).toFixed(1)}pt`;
       const flowLines=Object.entries(s.rivalFlow).map(([rid,f])=>{
         const avgDF=f.sumDIFF/f.count;
-        const flow=avgDF<=-1.0?`裏${rid}↓${avgDF.toFixed(1)}pt【自局への流入】`:
-                   avgDF>=1.0?`裏${rid}↑+${avgDF.toFixed(1)}pt【自局からの流出】`:
-                   `裏${rid}±${avgDF.toFixed(1)}pt【ほぼ横ばい】`;
+        const flow=avgDF<=-1.0?`裏${rid}↓${Math.abs(avgDF).toFixed(1)}pt【自局への流入】`:
+                   avgDF>=1.0?`裏${rid}↑${Math.abs(avgDF).toFixed(1)}pt【自局からの流出】`:
+                   `裏${rid}±${Math.abs(avgDF).toFixed(1)}pt【ほぼ横ばい】`;
         const titles=f.titles.slice(0,2).join("・");
         return `  ${flow}（裏番組:${titles||"—"} IN${(f.sumIN/f.count).toFixed(1)}%→OUT${(f.sumOUT/f.count).toFixed(1)}%）`;
       });
@@ -3484,7 +3484,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
                     const rst=ST.find(st2=>st2.id===r.rid);
                     const isInflow=r.avgDF<=-1.0; // 裏が下がる(占拠率-1pt以上) = 自局へ流入の可能性
                     const isOutflow=r.avgDF>=1.0;  // 裏が上がる(占拠率+1pt以上) = 自局から流出の可能性
-                    const flowLabel=isInflow?`↓ ${r.avgDF.toFixed(1)}pt → 自局への流入か`:isOutflow?`↑ +${r.avgDF.toFixed(1)}pt → 自局から流出か`:`± ${r.avgDF.toFixed(1)}pt`;
+                    const flowLabel=isInflow?`↓ ${Math.abs(r.avgDF).toFixed(1)}pt → 自局への流入か`:isOutflow?`↑ ${Math.abs(r.avgDF).toFixed(1)}pt → 自局から流出か`:`± ${Math.abs(r.avgDF).toFixed(1)}pt`;
                     const flowColor=isInflow?"#16A34A":isOutflow?"#DC2626":"#9CA3AF";
                     const titleText=r.titles.slice(0,2).join("・");
                     return <div key={r.rid} style={{display:"flex",alignItems:"flex-start",gap:6,fontSize:9.5}}>
