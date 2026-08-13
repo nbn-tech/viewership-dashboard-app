@@ -2321,7 +2321,9 @@ function AnnotationResultModal({result,progName,onClose}){
 // 「ドデスカ」は日中の再放送特集(例:「ドデスカ！メ〜ロメロ！セレクション」)等、タイトルの
 // どこかに"ドデスカ"を含むだけの別番組が他にもあるため、includesではなくstartsWithで本編だけに絞る
 const PROGRAM_DEFS=[
-  {key:"dodesuka",label:"ドデスカ",match:t=>t.startsWith("ドデスカ！"),excludeSunday:true},
+  // domainStart/domainEndを指定すると、横軸をその番組の実際の放送時間(土曜のみ短い等)に合わせず
+  // 常に固定範囲で表示する。データが無い部分(土曜6:00-6:30等)は線が自然に途切れて見える
+  {key:"dodesuka",label:"ドデスカ",match:t=>t.startsWith("ドデスカ！"),excludeSunday:true,domainStart:360,domainEnd:480},
   {key:"dodesukaplus",label:"ドデスカ+",match:t=>t.startsWith("ドデスカ＋")||t.startsWith("ドデスカ+")},
   {key:"choco",label:"チョコレートサムネット",match:t=>t.includes("チョコレートサムネット")},
 ];
@@ -2335,7 +2337,7 @@ const PROGRAM_COMPARE_OFFSETS=[
 
 // 複数系列(選択日/前日/1週間前/4週間前)を実時刻の横軸で重ね描きする折れ線グラフ。
 // 横軸の範囲は選択日(基準系列)の実際の放送時間に合わせる(平日は6:00-8:00、土曜は放送されている時間のみ等)
-function ProgramCompareChart({series,domainStart,domainEnd}){
+function ProgramCompareChart({series,domainStart,domainEnd,selMin,onSelect}){
   const cRef=useRef(null);
   const[w,setW]=useState(900);
   useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setW(e.contentRect.width);});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
@@ -2352,19 +2354,65 @@ function ProgramCompareChart({series,domainStart,domainEnd}){
   const yT=[];for(let v=0;v<=maxVal;v+=Math.ceil(maxVal/5))yT.push(v);
   const tickStep=total<=30?5:total<=60?10:total<=120?15:30;
   const xT=[];for(let m=Math.ceil(domainStart/tickStep)*tickStep;m<=domainEnd;m+=tickStep)xT.push(m);
+  // ダッシュボードのグラフクリック→時刻選択と同様、クリックした位置に一番近い分を選択できるようにする
+  const handleClick=e=>{
+    if(!onSelect)return;
+    const rect=e.currentTarget.getBoundingClientRect();
+    const frac=(e.clientX-rect.left-p.l)/cW;
+    onSelect(Math.round(domainStart+Math.max(0,Math.min(1,frac))*total));
+  };
   return <div ref={cRef} style={{width:"100%",height:h}}>
-    <svg width={w} height={h}>
+    <svg width={w} height={h} onClick={handleClick} style={{cursor:onSelect?"crosshair":"default"}}>
       <rect x={0} y={0} width={w} height={h} fill="#FAFBFC" rx={8}/>
       {yT.map(v=><g key={v}><line x1={p.l} x2={w-p.r} y1={yS(v)} y2={yS(v)} stroke="#E5E7EB" strokeDasharray="2,4"/><text x={p.l-6} y={yS(v)+4} fill="#9CA3AF" fontSize="10" textAnchor="end" fontFamily="monospace">{v}%</text></g>)}
       {xT.map(m=><text key={m} x={xS(m)} y={h-8} fill="#9CA3AF" fontSize="9.5" textAnchor="middle" fontFamily="monospace">{m2t(m)}</text>)}
       {available.map(s=><path key={s.label} d={s.points.map((pt,i)=>`${i===0?"M":"L"}${xS(pt.minuteOfDay)},${yS(pt.v||0)}`).join(" ")} fill="none" stroke={s.color} strokeWidth={s.offset===0?2.5:1.5} opacity={s.offset===0?1:0.75}/>)}
+      {selMin!=null&&selMin>=domainStart&&selMin<=domainEnd&&<line x1={xS(selMin)} x2={xS(selMin)} y1={p.t} y2={p.t+cH} stroke="#1d1d1f" strokeWidth={1} strokeDasharray="3,3" pointerEvents="none"/>}
     </svg>
   </div>;
 }
 
-function ProgramTrackerPage({progKey}){
+// ドデスカ等の分析結果コーナーを、上のグラフと同じ実時刻の横軸で並べたミニタイムライン。
+// ダッシュボードの「放送内容タイムライン」の単局版に相当し、ブロックをクリックするとCornerModalで詳細を見られる
+function ProgramCornerTimeline({corners,domainStart,domainEnd,onOpenCorner}){
+  const total=Math.max(1,domainEnd-domainStart);
+  const tickStep=total<=30?5:total<=60?10:total<=120?15:30;
+  const ticks=[];for(let m=Math.ceil(domainStart/tickStep)*tickStep;m<=domainEnd;m+=tickStep)ticks.push(m);
+  return <div style={{border:"1px solid #e0e0e0",borderRadius:12,overflow:"hidden",marginBottom:16,background:"#fff"}}>
+    <div style={{display:"flex",alignItems:"center",gap:8,padding:"7px 12px",borderBottom:"1px solid #e0e0e0",background:"#FAFBFC"}}>
+      <span style={{fontSize:11.5,fontWeight:700,color:"#1d1d1f"}}>放送内容タイムライン</span>
+      <span style={{fontSize:9.5,color:"#9CA3AF",fontFamily:"monospace"}}>{m2t(domainStart)}–{m2t(domainEnd)}</span>
+    </div>
+    <div style={{position:"relative",height:22,borderBottom:"1px solid #F3F4F6"}}>
+      {ticks.map(m=>{const left=((m-domainStart)/total)*100;return <div key={m} style={{position:"absolute",left:`${left}%`,top:0,bottom:0,borderLeft:"1px solid #EEF0F2"}}>
+        <span style={{position:"absolute",top:5,left:4,fontSize:8.5,fontFamily:"monospace",color:"#9CA3AF"}}>{m2t(m)}</span>
+      </div>;})}
+    </div>
+    <div style={{position:"relative",height:58}}>
+      {ticks.map(m=>{const left=((m-domainStart)/total)*100;return <div key={`g-${m}`} style={{position:"absolute",left:`${left}%`,top:0,bottom:0,width:1,background:"#F3F4F6"}}/>;})}
+      {corners.length===0&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:"#D1D5DB"}}>この日の分析結果はありません</div>}
+      {corners.map((c,i)=>{
+        const s=Math.max(domainStart,t2m(c.startMin)),e=Math.min(domainEnd,t2m(c.endMin));
+        if(e<=s)return null;
+        const left=((s-domainStart)/total)*100,width=((e-s)/total)*100;
+        const sg=SEG[c.segment]||SEG.other;
+        return <button key={i} onClick={()=>onOpenCorner(i)} title={`${c.title} ${c.startMin}–${c.endMin}`}
+          style={{position:"absolute",left:`${left}%`,width:`${width}%`,top:4,bottom:4,minWidth:6,overflow:"hidden",border:`1px solid ${sg.c}55`,borderLeft:`3px solid ${sg.c}`,borderRadius:3,background:`${sg.c}14`,cursor:"pointer",padding:"3px 6px",textAlign:"left"}}
+          onMouseEnter={ev=>ev.currentTarget.style.background=`${sg.c}28`} onMouseLeave={ev=>ev.currentTarget.style.background=`${sg.c}14`}>
+          <div style={{fontSize:8.5,fontWeight:700,color:sg.c,fontFamily:"monospace"}}>{c.startMin}</div>
+          <div style={{fontSize:10,fontWeight:600,color:"#1d1d1f",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.title}</div>
+        </button>;
+      })}
+    </div>
+  </div>;
+}
+
+function ProgramTrackerPage({progKey,weatherData}){
   const[refDate,setRefDate]=useState(GUIDE_DATE_MAX);
   const progDef=PROGRAM_DEFS.find(p=>p.key===progKey);
+  // ダッシュボードのグラフクリック→選択時刻表示と同様の機能。選択中の時刻(実時刻分)を保持する
+  const[progSelMin,setProgSelMin]=useState(null);
+  const[cornerModal,setCornerModal]=useState(null); // {corner, idx}
   // 放送が無い曜日(例:ドデスカの日曜)は選択日から外す。選べる日付の一覧をカレンダーに渡すことで
   // 前後ボタン・カレンダーグリッドの両方で自動的にスキップされる
   const pickerDates=useMemo(()=>progDef.excludeSunday?DASHBOARD_DATES.filter(d=>new Date(d).getDay()!==0):DASHBOARD_DATES,[progDef]);
@@ -2373,6 +2421,7 @@ function ProgramTrackerPage({progKey}){
   },[progDef,refDate]);
   const compareDates=useMemo(()=>PROGRAM_COMPARE_OFFSETS.map(c=>({...c,date:shiftDateStr(refDate,c.offset)})),[refDate]);
   const datesKey=compareDates.map(c=>c.date).join(",");
+  useEffect(()=>{setProgSelMin(null);setCornerModal(null);},[refDate,progKey]);
 
   const[epgCache,setEpgCache]=useState({});
   const[ratingCache,setRatingCache]=useState({});
@@ -2418,9 +2467,9 @@ function ProgramTrackerPage({progKey}){
   }),[compareDates,epgCache,ratingCache,progKey]);
 
   const refSeries=series[0];
-  // 横軸の範囲は選択日(基準系列)の実際の放送時間に合わせる。読み込み中/番組なしの間は
-  // ドデスカの標準的な平日枠(6:00-8:00)を仮表示しておく
-  const domainStart=refSeries?.relStart??360,domainEnd=refSeries?.relEnd??480;
+  // 横軸の範囲: 番組定義にdomainStart/domainEndがあれば常にその固定範囲(例:ドデスカは土曜も6:00-8:00)。
+  // 無ければ選択日(基準系列)の実際の放送時間に合わせる。読み込み中/番組なしの間は6:00-8:00を仮表示
+  const domainStart=progDef.domainStart??refSeries?.relStart??360,domainEnd=progDef.domainEnd??refSeries?.relEnd??480;
   const refCorners=useMemo(()=>{
     if(!refSeries?.prog||!cornerCache[refDate])return[];
     const dayMid=localMidnightAbsMin(refDate);
@@ -2455,20 +2504,43 @@ function ProgramTrackerPage({progKey}){
         ?<div style={{padding:"60px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>読み込み中...</div>
         :series.every(s=>!s.points)
           ?<div style={{padding:"60px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>該当する放送・視聴率データがありません</div>
-          :<ProgramCompareChart series={series} domainStart={domainStart} domainEnd={domainEnd}/>}
+          :<ProgramCompareChart series={series} domainStart={domainStart} domainEnd={domainEnd} selMin={progSelMin} onSelect={setProgSelMin}/>}
+      {/* ダッシュボードの「選択時刻」表示と同様、グラフをクリックした時刻の各系列の値をまとめて見られるようにする */}
+      {progSelMin!=null&&<div style={{display:"flex",flexWrap:"wrap",gap:14,alignItems:"center",padding:"8px 12px",marginTop:10,background:"#f5f5f7",borderRadius:10}}>
+        <span style={{fontSize:11,color:"#7a7a7a",fontFamily:"monospace"}}>{m2t(progSelMin)} 時点</span>
+        {compareDates.map((cd,i)=>{
+          const s=series[i];
+          const pt=s?.points?.reduce((best,p)=>Math.abs(p.minuteOfDay-progSelMin)<Math.abs((best?.minuteOfDay??Infinity)-progSelMin)?p:best,null)??null;
+          return <span key={cd.label} style={{display:"flex",alignItems:"center",gap:5,fontSize:11.5}}>
+            <span style={{width:8,height:8,borderRadius:"50%",background:cd.color,display:"inline-block"}}/>
+            <span style={{color:"#374151",fontWeight:600}}>{cd.label}</span>
+            <span style={{color:"#111827",fontFamily:"monospace",fontWeight:700}}>{pt?`${pt.v.toFixed(1)}%`:"—"}</span>
+          </span>;
+        })}
+      </div>}
     </div>
-    {refSeries?.prog&&<div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:16}}>
-      <div style={{fontSize:13,fontWeight:600,color:"#1d1d1f",marginBottom:2}}>{refSeries.prog.title}</div>
-      <div style={{fontSize:11,color:"#9CA3AF",fontFamily:"monospace",marginBottom:10}}>{refDate} {m2t(refSeries.prog.startAbs-localMidnightAbsMin(refDate))}–{m2t(refSeries.prog.endAbs-localMidnightAbsMin(refDate))}</div>
-      {refCorners.length===0&&<div style={{padding:"20px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>この日の分析結果はありません</div>}
-      {refCorners.map((c,i)=><div key={i} style={{padding:"9px 0",borderTop:i>0?"1px solid #F3F4F6":"none"}}>
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
-          <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace"}}>{c.startMin}–{c.endMin}</span>
-          <span style={{fontSize:12.5,fontWeight:600,color:"#111827"}}>{c.title}</span>
-        </div>
-        {c.summary&&<div style={{fontSize:11.5,color:"#6B7280",lineHeight:1.6}}>{c.summary}</div>}
-      </div>)}
-    </div>}
+    {refSeries?.prog&&<>
+      <ProgramCornerTimeline corners={refCorners} domainStart={domainStart} domainEnd={domainEnd}
+        onOpenCorner={i=>setCornerModal({corner:refCorners[i],idx:i})}/>
+      <div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:16}}>
+        <div style={{fontSize:13,fontWeight:600,color:"#1d1d1f",marginBottom:2}}>{refSeries.prog.title}</div>
+        <div style={{fontSize:11,color:"#9CA3AF",fontFamily:"monospace",marginBottom:10}}>{refDate} {m2t(refSeries.prog.startAbs-localMidnightAbsMin(refDate))}–{m2t(refSeries.prog.endAbs-localMidnightAbsMin(refDate))}</div>
+        {refCorners.length===0&&<div style={{padding:"20px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>この日の分析結果はありません</div>}
+        {refCorners.map((c,i)=><div key={i} onClick={()=>setCornerModal({corner:c,idx:i})}
+          style={{padding:"9px 4px",borderTop:i>0?"1px solid #F3F4F6":"none",cursor:"pointer",borderRadius:6}}
+          onMouseEnter={e=>e.currentTarget.style.background="#FAFBFC"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
+            <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace"}}>{c.startMin}–{c.endMin}</span>
+            <span style={{fontSize:12.5,fontWeight:600,color:"#111827"}}>{c.title}</span>
+          </div>
+          {c.summary&&<div style={{fontSize:11.5,color:"#6B7280",lineHeight:1.6}}>{c.summary}</div>}
+        </div>)}
+      </div>
+    </>}
+    {cornerModal&&<CornerModal corner={cornerModal.corner} cache={{}} onClose={()=>setCornerModal(null)}
+      navList={refCorners} navIdx={cornerModal.idx}
+      onNavigate={c=>{const idx=refCorners.findIndex(x=>x.title===c.title&&x.startMin===c.startMin);setCornerModal({corner:c,idx});}}
+      weatherData={weatherData} guideMode={true} fullDayRatings={ratingCache[refDate]}/>}
   </div>;
 }
 
@@ -4677,7 +4749,7 @@ export default function App(){
     return <div className="app-root" style={{width:"100%",minHeight:"100vh",background:"#f5f5f7",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif",color:"#111827"}}>
       <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}`}</style>
       <NavBar/>
-      <ProgramTrackerPage progKey={progKey}/>
+      <ProgramTrackerPage progKey={progKey} weatherData={weatherData}/>
     </div>;
   }
   if(page==="search"){
