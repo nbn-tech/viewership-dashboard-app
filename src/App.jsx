@@ -2327,7 +2327,8 @@ const PROGRAM_DEFS=[
   {key:"dodesuka",label:"ドデスカ",match:t=>t.startsWith("ドデスカ！"),disallowDow:[0],domainStart:360,domainEnd:480},
   // ドデスカ+は平日(月〜金)のみ15:40-19:00放送。土日は放送が無いため選択不可にする
   {key:"dodesukaplus",label:"ドデスカ+",match:t=>t.startsWith("ドデスカ＋")||t.startsWith("ドデスカ+"),disallowDow:[0,6],domainStart:940,domainEnd:1140},
-  {key:"choco",label:"チョコレートサムネット",match:t=>t.includes("チョコレートサムネット")},
+  // チョコレートサムネットは日曜日のみ16:25-17:25放送。日曜以外は選択不可にする
+  {key:"choco",label:"チョコレートサムネット",match:t=>t.includes("チョコレートサムネット"),disallowDow:[1,2,3,4,5,6],domainStart:985,domainEnd:1045},
 ];
 // 「1か月前」は暦日で-30日すると曜日がズレる(30が7の倍数でない)ため、必ず同じ曜日になる-28日(4週間前)にする
 const PROGRAM_COMPARE_OFFSETS=[
