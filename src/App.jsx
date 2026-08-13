@@ -2327,10 +2327,18 @@ const PROGRAM_DEFS=[
   {key:"dodesuka",label:"ドデスカ",match:t=>t.startsWith("ドデスカ！"),disallowDow:[0],domainStart:360,domainEnd:480},
   // ドデスカ+は平日(月〜金)のみ15:40-19:00放送。土日は放送が無いため選択不可にする
   {key:"dodesukaplus",label:"ドデスカ+",match:t=>t.startsWith("ドデスカ＋")||t.startsWith("ドデスカ+"),disallowDow:[0,6],domainStart:940,domainEnd:1140},
-  // チョコレートサムネットは日曜日のみ16:25-17:25放送。日曜以外は選択不可にする
-  {key:"choco",label:"チョコレートサムネット",match:t=>t.includes("チョコレートサムネット"),disallowDow:[1,2,3,4,5,6],domainStart:985,domainEnd:1045},
+  // チョコレートサムネットは日曜日のみ16:25-17:25放送。日曜以外は選択不可にする。
+  // 週1回番組なので「前日」に放送が無く比較にならないため、代わりに2週間前を比較系列に入れる
+  {key:"choco",label:"チョコレートサムネット",match:t=>t.includes("チョコレートサムネット"),disallowDow:[1,2,3,4,5,6],domainStart:985,domainEnd:1045,
+    compareOffsets:[
+      {label:"選択日",offset:0,color:"#0066cc"},
+      {label:"1週間前",offset:-7,color:"#16A34A"},
+      {label:"2週間前",offset:-14,color:"#EA580C"},
+      {label:"4週間前",offset:-28,color:"#9333EA"},
+    ]},
 ];
-// 「1か月前」は暦日で-30日すると曜日がズレる(30が7の倍数でない)ため、必ず同じ曜日になる-28日(4週間前)にする
+// 「1か月前」は暦日で-30日すると曜日がズレる(30が7の倍数でない)ため、必ず同じ曜日になる-28日(4週間前)にする。
+// 番組ごとにcompareOffsetsで上書きしない限り、この標準セット(選択日/前日/1週間前/4週間前)を使う
 const PROGRAM_COMPARE_OFFSETS=[
   {label:"選択日",offset:0,color:"#0066cc"},
   {label:"前日",offset:-1,color:"#16A34A"},
@@ -2569,13 +2577,16 @@ function ProgramPanel({selMin,rows,onOpenCorner}){
 function ProgramTrackerPage({progKey,weatherData,metric}){
   const[refDate,setRefDate]=useState(GUIDE_DATE_MAX);
   const progDef=PROGRAM_DEFS.find(p=>p.key===progKey);
+  // 比較系列は番組ごとにcompareOffsetsで上書き可能(例:週1回番組は「前日」の代わりに「2週間前」)。
+  // 無指定なら標準の選択日/前日/1週間前/4週間前を使う
+  const compareOffsets=progDef.compareOffsets||PROGRAM_COMPARE_OFFSETS;
   // ダッシュボードのグラフクリック→選択時刻表示と同様の機能。選択中の時刻(実時刻分)を保持する
   const[progSelMin,setProgSelMin]=useState(null);
   const[cornerModal,setCornerModal]=useState(null); // {corner, idx, navList}
   // ダッシュボードと同様の属性(デモグラフィック)切り替え。この番組別ページ内だけで保持する
   const[demoMetric,setDemoMetric]=useState("ALL");
-  // ダッシュボードの局表示切り替え(表示設定)と同様、系列(選択日/前日/1週間前/4週間前)ごとに表示on/offできる
-  const[progSel,setProgSel]=useState(PROGRAM_COMPARE_OFFSETS.map(c=>c.offset));
+  // ダッシュボードの局表示切り替え(表示設定)と同様、系列(選択日/前日/1週間前/4週間前等)ごとに表示on/offできる
+  const[progSel,setProgSel]=useState(compareOffsets.map(c=>c.offset));
   const togProgSel=off=>setProgSel(p=>p.includes(off)?p.filter(x=>x!==off):[...p,off]);
   // 放送が無い曜日(例:ドデスカの日曜、ドデスカ+の土日)は選択日から外す。選べる日付の一覧をカレンダーに
   // 渡すことで前後ボタン・カレンダーグリッドの両方で自動的にスキップされる
@@ -2591,7 +2602,7 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
     while(disallow.includes(new Date(d).getDay()))d=shiftDateStr(d,-1);
     setRefDate(d);
   },[progDef,refDate]);
-  const compareDates=useMemo(()=>PROGRAM_COMPARE_OFFSETS.map(c=>({...c,date:shiftDateStr(refDate,c.offset)})),[refDate]);
+  const compareDates=useMemo(()=>compareOffsets.map(c=>({...c,date:shiftDateStr(refDate,c.offset)})),[refDate,compareOffsets]);
   const datesKey=compareDates.map(c=>c.date).join(",");
 
   const[epgCache,setEpgCache]=useState({});
@@ -2699,6 +2710,9 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
     setProgSelMin(null);setCornerModal(null);setActiveVideoDate(null);
     setVideoUrl(null);setNoVideoForTime(false);prevVideoUrlRef.current=null;
     setZoomLevel(0);setPanCenter(null);setHl(null);
+    // 番組を切り替えた時、前の番組の比較系列(オフセット)が残らないよう表示設定もリセットする
+    setProgSel(compareOffsets.map(c=>c.offset));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   },[refDate,progKey]);
 
   useEffect(()=>{
