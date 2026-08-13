@@ -804,8 +804,8 @@ async function fetchAndParseRatingXlsx(date,demo="ALL"){
 }
 
 // 指定日の終日(05:00〜翌05:00)視聴率を{time,minute,局:値}オブジェクト配列で取得する(番組表用)
-async function fetchFullDayRatingObjects(date){
-  const{allday}=await fetchAndParseRatingXlsx(date);
+async function fetchFullDayRatingObjects(date,demo="ALL"){
+  const{allday}=await fetchAndParseRatingXlsx(date,demo);
   return allday?rawRowsToRatingObjects(allday,300):null;
 }
 
@@ -2535,12 +2535,17 @@ function ProgramPanel({selMin,rows,onOpenCorner}){
   </div>;
 }
 
-function ProgramTrackerPage({progKey,weatherData}){
+function ProgramTrackerPage({progKey,weatherData,metric}){
   const[refDate,setRefDate]=useState(GUIDE_DATE_MAX);
   const progDef=PROGRAM_DEFS.find(p=>p.key===progKey);
   // ダッシュボードのグラフクリック→選択時刻表示と同様の機能。選択中の時刻(実時刻分)を保持する
   const[progSelMin,setProgSelMin]=useState(null);
   const[cornerModal,setCornerModal]=useState(null); // {corner, idx, navList}
+  // ダッシュボードと同様の属性(デモグラフィック)切り替え。この番組別ページ内だけで保持する
+  const[demoMetric,setDemoMetric]=useState("ALL");
+  // ダッシュボードの局表示切り替え(表示設定)と同様、系列(選択日/前日/1週間前/4週間前)ごとに表示on/offできる
+  const[progSel,setProgSel]=useState(PROGRAM_COMPARE_OFFSETS.map(c=>c.offset));
+  const togProgSel=off=>setProgSel(p=>p.includes(off)?p.filter(x=>x!==off):[...p,off]);
   // 放送が無い曜日(例:ドデスカの日曜)は選択日から外す。選べる日付の一覧をカレンダーに渡すことで
   // 前後ボタン・カレンダーグリッドの両方で自動的にスキップされる
   const pickerDates=useMemo(()=>progDef.excludeSunday?DASHBOARD_DATES.filter(d=>new Date(d).getDay()!==0):DASHBOARD_DATES,[progDef]);
@@ -2565,13 +2570,14 @@ function ProgramTrackerPage({progKey,weatherData}){
           .then(raw=>setEpgCache(prev=>({...prev,[date]:parseEpgTimeline(raw,isJson,date)})))
           .catch(()=>setEpgCache(prev=>({...prev,[date]:[]})));
       }
-      if(!(date in ratingCache)){
-        setRatingCache(prev=>({...prev,[date]:null}));
-        fetchFullDayRatingObjects(date).then(data=>setRatingCache(prev=>({...prev,[date]:data||[]}))).catch(()=>setRatingCache(prev=>({...prev,[date]:[]})));
+      const rKey=`${date}|${demoMetric}`;
+      if(!(rKey in ratingCache)){
+        setRatingCache(prev=>({...prev,[rKey]:null}));
+        fetchFullDayRatingObjects(date,demoMetric).then(data=>setRatingCache(prev=>({...prev,[rKey]:data||[]}))).catch(()=>setRatingCache(prev=>({...prev,[rKey]:[]})));
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[datesKey]);
+  },[datesKey,demoMetric]);
   // 分析結果(コーナー)は、選択日だけでなく4本の比較系列すべてぶん取得する(タイムラインを縦に並べて表示するため)
   useEffect(()=>{
     compareDates.forEach(({date})=>{
@@ -2586,15 +2592,21 @@ function ProgramTrackerPage({progKey,weatherData}){
   // 「番組開始からの経過分」に正規化したseries(points)にする。番組が無い日(週1回番組の平日等)は自然にnull
   const series=useMemo(()=>compareDates.map(cd=>{
     const progs=epgCache[cd.date];
-    const ratings=ratingCache[cd.date];
+    const ratings=ratingCache[`${cd.date}|${demoMetric}`];
     if(progs==null||ratings==null)return{...cd,loading:true,points:null,prog:null};
     const dayMid=localMidnightAbsMin(cd.date);
     const prog=progs.find(p=>p.stId==="NBN"&&progDef.match(p.title));
     if(!prog)return{...cd,loading:false,points:null,prog:null};
     const relStart=prog.startAbs-dayMid,relEnd=prog.endAbs-dayMid;
-    const points=ratings.filter(r=>r.minute>=relStart&&r.minute<relEnd).map(r=>({minuteOfDay:r.minute,v:r.NBN}));
+    // 占拠率表示の時は、その分の全局視聴率合計に対するNBNの割合に変換する
+    const valueOf=r=>{
+      if(metric!=="share")return r.NBN;
+      const t=ST.reduce((s,st)=>s+(r[st.id]||0),0);
+      return t>0?(r.NBN/t)*100:0;
+    };
+    const points=ratings.filter(r=>r.minute>=relStart&&r.minute<relEnd).map(r=>({minuteOfDay:r.minute,v:valueOf(r)}));
     return{...cd,loading:false,points:points.length?points:null,prog,relStart,relEnd};
-  }),[compareDates,epgCache,ratingCache,progKey]);
+  }),[compareDates,epgCache,ratingCache,progKey,demoMetric,metric]);
 
   const refSeries=series[0];
   // 横軸の範囲: 番組定義にdomainStart/domainEndがあれば常にその固定範囲(例:ドデスカは土曜も6:00-8:00)。
@@ -2739,21 +2751,27 @@ function ProgramTrackerPage({progKey,weatherData}){
           <p style={{fontSize:13,color:"#7a7a7a",marginTop:4,letterSpacing:"-0.2px"}}>NBN視聴率推移を、選択日・前日・1週間前・4週間前で重ねて比較できます。左のメニューから他の番組にも切り替えられます。</p>
         </div>
         <div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:"16px 0",marginBottom:16}}>
-          <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:10,padding:"0 16px"}}>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center",marginBottom:10,padding:"0 16px"}}>
+            <span style={{color:"#9CA3AF",fontSize:10,fontFamily:"monospace",marginRight:2}}>表示設定</span>
             {compareDates.map((cd,i)=>{
               const s=series[i];
-              return <div key={cd.label} style={{display:"flex",alignItems:"center",gap:6,fontSize:11}}>
-                <span style={{width:10,height:2.5,background:cd.color,display:"inline-block",borderRadius:2}}/>
-                <span style={{color:"#374151",fontWeight:600}}>{cd.label}</span>
-                <span style={{color:"#9CA3AF",fontFamily:"monospace"}}>{cd.date}{s?.loading?"（読込中…）":!s?.points?"（番組なし）":""}</span>
-              </div>;
+              const active=progSel.includes(cd.offset);
+              return <button key={cd.label} onClick={()=>togProgSel(cd.offset)}
+                style={{display:"flex",alignItems:"center",gap:6,padding:"3px 9px",borderRadius:16,border:`1.5px solid ${active?cd.color:"#E5E7EB"}`,background:active?`${cd.color}0D`:"transparent",color:active?cd.color:"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600}}>
+                <span style={{width:7,height:7,borderRadius:"50%",background:active?cd.color:"#D1D5DB"}}/>
+                {cd.label}
+                <span style={{fontSize:9.5,fontWeight:400,fontFamily:"monospace",opacity:0.75}}>{cd.date}{s?.loading?"（読込中…）":!s?.points?"（番組なし）":""}</span>
+              </button>;
             })}
+            <select value={demoMetric} onChange={e=>setDemoMetric(e.target.value)} style={{marginLeft:"auto",padding:"4px 10px",borderRadius:8,border:"1px solid #e0e0e0",background:"#fff",color:"#1d1d1f",fontSize:12,fontFamily:"inherit",cursor:"pointer"}}>
+              {DEMO_LIST.map(d=><option key={d.key} value={d.key}>{d.label}（{d.key}）</option>)}
+            </select>
           </div>
           {anyLoading&&!series.some(s=>s.points)
             ?<div style={{padding:"60px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>読み込み中...</div>
             :series.every(s=>!s.points)
               ?<div style={{padding:"60px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>該当する放送・視聴率データがありません</div>
-              :<ProgramCompareChart series={series} domainStart={winStart} domainEnd={winEnd} selMin={progSelMin}
+              :<ProgramCompareChart series={series.filter(s=>progSel.includes(s.offset))} domainStart={winStart} domainEnd={winEnd} selMin={progSelMin}
                   onSelect={m=>{setProgSelMin(m);setHl(null);}} onPan={handlePan} hl={hl}/>}
         </div>
         {refSeries?.prog&&<ProgramDateTimeline rows={rows} domainStart={winStart} domainEnd={winEnd} selMin={progSelMin} onBlockClick={handleBlockClick}/>}
@@ -2780,7 +2798,7 @@ function ProgramTrackerPage({progKey,weatherData}){
     {cornerModal&&<CornerModal corner={cornerModal.corner} cache={{}} onClose={()=>setCornerModal(null)}
       navList={cornerModal.navList||refCorners} navIdx={cornerModal.idx}
       onNavigate={c=>{const list=cornerModal.navList||refCorners;const idx=list.findIndex(x=>x.title===c.title&&x.startMin===c.startMin);setCornerModal({...cornerModal,corner:c,idx});}}
-      weatherData={weatherData} guideMode={true} fullDayRatings={ratingCache[cornerModal.corner.date]||ratingCache[refDate]}/>}
+      weatherData={weatherData} guideMode={true} fullDayRatings={ratingCache[`${cornerModal.corner.date}|${demoMetric}`]||ratingCache[`${refDate}|${demoMetric}`]}/>}
   </div>;
 }
 
@@ -4989,7 +5007,7 @@ export default function App(){
     return <div className="app-root" style={{width:"100%",minHeight:"100vh",background:"#f5f5f7",fontFamily:"SF Pro Display,system-ui,-apple-system,BlinkMacSystemFont,sans-serif",color:"#111827"}}>
       <style>{`@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:2px}`}</style>
       <NavBar/>
-      <ProgramTrackerPage progKey={progKey} weatherData={weatherData}/>
+      <ProgramTrackerPage progKey={progKey} weatherData={weatherData} metric={metric}/>
     </div>;
   }
   if(page==="search"){
