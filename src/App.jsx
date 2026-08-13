@@ -2323,8 +2323,10 @@ function AnnotationResultModal({result,progName,onClose}){
 const PROGRAM_DEFS=[
   // domainStart/domainEndを指定すると、横軸をその番組の実際の放送時間(土曜のみ短い等)に合わせず
   // 常に固定範囲で表示する。データが無い部分(土曜6:00-6:30等)は線が自然に途切れて見える
-  {key:"dodesuka",label:"ドデスカ",match:t=>t.startsWith("ドデスカ！"),excludeSunday:true,domainStart:360,domainEnd:480},
-  {key:"dodesukaplus",label:"ドデスカ+",match:t=>t.startsWith("ドデスカ＋")||t.startsWith("ドデスカ+")},
+  // disallowDowは選択日から除外する曜日(0=日〜6=土)。放送が無い曜日をカレンダーで選べないようにする
+  {key:"dodesuka",label:"ドデスカ",match:t=>t.startsWith("ドデスカ！"),disallowDow:[0],domainStart:360,domainEnd:480},
+  // ドデスカ+は平日(月〜金)のみ15:40-19:00放送。土日は放送が無いため選択不可にする
+  {key:"dodesukaplus",label:"ドデスカ+",match:t=>t.startsWith("ドデスカ＋")||t.startsWith("ドデスカ+"),disallowDow:[0,6],domainStart:940,domainEnd:1140},
   {key:"choco",label:"チョコレートサムネット",match:t=>t.includes("チョコレートサムネット")},
 ];
 // 「1か月前」は暦日で-30日すると曜日がズレる(30が7の倍数でない)ため、必ず同じ曜日になる-28日(4週間前)にする
@@ -2574,11 +2576,19 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
   // ダッシュボードの局表示切り替え(表示設定)と同様、系列(選択日/前日/1週間前/4週間前)ごとに表示on/offできる
   const[progSel,setProgSel]=useState(PROGRAM_COMPARE_OFFSETS.map(c=>c.offset));
   const togProgSel=off=>setProgSel(p=>p.includes(off)?p.filter(x=>x!==off):[...p,off]);
-  // 放送が無い曜日(例:ドデスカの日曜)は選択日から外す。選べる日付の一覧をカレンダーに渡すことで
-  // 前後ボタン・カレンダーグリッドの両方で自動的にスキップされる
-  const pickerDates=useMemo(()=>progDef.excludeSunday?DASHBOARD_DATES.filter(d=>new Date(d).getDay()!==0):DASHBOARD_DATES,[progDef]);
+  // 放送が無い曜日(例:ドデスカの日曜、ドデスカ+の土日)は選択日から外す。選べる日付の一覧をカレンダーに
+  // 渡すことで前後ボタン・カレンダーグリッドの両方で自動的にスキップされる
+  const pickerDates=useMemo(()=>{
+    const disallow=progDef.disallowDow||[];
+    return disallow.length?DASHBOARD_DATES.filter(d=>!disallow.includes(new Date(d).getDay())):DASHBOARD_DATES;
+  },[progDef]);
   useEffect(()=>{
-    if(progDef.excludeSunday&&new Date(refDate).getDay()===0)setRefDate(d=>shiftDateStr(d,-1));
+    const disallow=progDef.disallowDow||[];
+    if(!disallow.length||!disallow.includes(new Date(refDate).getDay()))return;
+    // 週末2日連続など、除外曜日が連続していても選べる日まで1日ずつ遡る
+    let d=refDate;
+    while(disallow.includes(new Date(d).getDay()))d=shiftDateStr(d,-1);
+    setRefDate(d);
   },[progDef,refDate]);
   const compareDates=useMemo(()=>PROGRAM_COMPARE_OFFSETS.map(c=>({...c,date:shiftDateStr(refDate,c.offset)})),[refDate]);
   const datesKey=compareDates.map(c=>c.date).join(",");
