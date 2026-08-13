@@ -2372,38 +2372,120 @@ function ProgramCompareChart({series,domainStart,domainEnd,selMin,onSelect}){
   </div>;
 }
 
-// ドデスカ等の分析結果コーナーを、上のグラフと同じ実時刻の横軸で並べたミニタイムライン。
-// ダッシュボードの「放送内容タイムライン」の単局版に相当し、ブロックをクリックするとCornerModalで詳細を見られる
-function ProgramCornerTimeline({corners,domainStart,domainEnd,onOpenCorner}){
+// ドデスカ等の分析結果を、選択日・前日・1週間前・4週間前を縦に並べて表示するタイムライン。
+// ダッシュボードの「放送内容タイムライン」(局を縦に並べる)と同じ見た目・操作感で、局の代わりに比較日を縦に並べる。
+// コーナーのブロックをクリックすると、そのコーナーの正確な秒数から動画再生できる(onBlockClickの第3引数)
+function ProgramDateTimeline({rows,domainStart,domainEnd,selMin,onBlockClick}){
+  const[expandedKey,setExpandedKey]=useState(null);
+  const[hoveredBlock,setHoveredBlock]=useState(null);
   const total=Math.max(1,domainEnd-domainStart);
   const tickStep=total<=30?5:total<=60?10:total<=120?15:30;
   const ticks=[];for(let m=Math.ceil(domainStart/tickStep)*tickStep;m<=domainEnd;m+=tickStep)ticks.push(m);
-  return <div style={{border:"1px solid #e0e0e0",borderRadius:12,overflow:"hidden",marginBottom:16,background:"#fff"}}>
-    <div style={{display:"flex",alignItems:"center",gap:8,padding:"7px 12px",borderBottom:"1px solid #e0e0e0",background:"#FAFBFC"}}>
-      <span style={{fontSize:11.5,fontWeight:700,color:"#1d1d1f"}}>放送内容タイムライン</span>
-      <span style={{fontSize:9.5,color:"#9CA3AF",fontFamily:"monospace"}}>{m2t(domainStart)}–{m2t(domainEnd)}</span>
+  const cursorLeft=selMin==null?-1:((selMin-domainStart)/total)*100;
+  return <div style={{margin:"0 0 16px",border:"1px solid #9fc5dd",background:"rgba(242,249,255,.92)",overflow:"hidden",borderRadius:8}}>
+    <div style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",borderBottom:"1px solid #9fc5dd",fontSize:12,fontWeight:700,color:"#173b5d"}}>
+      <span>放送内容タイムライン</span>
+      <span style={{fontSize:9.5,fontWeight:400,color:"#56778e",fontFamily:"monospace"}}>{m2t(domainStart)}–{m2t(domainEnd)}</span>
     </div>
-    <div style={{position:"relative",height:22,borderBottom:"1px solid #F3F4F6"}}>
-      {ticks.map(m=>{const left=((m-domainStart)/total)*100;return <div key={m} style={{position:"absolute",left:`${left}%`,top:0,bottom:0,borderLeft:"1px solid #EEF0F2"}}>
-        <span style={{position:"absolute",top:5,left:4,fontSize:8.5,fontFamily:"monospace",color:"#9CA3AF"}}>{m2t(m)}</span>
-      </div>;})}
-    </div>
-    <div style={{position:"relative",height:58}}>
-      {ticks.map(m=>{const left=((m-domainStart)/total)*100;return <div key={`g-${m}`} style={{position:"absolute",left:`${left}%`,top:0,bottom:0,width:1,background:"#F3F4F6"}}/>;})}
-      {corners.length===0&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:"#D1D5DB"}}>この日の分析結果はありません</div>}
-      {corners.map((c,i)=>{
-        const s=Math.max(domainStart,t2m(c.startMin)),e=Math.min(domainEnd,t2m(c.endMin));
-        if(e<=s)return null;
-        const left=((s-domainStart)/total)*100,width=((e-s)/total)*100;
-        const sg=SEG[c.segment]||SEG.other;
-        return <button key={i} onClick={()=>onOpenCorner(i)} title={`${c.title} ${c.startMin}–${c.endMin}`}
-          style={{position:"absolute",left:`${left}%`,width:`${width}%`,top:4,bottom:4,minWidth:6,overflow:"hidden",border:`1px solid ${sg.c}55`,borderLeft:`3px solid ${sg.c}`,borderRadius:3,background:`${sg.c}14`,cursor:"pointer",padding:"3px 6px",textAlign:"left"}}
-          onMouseEnter={ev=>ev.currentTarget.style.background=`${sg.c}28`} onMouseLeave={ev=>ev.currentTarget.style.background=`${sg.c}14`}>
-          <div style={{fontSize:8.5,fontWeight:700,color:sg.c,fontFamily:"monospace"}}>{c.startMin}</div>
-          <div style={{fontSize:10,fontWeight:600,color:"#1d1d1f",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.title}</div>
-        </button>;
+    <div style={{position:"relative"}}>
+      <div style={{display:"flex",height:26,borderBottom:"1px solid #9fc5dd",background:"#e5f2fa"}}>
+        <div style={{width:TIMELINE_LABEL_WIDTH,flexShrink:0,padding:"7px 8px",borderRight:"1px solid #9fc5dd",fontSize:8.5,fontWeight:700,color:"#56778e"}}>時刻</div>
+        <div style={{position:"relative",flex:1,minWidth:0}}>
+          {ticks.map(m=>{const left=((m-domainStart)/total)*100;return <div key={m} style={{position:"absolute",left:`${left}%`,top:0,bottom:0,borderLeft:"1px solid #b9d4e5"}}>
+            <span style={{position:"absolute",top:6,left:4,fontSize:8.5,fontFamily:"monospace",color:"#56778e",whiteSpace:"nowrap"}}>{m2t(m)}</span>
+          </div>;})}
+        </div>
+      </div>
+      {ticks.map(m=>{const left=((m-domainStart)/total)*100;return <div key={`grid-${m}`} style={{position:"absolute",top:26,bottom:0,left:`calc(${TIMELINE_LABEL_WIDTH}px + (100% - ${TIMELINE_LABEL_WIDTH}px) * ${left/100})`,width:1,background:"rgba(159,197,221,.48)",pointerEvents:"none",zIndex:2}}/>;})}
+      {rows.map((row,ri)=>{
+        const hasProg=row.relStart!=null&&row.relEnd!=null;
+        return <div key={row.label}>
+          <div style={{display:"flex",height:56,borderBottom:"1px solid #b9d4e5"}}>
+            <div style={{width:TIMELINE_LABEL_WIDTH,flexShrink:0,padding:"7px 8px",background:"#e5f2fa",color:row.color,fontSize:10,fontWeight:700,borderRight:"1px solid #9fc5dd"}}>
+              <div>{row.label}</div>
+              <div style={{fontSize:8,fontWeight:400,color:"#56778e",fontFamily:"monospace",marginTop:2}}>{row.date}</div>
+            </div>
+            <div style={{position:"relative",flex:1,minWidth:0}}
+              onClick={e=>{if(!hasProg)return;const r=e.currentTarget.getBoundingClientRect();const m=Math.round(domainStart+Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*total);onBlockClick(m,row,null);}}>
+              {row.loading&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:"#9fb3c4"}}>読み込み中…</div>}
+              {!row.loading&&!hasProg&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:"#9fb3c4"}}>この日は放送なし</div>}
+              {hasProg&&<div style={{position:"absolute",left:`${((Math.max(domainStart,row.relStart)-domainStart)/total)*100}%`,width:`${((Math.min(domainEnd,row.relEnd)-Math.max(domainStart,row.relStart))/total)*100}%`,top:4,bottom:4,background:"#9fc5dd28",border:"1px solid #9fc5dd55",borderRadius:2,pointerEvents:"none"}}/>}
+              {hasProg&&(row.corners||[]).map((c,ci)=>{
+                const s=Math.max(domainStart,t2m(c.startMin)),e=Math.min(domainEnd,t2m(c.endMin));
+                if(e<=s)return null;
+                const left=((s-domainStart)/total)*100,width=((e-s)/total)*100;
+                const sg=SEG[c.segment]||SEG.other;
+                const blockKey=`${ri}-${ci}`;
+                const isHovered=hoveredBlock===blockKey;
+                return <button key={blockKey} title={`${c.title} ${c.startMin}–${c.endMin}`}
+                  onClick={ev=>{ev.stopPropagation();const m=t2m(c.startMin);const exactSeek=(c.object_key!=null&&c.start_sec!=null)?{objectKey:c.object_key,startSec:c.start_sec}:null;onBlockClick(m,row,exactSeek);setExpandedKey(prev=>prev===blockKey?null:blockKey);}}
+                  onMouseEnter={()=>setHoveredBlock(blockKey)} onMouseLeave={()=>setHoveredBlock(null)}
+                  style={{position:"absolute",left:`${left}%`,width:`${width}%`,top:6,bottom:6,minWidth:8,overflow:"hidden",border:`1px solid ${isHovered?sg.c:"rgba(255,255,255,.78)"}`,borderRadius:2,background:isHovered?sg.c:`${sg.c}30`,color:isHovered?"#fff":sg.c,cursor:"pointer",padding:"3px 6px",textAlign:"left",zIndex:isHovered?4:1,boxShadow:isHovered?`0 0 0 1px ${sg.c},0 2px 6px rgba(0,0,0,.16)`:"none",transition:"background .12s ease,color .12s ease"}}>
+                  <span style={{display:"block",fontSize:9.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.title}</span>
+                  <span style={{fontSize:8,opacity:.85,fontFamily:"monospace"}}>{c.startMin}</span>
+                </button>;
+              })}
+            </div>
+          </div>
+          {expandedKey&&expandedKey.split("-")[0]===String(ri)&&(()=>{
+            const ci=parseInt(expandedKey.split("-")[1]);
+            const c=(row.corners||[])[ci];
+            if(!c)return null;
+            const sg=SEG[c.segment]||SEG.other;
+            return <div style={{display:"flex",borderBottom:"1px solid #b9d4e5",background:"#fff"}}>
+              <div style={{width:TIMELINE_LABEL_WIDTH,flexShrink:0,borderRight:"1px solid #9fc5dd",background:"#e5f2fa"}}/>
+              <div style={{flex:1,padding:"10px 14px",color:"#173b5d"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
+                  <span style={{fontSize:11.5,fontWeight:700,color:sg.c}}>{c.title}</span>
+                  <span style={{fontSize:9.5,fontFamily:"monospace",color:"#56778e"}}>{c.startMin}–{c.endMin}</span>
+                  <button onClick={()=>setExpandedKey(null)} style={{marginLeft:"auto",border:0,background:"transparent",color:"#789",cursor:"pointer",fontSize:14}}>×</button>
+                </div>
+                <div style={{fontSize:11,lineHeight:1.7,whiteSpace:"pre-wrap"}}>{c.summary||"このコーナーの内容データはありません。"}</div>
+                {c.tags?.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:7}}>{c.tags.map(tag=><span key={tag} style={{padding:"1px 6px",border:"1px solid #c9dce8",borderRadius:3,fontSize:9,color:"#56778e"}}>#{tag}</span>)}</div>}
+              </div>
+            </div>;
+          })()}
+        </div>;
       })}
+      {cursorLeft>=0&&cursorLeft<=100&&<div style={{position:"absolute",top:0,bottom:0,left:`calc(${TIMELINE_LABEL_WIDTH}px + (100% - ${TIMELINE_LABEL_WIDTH}px) * ${cursorLeft/100})`,width:1,background:"#ef4444",pointerEvents:"none",zIndex:5}}/>}
     </div>
+  </div>;
+}
+
+// ダッシュボードの右パネル(Panel)相当。選択時刻における各比較日の放送内容を縦に並べて表示する
+function ProgramPanel({selMin,rows,onOpenCorner}){
+  const[exp,setExp]=useState(null);
+  if(selMin==null)return <div style={{display:"flex",alignItems:"center",justifyContent:"center",flex:1,color:"#9CA3AF",fontSize:12.5,textAlign:"center",padding:24,lineHeight:1.8}}>グラフまたはタイムラインを<br/>クリックすると<br/>各日の放送内容を表示します</div>;
+  const items=rows.map((row,ri)=>{
+    const corner=(row.corners||[]).find(c=>t2m(c.startMin)<=selMin&&selMin<t2m(c.endMin||c.startMin));
+    return{row,ri,corner};
+  });
+  return <div style={{overflowY:"auto",flex:1,padding:"0 2px"}}>
+    <div style={{position:"sticky",top:0,background:"#fff",padding:"10px 8px 8px",borderBottom:"1px solid #F3F4F6",zIndex:2}}>
+      <span style={{color:"#111827",fontSize:13,fontWeight:700}}>選択時刻の放送内容</span>
+    </div>
+    {items.map(({row,ri,corner})=>{
+      const cid=`${ri}-${corner?.title}`;const isE=exp===cid;
+      const sg=corner?SEG[corner.segment]:null;
+      return <div key={row.label} style={{borderBottom:"1px solid #F3F4F6",padding:"9px 8px",background:corner?.segment==="cm"?"#FAFAFA":"#fff"}}>
+        <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:5}}>
+          <span style={{width:8,height:8,borderRadius:"50%",background:row.color,display:"inline-block",flexShrink:0}}/>
+          <span style={{color:"#374151",fontSize:11,fontWeight:600}}>{row.label}</span>
+          <span style={{color:"#9CA3AF",fontSize:9.5,fontFamily:"monospace"}}>{row.date}</span>
+        </div>
+        {row.relStart==null&&<div style={{color:"#D1D5DB",fontSize:10.5}}>放送なし</div>}
+        {row.relStart!=null&&!corner&&<div style={{color:"#D1D5DB",fontSize:10.5}}>この時刻に分析結果はありません</div>}
+        {corner&&<div onClick={()=>setExp(isE?null:cid)} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
+          {sg&&<span style={{background:sg.c,color:"#fff",fontSize:9,fontWeight:700,padding:"1.5px 6px",borderRadius:3,flexShrink:0}}>{sg.lb}</span>}
+          <span style={{color:isE?row.color:"#111827",fontSize:12,fontWeight:600}}>{corner.title}</span>
+          <span style={{fontSize:9,marginLeft:"auto",opacity:0.4}}>{isE?"▲":"▼"}</span>
+        </div>}
+        {isE&&corner&&<div style={{marginTop:6}}>
+          {corner.summary&&<div style={{padding:"7px 9px",background:"#F9FAFB",borderRadius:5,borderLeft:`2px solid ${row.color}`,color:"#4B5563",fontSize:11,lineHeight:1.65,marginBottom:6}}>{corner.summary}</div>}
+          <button onClick={()=>onOpenCorner(row,(row.corners||[]).indexOf(corner))} style={{fontSize:10.5,padding:"4px 10px",borderRadius:6,border:"1px solid #0066cc",background:"#fff",color:"#0066cc",cursor:"pointer"}}>詳細を見る</button>
+        </div>}
+      </div>;
+    })}
   </div>;
 }
 
@@ -2412,7 +2494,7 @@ function ProgramTrackerPage({progKey,weatherData}){
   const progDef=PROGRAM_DEFS.find(p=>p.key===progKey);
   // ダッシュボードのグラフクリック→選択時刻表示と同様の機能。選択中の時刻(実時刻分)を保持する
   const[progSelMin,setProgSelMin]=useState(null);
-  const[cornerModal,setCornerModal]=useState(null); // {corner, idx}
+  const[cornerModal,setCornerModal]=useState(null); // {corner, idx, navList}
   // 放送が無い曜日(例:ドデスカの日曜)は選択日から外す。選べる日付の一覧をカレンダーに渡すことで
   // 前後ボタン・カレンダーグリッドの両方で自動的にスキップされる
   const pickerDates=useMemo(()=>progDef.excludeSunday?DASHBOARD_DATES.filter(d=>new Date(d).getDay()!==0):DASHBOARD_DATES,[progDef]);
@@ -2421,7 +2503,6 @@ function ProgramTrackerPage({progKey,weatherData}){
   },[progDef,refDate]);
   const compareDates=useMemo(()=>PROGRAM_COMPARE_OFFSETS.map(c=>({...c,date:shiftDateStr(refDate,c.offset)})),[refDate]);
   const datesKey=compareDates.map(c=>c.date).join(",");
-  useEffect(()=>{setProgSelMin(null);setCornerModal(null);},[refDate,progKey]);
 
   const[epgCache,setEpgCache]=useState({});
   const[ratingCache,setRatingCache]=useState({});
@@ -2445,12 +2526,15 @@ function ProgramTrackerPage({progKey,weatherData}){
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[datesKey]);
+  // 分析結果(コーナー)は、選択日だけでなく4本の比較系列すべてぶん取得する(タイムラインを縦に並べて表示するため)
   useEffect(()=>{
-    if(!(refDate in cornerCache)){
-      setCornerCache(prev=>({...prev,[refDate]:null}));
-      apiClient.annotationListByDate(refDate).then(r=>setCornerCache(prev=>({...prev,[refDate]:r}))).catch(()=>setCornerCache(prev=>({...prev,[refDate]:[]})));
-    }
-  },[refDate]);
+    compareDates.forEach(({date})=>{
+      if(date in cornerCache)return;
+      setCornerCache(prev=>({...prev,[date]:null}));
+      apiClient.annotationListByDate(date).then(r=>setCornerCache(prev=>({...prev,[date]:r}))).catch(()=>setCornerCache(prev=>({...prev,[date]:[]})));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[datesKey]);
 
   // 各比較日について、その日のEPGから対象番組の実際の放送時間を探し、NBNの視聴率を
   // 「番組開始からの経過分」に正規化したseries(points)にする。番組が無い日(週1回番組の平日等)は自然にnull
@@ -2470,77 +2554,172 @@ function ProgramTrackerPage({progKey,weatherData}){
   // 横軸の範囲: 番組定義にdomainStart/domainEndがあれば常にその固定範囲(例:ドデスカは土曜も6:00-8:00)。
   // 無ければ選択日(基準系列)の実際の放送時間に合わせる。読み込み中/番組なしの間は6:00-8:00を仮表示
   const domainStart=progDef.domainStart??refSeries?.relStart??360,domainEnd=progDef.domainEnd??refSeries?.relEnd??480;
-  const refCorners=useMemo(()=>{
-    if(!refSeries?.prog||!cornerCache[refDate])return[];
-    const dayMid=localMidnightAbsMin(refDate);
-    const sM=refSeries.prog.startAbs-dayMid,eM=refSeries.prog.endAbs-dayMid;
-    return(cornerCache[refDate]||[])
+
+  // ダッシュボードの「局を縦に並べる」タイムラインに相当する、比較日ぶんの行データ(コーナー一覧つき)
+  const rows=useMemo(()=>compareDates.map((cd,i)=>{
+    const s=series[i];
+    if(!s?.prog)return{...cd,loading:!!s?.loading,relStart:null,relEnd:null,corners:[]};
+    const dayMid=localMidnightAbsMin(cd.date);
+    const sM=s.prog.startAbs-dayMid,eM=s.prog.endAbs-dayMid;
+    const corners=(cornerCache[cd.date]||[])
       .filter(c=>c.stId==="NBN"&&c.startMin&&t2m(c.startMin)>=sM-2&&t2m(c.startMin)<eM+2)
       .sort((a,b)=>t2m(a.startMin)-t2m(b.startMin));
-  },[refSeries,cornerCache,refDate]);
+    return{...cd,loading:cornerCache[cd.date]==null,relStart:s.relStart,relEnd:s.relEnd,corners};
+  }),[compareDates,series,cornerCache]);
+  const refCorners=rows[0]?.corners||[];
 
   const anyLoading=series.some(s=>s.loading);
 
-  return <div style={{maxWidth:960,margin:"0 auto",padding:"20px 18px 40px"}}>
-    <div style={{marginBottom:14}}>
-      <h1 style={{fontSize:22,fontWeight:600,color:"#1d1d1f",letterSpacing:"-0.374px"}}>番組別 － {progDef.label}</h1>
-      <p style={{fontSize:13,color:"#7a7a7a",marginTop:4,letterSpacing:"-0.2px"}}>NBN視聴率推移を、選択日・前日・1週間前・1か月前で重ねて比較できます。左のメニューから他の番組にも切り替えられます。</p>
-    </div>
-    <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",marginBottom:14}}>
-      <CalendarPicker value={refDate} onChange={setRefDate} dates={pickerDates}/>
-    </div>
-    <div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:16,marginBottom:16}}>
-      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:10}}>
-        {compareDates.map((cd,i)=>{
-          const s=series[i];
-          return <div key={cd.label} style={{display:"flex",alignItems:"center",gap:6,fontSize:11}}>
-            <span style={{width:10,height:2.5,background:cd.color,display:"inline-block",borderRadius:2}}/>
-            <span style={{color:"#374151",fontWeight:600}}>{cd.label}</span>
-            <span style={{color:"#9CA3AF",fontFamily:"monospace"}}>{cd.date}{s?.loading?"（読込中…）":!s?.points?"（番組なし）":""}</span>
-          </div>;
-        })}
+  // ------- 放送動画の再生(タイムラインのコーナーをクリック→秒単位でシーク。局は常にNBN=ch6) -------
+  const videoRef=useRef(null);
+  const[videoUrl,setVideoUrl]=useState(null);
+  const[noVideoForTime,setNoVideoForTime]=useState(false);
+  const[activeVideoDate,setActiveVideoDate]=useState(null); // 現在動画パネルに表示している比較日
+  const prevVideoUrlRef=useRef(null);
+  const pendingSeekRef=useRef(null);
+  // コーナー(分析結果)ブロックを押した時だけ使う、正確な動画URL＋開始秒(分単位ではなく秒単位)
+  const cornerSeekRef=useRef(null);
+  const[videoFilesByDate,setVideoFilesByDate]=useState({}); // date -> files[]|null(読込中)|[](動画なし)
+
+  useEffect(()=>{
+    setProgSelMin(null);setCornerModal(null);setActiveVideoDate(null);
+    setVideoUrl(null);setNoVideoForTime(false);prevVideoUrlRef.current=null;
+  },[refDate,progKey]);
+
+  useEffect(()=>{
+    compareDates.forEach(({date})=>{
+      if(date==="2026-04-17"||date<"2026-06-17"){if(!(date in videoFilesByDate))setVideoFilesByDate(prev=>({...prev,[date]:[]}));return;}
+      if(date in videoFilesByDate)return;
+      setVideoFilesByDate(prev=>({...prev,[date]:null}));
+      const yyyymmdd=date.replace(/-/g,'');
+      fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/?prefix=movie/ch6/${yyyymmdd}/&list-type=2`)
+        .then(r=>r.ok?r.text():Promise.reject())
+        .then(text=>{
+          const xml=new DOMParser().parseFromString(text,'text/xml');
+          const files=[...xml.querySelectorAll('Contents')]
+            .map(c=>({key:c.querySelector('Key').textContent,size:parseInt(c.querySelector('Size').textContent)}))
+            .filter(f=>f.size>1000000)
+            .map(f=>{const fn=f.key.split('/').pop();const m=fn.match(/CH\d+_\d{8}_(\d{2})(\d{2})(\d{2})\.mp4$/);if(!m)return null;return{...f,fn,startSec:parseInt(m[1])*3600+parseInt(m[2])*60+parseInt(m[3])};})
+            .filter(Boolean).sort((a,b)=>a.startSec-b.startSec);
+          setVideoFilesByDate(prev=>({...prev,[date]:files}));
+        })
+        .catch(()=>setVideoFilesByDate(prev=>({...prev,[date]:[]})));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[datesKey]);
+
+  const handleBlockClick=(m,row,exactSeek)=>{
+    setProgSelMin(m);
+    setActiveVideoDate(row.date);
+    if(exactSeek){
+      const yyyymmdd=row.date.replace(/-/g,'');
+      cornerSeekRef.current={url:`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/movie/ch6/${yyyymmdd}/${exactSeek.objectKey}`,sec:exactSeek.startSec};
+    }else{
+      cornerSeekRef.current=null;
+    }
+  };
+
+  useEffect(()=>{
+    if(cornerSeekRef.current){
+      const{url,sec}=cornerSeekRef.current;
+      cornerSeekRef.current=null;
+      setNoVideoForTime(false);
+      if(url===prevVideoUrlRef.current){if(videoRef.current)videoRef.current.currentTime=sec;}
+      else{pendingSeekRef.current=sec;prevVideoUrlRef.current=url;setVideoUrl(url);}
+      return;
+    }
+    if(activeVideoDate==null||progSelMin==null)return;
+    const files=videoFilesByDate[activeVideoDate];
+    if(!files)return;
+    // progSelMinはその日の0時からの分(時刻そのもの)なので、そのまま秒に変換すればよい
+    const tgt=progSelMin*60;
+    let found=null;
+    for(let i=0;i<files.length;i++){
+      if(files[i].startSec<=tgt&&(i===files.length-1||files[i+1].startSec>tgt)){found=files[i];break;}
+    }
+    if(!found){setVideoUrl(null);setNoVideoForTime(true);return;}
+    setNoVideoForTime(false);
+    const offSec=tgt-found.startSec;
+    const newUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${found.key}`;
+    if(newUrl===prevVideoUrlRef.current){if(videoRef.current)videoRef.current.currentTime=offSec;}
+    else{pendingSeekRef.current=offSec;prevVideoUrlRef.current=newUrl;setVideoUrl(newUrl);}
+  },[progSelMin,activeVideoDate,videoFilesByDate]);
+
+  const activeRow=rows.find(r=>r.date===activeVideoDate);
+
+  return <div style={{width:"100%"}}>
+    <div style={{position:"sticky",top:"var(--topbar-height)",zIndex:90,boxShadow:"0 2px 8px rgba(23,59,93,.12)"}}>
+      <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",padding:"10px 18px",borderBottom:"1px solid #F3F4F6",background:"#fff"}}>
+        <CalendarPicker value={refDate} onChange={setRefDate} dates={pickerDates}/>
+        <WeatherBadge weather={weatherData?.[refDate]}/>
+        {progSelMin!==null&&<div style={{display:"flex",alignItems:"center",gap:6,padding:"3px 10px",borderRadius:8,background:"#f5f5f7"}}>
+          <span style={{fontSize:10,color:"#7a7a7a"}}>選択時刻</span>
+          <span style={{fontSize:11.5,color:"#0066cc",fontFamily:"monospace",fontWeight:600}}>{m2t(progSelMin)}</span>
+        </div>}
       </div>
-      {anyLoading&&!series.some(s=>s.points)
-        ?<div style={{padding:"60px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>読み込み中...</div>
-        :series.every(s=>!s.points)
-          ?<div style={{padding:"60px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>該当する放送・視聴率データがありません</div>
-          :<ProgramCompareChart series={series} domainStart={domainStart} domainEnd={domainEnd} selMin={progSelMin} onSelect={setProgSelMin}/>}
-      {/* ダッシュボードの「選択時刻」表示と同様、グラフをクリックした時刻の各系列の値をまとめて見られるようにする */}
-      {progSelMin!=null&&<div style={{display:"flex",flexWrap:"wrap",gap:14,alignItems:"center",padding:"8px 12px",marginTop:10,background:"#f5f5f7",borderRadius:10}}>
-        <span style={{fontSize:11,color:"#7a7a7a",fontFamily:"monospace"}}>{m2t(progSelMin)} 時点</span>
-        {compareDates.map((cd,i)=>{
-          const s=series[i];
-          const pt=s?.points?.reduce((best,p)=>Math.abs(p.minuteOfDay-progSelMin)<Math.abs((best?.minuteOfDay??Infinity)-progSelMin)?p:best,null)??null;
-          return <span key={cd.label} style={{display:"flex",alignItems:"center",gap:5,fontSize:11.5}}>
-            <span style={{width:8,height:8,borderRadius:"50%",background:cd.color,display:"inline-block"}}/>
-            <span style={{color:"#374151",fontWeight:600}}>{cd.label}</span>
-            <span style={{color:"#111827",fontFamily:"monospace",fontWeight:700}}>{pt?`${pt.v.toFixed(1)}%`:"—"}</span>
-          </span>;
-        })}
-      </div>}
     </div>
-    {refSeries?.prog&&<>
-      <ProgramCornerTimeline corners={refCorners} domainStart={domainStart} domainEnd={domainEnd}
-        onOpenCorner={i=>setCornerModal({corner:refCorners[i],idx:i})}/>
-      <div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:16}}>
-        <div style={{fontSize:13,fontWeight:600,color:"#1d1d1f",marginBottom:2}}>{refSeries.prog.title}</div>
-        <div style={{fontSize:11,color:"#9CA3AF",fontFamily:"monospace",marginBottom:10}}>{refDate} {m2t(refSeries.prog.startAbs-localMidnightAbsMin(refDate))}–{m2t(refSeries.prog.endAbs-localMidnightAbsMin(refDate))}</div>
-        {refCorners.length===0&&<div style={{padding:"20px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>この日の分析結果はありません</div>}
-        {refCorners.map((c,i)=><div key={i} onClick={()=>setCornerModal({corner:c,idx:i})}
-          style={{padding:"9px 4px",borderTop:i>0?"1px solid #F3F4F6":"none",cursor:"pointer",borderRadius:6}}
-          onMouseEnter={e=>e.currentTarget.style.background="#FAFBFC"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
-            <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace"}}>{c.startMin}–{c.endMin}</span>
-            <span style={{fontSize:12.5,fontWeight:600,color:"#111827"}}>{c.title}</span>
+    <div style={{display:"flex",alignItems:"flex-start",minHeight:"calc(100vh - 140px)"}}>
+      <div style={{flex:"1 1 0",display:"flex",flexDirection:"column",minWidth:0,overflow:"visible",padding:"16px 18px"}}>
+        <div style={{marginBottom:14}}>
+          <h1 style={{fontSize:22,fontWeight:600,color:"#1d1d1f",letterSpacing:"-0.374px"}}>番組別 － {progDef.label}</h1>
+          <p style={{fontSize:13,color:"#7a7a7a",marginTop:4,letterSpacing:"-0.2px"}}>NBN視聴率推移を、選択日・前日・1週間前・4週間前で重ねて比較できます。左のメニューから他の番組にも切り替えられます。</p>
+        </div>
+        <div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:16,marginBottom:16}}>
+          <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:10}}>
+            {compareDates.map((cd,i)=>{
+              const s=series[i];
+              return <div key={cd.label} style={{display:"flex",alignItems:"center",gap:6,fontSize:11}}>
+                <span style={{width:10,height:2.5,background:cd.color,display:"inline-block",borderRadius:2}}/>
+                <span style={{color:"#374151",fontWeight:600}}>{cd.label}</span>
+                <span style={{color:"#9CA3AF",fontFamily:"monospace"}}>{cd.date}{s?.loading?"（読込中…）":!s?.points?"（番組なし）":""}</span>
+              </div>;
+            })}
           </div>
-          {c.summary&&<div style={{fontSize:11.5,color:"#6B7280",lineHeight:1.6}}>{c.summary}</div>}
-        </div>)}
+          {anyLoading&&!series.some(s=>s.points)
+            ?<div style={{padding:"60px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>読み込み中...</div>
+            :series.every(s=>!s.points)
+              ?<div style={{padding:"60px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>該当する放送・視聴率データがありません</div>
+              :<ProgramCompareChart series={series} domainStart={domainStart} domainEnd={domainEnd} selMin={progSelMin} onSelect={setProgSelMin}/>}
+        </div>
+        {refSeries?.prog&&<ProgramDateTimeline rows={rows} domainStart={domainStart} domainEnd={domainEnd} selMin={progSelMin} onBlockClick={handleBlockClick}/>}
+        {refSeries?.prog&&<div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:16}}>
+          <div style={{fontSize:13,fontWeight:600,color:"#1d1d1f",marginBottom:2}}>{refSeries.prog.title}</div>
+          <div style={{fontSize:11,color:"#9CA3AF",fontFamily:"monospace",marginBottom:10}}>{refDate} {m2t(refSeries.prog.startAbs-localMidnightAbsMin(refDate))}–{m2t(refSeries.prog.endAbs-localMidnightAbsMin(refDate))}</div>
+          {refCorners.length===0&&<div style={{padding:"20px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>この日の分析結果はありません</div>}
+          {refCorners.map((c,i)=><div key={i} onClick={()=>setCornerModal({corner:c,idx:i,navList:refCorners})}
+            style={{padding:"9px 4px",borderTop:i>0?"1px solid #F3F4F6":"none",cursor:"pointer",borderRadius:6}}
+            onMouseEnter={e=>e.currentTarget.style.background="#FAFBFC"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
+              <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace"}}>{c.startMin}–{c.endMin}</span>
+              <span style={{fontSize:12.5,fontWeight:600,color:"#111827"}}>{c.title}</span>
+            </div>
+            {c.summary&&<div style={{fontSize:11.5,color:"#6B7280",lineHeight:1.6}}>{c.summary}</div>}
+          </div>)}
+        </div>}
       </div>
-    </>}
+      <div style={{width:"clamp(260px, 14.2857vw, 420px)",flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column",position:"sticky",top:"calc(var(--topbar-height) + 52px)",maxHeight:"calc(100vh - var(--topbar-height) - 52px)",overflowY:"auto"}}>
+        <div style={{padding:"10px 10px 12px",borderBottom:"1px solid #D7E5EE",background:"#F7FBFE"}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:7,flexWrap:"wrap"}}>
+            <span style={{fontSize:11,fontWeight:700,color:"#173B5D"}}>放送動画{activeRow?`（${activeRow.label}）`:""}</span>
+            {videoUrl&&progSelMin!==null&&<span style={{fontSize:9.5,color:"#6B7280",fontFamily:"monospace",marginLeft:"auto"}}>{m2t(progSelMin)} にシーク済み</span>}
+          </div>
+          {!activeVideoDate&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>タイムラインのコーナーをクリックすると動画を表示します</div>}
+          {activeVideoDate&&videoFilesByDate[activeVideoDate]===null&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>動画情報を読み込み中…</div>}
+          {activeVideoDate&&videoFilesByDate[activeVideoDate]?.length===0&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この日の動画データはありません</div>}
+          {activeVideoDate&&videoFilesByDate[activeVideoDate]?.length>0&&!videoUrl&&!noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>タイムラインの時刻をクリックすると動画を表示します</div>}
+          {noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この時刻の動画はありません</div>}
+          {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls
+            onLoadedMetadata={()=>{if(videoRef.current&&pendingSeekRef.current!==null){videoRef.current.currentTime=pendingSeekRef.current;pendingSeekRef.current=null;}}}
+            onEnded={()=>{const files=videoFilesByDate[activeVideoDate];if(!files)return;const idx=files.findIndex(f=>`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${f.key}`===videoUrl);if(idx===-1||idx===files.length-1)return;const nxt=files[idx+1];const nxtUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}}
+            style={{display:"block",width:"100%",aspectRatio:"16 / 9",objectFit:"contain",borderRadius:5,background:"#000"}}/>}
+        </div>
+        <ProgramPanel selMin={progSelMin} rows={rows} onOpenCorner={(row,idx)=>setCornerModal({corner:row.corners[idx],idx,navList:row.corners})}/>
+      </div>
+    </div>
     {cornerModal&&<CornerModal corner={cornerModal.corner} cache={{}} onClose={()=>setCornerModal(null)}
-      navList={refCorners} navIdx={cornerModal.idx}
-      onNavigate={c=>{const idx=refCorners.findIndex(x=>x.title===c.title&&x.startMin===c.startMin);setCornerModal({corner:c,idx});}}
-      weatherData={weatherData} guideMode={true} fullDayRatings={ratingCache[refDate]}/>}
+      navList={cornerModal.navList||refCorners} navIdx={cornerModal.idx}
+      onNavigate={c=>{const list=cornerModal.navList||refCorners;const idx=list.findIndex(x=>x.title===c.title&&x.startMin===c.startMin);setCornerModal({...cornerModal,corner:c,idx});}}
+      weatherData={weatherData} guideMode={true} fullDayRatings={ratingCache[cornerModal.corner.date]||ratingCache[refDate]}/>}
   </div>;
 }
 
