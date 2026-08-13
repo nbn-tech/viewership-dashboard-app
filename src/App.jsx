@@ -2453,7 +2453,7 @@ function ProgramDateTimeline({rows,domainStart,domainEnd,selMin,onBlockClick,onP
   return <div ref={wrapRef} style={{margin:"0 0 16px",border:"1px solid #9fc5dd",background:"rgba(242,249,255,.92)",overflow:"hidden",borderRadius:8}}>
     <div style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",borderBottom:"1px solid #9fc5dd",fontSize:12,fontWeight:700,color:"#173b5d"}}>
       <span>放送内容タイムライン</span>
-      <span style={{fontSize:9.5,fontWeight:400,color:"#56778e",fontFamily:"monospace"}}>{m2t(domainStart)}–{m2t(domainEnd)}</span>
+      <span style={{fontSize:9.5,fontWeight:400,color:"#56778e",fontFamily:"monospace"}}>{m2t(Math.round(domainStart))}–{m2t(Math.round(domainEnd))}</span>
     </div>
     {usedSegs.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",padding:"5px 10px",borderBottom:"1px solid #9fc5dd",background:"#e5f2fa"}}>
       {usedSegs.map(k=><div key={k} style={{display:"flex",alignItems:"center",gap:4}}>
