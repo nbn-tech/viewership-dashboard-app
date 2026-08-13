@@ -2337,13 +2337,18 @@ const PROGRAM_COMPARE_OFFSETS=[
 
 // 複数系列(選択日/前日/1週間前/4週間前)を実時刻の横軸で重ね描きする折れ線グラフ。
 // 横軸の範囲は選択日(基準系列)の実際の放送時間に合わせる(平日は6:00-8:00、土曜は放送されている時間のみ等)
-function ProgramCompareChart({series,domainStart,domainEnd,selMin,onSelect}){
-  const cRef=useRef(null);
+function ProgramCompareChart({series,domainStart,domainEnd,selMin,onSelect,onPan,hl}){
+  const ref=useRef(null),cRef=useRef(null);
   const[w,setW]=useState(900);
+  const[dragging,setDragging]=useState(false);
+  const dragX=useRef(0);
+  const hasDragged=useRef(false);
   useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setW(e.contentRect.width);});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
-  const h=320,p={t:20,r:16,b:30,l:40};
+  // 放送内容タイムラインの日付列と同じ幅を左に確保し、両者の時刻軸を同じX座標に揃える
+  const h=320,p={t:20,r:0,b:30,l:TIMELINE_LABEL_WIDTH};
   const cW=Math.max(1,w-p.l-p.r),cH=h-p.t-p.b;
   const total=Math.max(1,domainEnd-domainStart);
+  const mpp=total/cW;
   const available=series
     .filter(s=>s.points&&s.points.length)
     .map(s=>({...s,points:s.points.filter(pt=>pt.minuteOfDay>=domainStart&&pt.minuteOfDay<=domainEnd)}))
@@ -2354,19 +2359,60 @@ function ProgramCompareChart({series,domainStart,domainEnd,selMin,onSelect}){
   const yT=[];for(let v=0;v<=maxVal;v+=Math.ceil(maxVal/5))yT.push(v);
   const tickStep=total<=30?5:total<=60?10:total<=120?15:30;
   const xT=[];for(let m=Math.ceil(domainStart/tickStep)*tickStep;m<=domainEnd;m+=tickStep)xT.push(m);
+  // マウスホイール／トラックパッドの横スクロールでズームした範囲を左右にスクロールできるようにする
+  // (ReactのonWheelはpassiveで登録されpreventDefaultが効かないため、ネイティブリスナーで対応する)
+  useEffect(()=>{
+    const el=ref.current;
+    if(!el||!onPan)return;
+    const handler=ev=>{
+      const delta=Math.abs(ev.deltaX)>Math.abs(ev.deltaY)?ev.deltaX:ev.deltaY;
+      if(delta===0)return;
+      ev.preventDefault();
+      onPan(delta*mpp);
+    };
+    el.addEventListener('wheel',handler,{passive:false});
+    return()=>el.removeEventListener('wheel',handler);
+  },[onPan,mpp]);
   // ダッシュボードのグラフクリック→時刻選択と同様、クリックした位置に一番近い分を選択できるようにする
   const handleClick=e=>{
+    if(hasDragged.current){hasDragged.current=false;return;}
     if(!onSelect)return;
     const rect=e.currentTarget.getBoundingClientRect();
     const frac=(e.clientX-rect.left-p.l)/cW;
     onSelect(Math.round(domainStart+Math.max(0,Math.min(1,frac))*total));
   };
+  const hlColor=hl?.color||"#1d1d1f";
   return <div ref={cRef} style={{width:"100%",height:h}}>
-    <svg width={w} height={h} onClick={handleClick} style={{cursor:onSelect?"crosshair":"default"}}>
+    <svg ref={ref} width={w} height={h} onClick={handleClick}
+      style={{cursor:onPan?(dragging?"grabbing":"grab"):(onSelect?"crosshair":"default"),userSelect:"none"}}
+      onMouseDown={e=>{if(!onPan||e.button!==0)return;setDragging(true);dragX.current=e.clientX;hasDragged.current=false;e.preventDefault();}}
+      onMouseMove={e=>{if(dragging&&onPan){const dx=e.clientX-dragX.current;if(Math.abs(dx)>3)hasDragged.current=true;dragX.current=e.clientX;onPan(-dx*mpp);}}}
+      onMouseUp={()=>setDragging(false)}
+      onMouseLeave={()=>setDragging(false)}>
       <rect x={0} y={0} width={w} height={h} fill="#FAFBFC" rx={8}/>
       {yT.map(v=><g key={v}><line x1={p.l} x2={w-p.r} y1={yS(v)} y2={yS(v)} stroke="#E5E7EB" strokeDasharray="2,4"/><text x={p.l-6} y={yS(v)+4} fill="#9CA3AF" fontSize="10" textAnchor="end" fontFamily="monospace">{v}%</text></g>)}
       {xT.map(m=><text key={m} x={xS(m)} y={h-8} fill="#9CA3AF" fontSize="9.5" textAnchor="middle" fontFamily="monospace">{m2t(m)}</text>)}
-      {available.map(s=><path key={s.label} d={s.points.map((pt,i)=>`${i===0?"M":"L"}${xS(pt.minuteOfDay)},${yS(pt.v||0)}`).join(" ")} fill="none" stroke={s.color} strokeWidth={s.offset===0?2.5:1.5} opacity={s.offset===0?1:0.75}/>)}
+      {hl&&<rect x={xS(hl.start)} y={p.t} width={Math.max(xS(hl.end)-xS(hl.start),2)} height={cH} fill={hlColor} opacity={0.07} rx={2}/>}
+      {hl&&<line x1={xS(hl.start)} x2={xS(hl.start)} y1={p.t} y2={p.t+cH} stroke={hlColor} strokeWidth={1.5} opacity={0.4} strokeDasharray="4,3"/>}
+      {hl&&<line x1={xS(hl.end)} x2={xS(hl.end)} y1={p.t} y2={p.t+cH} stroke={hlColor} strokeWidth={1.5} opacity={0.4} strokeDasharray="4,3"/>}
+      {available.map(s=>{
+        const isH=hl?.date===s.date;
+        return <path key={s.label} d={s.points.map((pt,i)=>`${i===0?"M":"L"}${xS(pt.minuteOfDay)},${yS(pt.v||0)}`).join(" ")} fill="none" stroke={s.color}
+          strokeWidth={hl?(isH?1:0.8):(s.offset===0?2.5:1.5)} opacity={hl?(isH?0.3:0.15):(s.offset===0?1:0.75)}/>;
+      })}
+      {hl&&(()=>{
+        const s=available.find(x=>x.date===hl.date);
+        if(!s)return null;
+        const segPts=s.points.filter(pt=>pt.minuteOfDay>=hl.start&&pt.minuteOfDay<=hl.end);
+        if(!segPts.length)return null;
+        const d=segPts.map((pt,i)=>`${i===0?"M":"L"}${xS(pt.minuteOfDay)},${yS(pt.v||0)}`).join(" ");
+        const first=segPts[0],last=segPts[segPts.length-1];
+        return <>
+          <path d={d} fill="none" stroke={s.color} strokeWidth={3.5} strokeLinecap="round"/>
+          <circle cx={xS(first.minuteOfDay)} cy={yS(first.v||0)} r={4} fill={s.color} stroke="#fff" strokeWidth={2}/>
+          <circle cx={xS(last.minuteOfDay)} cy={yS(last.v||0)} r={4} fill={s.color} stroke="#fff" strokeWidth={2}/>
+        </>;
+      })()}
       {selMin!=null&&selMin>=domainStart&&selMin<=domainEnd&&<line x1={xS(selMin)} x2={xS(selMin)} y1={p.t} y2={p.t+cH} stroke="#1d1d1f" strokeWidth={1} strokeDasharray="3,3" pointerEvents="none"/>}
     </svg>
   </div>;
@@ -2406,7 +2452,7 @@ function ProgramDateTimeline({rows,domainStart,domainEnd,selMin,onBlockClick}){
               <div style={{fontSize:8,fontWeight:400,color:"#56778e",fontFamily:"monospace",marginTop:2}}>{row.date}</div>
             </div>
             <div style={{position:"relative",flex:1,minWidth:0}}
-              onClick={e=>{if(!hasProg)return;const r=e.currentTarget.getBoundingClientRect();const m=Math.round(domainStart+Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*total);onBlockClick(m,row,null);}}>
+              onClick={e=>{if(!hasProg)return;const r=e.currentTarget.getBoundingClientRect();const m=Math.round(domainStart+Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*total);onBlockClick(m,row,null,null);}}>
               {row.loading&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:"#9fb3c4"}}>読み込み中…</div>}
               {!row.loading&&!hasProg&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:"#9fb3c4"}}>この日は放送なし</div>}
               {hasProg&&<div style={{position:"absolute",left:`${((Math.max(domainStart,row.relStart)-domainStart)/total)*100}%`,width:`${((Math.min(domainEnd,row.relEnd)-Math.max(domainStart,row.relStart))/total)*100}%`,top:4,bottom:4,background:"#9fc5dd28",border:"1px solid #9fc5dd55",borderRadius:2,pointerEvents:"none"}}/>}
@@ -2418,7 +2464,7 @@ function ProgramDateTimeline({rows,domainStart,domainEnd,selMin,onBlockClick}){
                 const blockKey=`${ri}-${ci}`;
                 const isHovered=hoveredBlock===blockKey;
                 return <button key={blockKey} title={`${c.title} ${c.startMin}–${c.endMin}`}
-                  onClick={ev=>{ev.stopPropagation();const m=t2m(c.startMin);const exactSeek=(c.object_key!=null&&c.start_sec!=null)?{objectKey:c.object_key,startSec:c.start_sec}:null;onBlockClick(m,row,exactSeek);setExpandedKey(prev=>prev===blockKey?null:blockKey);}}
+                  onClick={ev=>{ev.stopPropagation();const m=t2m(c.startMin);const exactSeek=(c.object_key!=null&&c.start_sec!=null)?{objectKey:c.object_key,startSec:c.start_sec}:null;onBlockClick(m,row,exactSeek,c);setExpandedKey(prev=>prev===blockKey?null:blockKey);}}
                   onMouseEnter={()=>setHoveredBlock(blockKey)} onMouseLeave={()=>setHoveredBlock(null)}
                   style={{position:"absolute",left:`${left}%`,width:`${width}%`,top:6,bottom:6,minWidth:8,overflow:"hidden",border:`1px solid ${isHovered?sg.c:"rgba(255,255,255,.78)"}`,borderRadius:2,background:isHovered?sg.c:`${sg.c}30`,color:isHovered?"#fff":sg.c,cursor:"pointer",padding:"3px 6px",textAlign:"left",zIndex:isHovered?4:1,boxShadow:isHovered?`0 0 0 1px ${sg.c},0 2px 6px rgba(0,0,0,.16)`:"none",transition:"background .12s ease,color .12s ease"}}>
                   <span style={{display:"block",fontSize:9.5,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.title}</span>
@@ -2554,6 +2600,21 @@ function ProgramTrackerPage({progKey,weatherData}){
   // 横軸の範囲: 番組定義にdomainStart/domainEndがあれば常にその固定範囲(例:ドデスカは土曜も6:00-8:00)。
   // 無ければ選択日(基準系列)の実際の放送時間に合わせる。読み込み中/番組なしの間は6:00-8:00を仮表示
   const domainStart=progDef.domainStart??refSeries?.relStart??360,domainEnd=progDef.domainEnd??refSeries?.relEnd??480;
+  const domainWidth=domainEnd-domainStart;
+  // 視聴率ダッシュボードと同様のズーム機能。全体幅より狭いZOOM_WIDTHS(分)だけを候補にする
+  const effectiveZoomWidths=useMemo(()=>[domainWidth,...new Set(ZOOM_WIDTHS.filter(w=>w<domainWidth))].sort((a,b)=>b-a),[domainWidth]);
+  const[zoomLevel,setZoomLevel]=useState(0);
+  const[panCenter,setPanCenter]=useState(null);
+  const viewWidth=effectiveZoomWidths[Math.min(zoomLevel,effectiveZoomWidths.length-1)];
+  const minCenter=domainStart+viewWidth/2,maxCenter=domainEnd-viewWidth/2;
+  const defaultCenter=(domainStart+domainEnd)/2;
+  const effectiveCenter=Math.max(minCenter,Math.min(maxCenter,panCenter??defaultCenter));
+  const winStart=effectiveCenter-viewWidth/2,winEnd=effectiveCenter+viewWidth/2;
+  const handlePan=useCallback(deltaMin=>{
+    setPanCenter(c=>Math.max(minCenter,Math.min(maxCenter,(c??defaultCenter)+deltaMin)));
+  },[defaultCenter,minCenter,maxCenter]);
+  // クリックしたコーナーの推移だけを目立たせるハイライト({start,end,date,color})。ダッシュボードのhl相当
+  const[hl,setHl]=useState(null);
 
   // ダッシュボードの「局を縦に並べる」タイムラインに相当する、比較日ぶんの行データ(コーナー一覧つき)
   const rows=useMemo(()=>compareDates.map((cd,i)=>{
@@ -2584,6 +2645,7 @@ function ProgramTrackerPage({progKey,weatherData}){
   useEffect(()=>{
     setProgSelMin(null);setCornerModal(null);setActiveVideoDate(null);
     setVideoUrl(null);setNoVideoForTime(false);prevVideoUrlRef.current=null;
+    setZoomLevel(0);setPanCenter(null);setHl(null);
   },[refDate,progKey]);
 
   useEffect(()=>{
@@ -2608,7 +2670,7 @@ function ProgramTrackerPage({progKey,weatherData}){
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[datesKey]);
 
-  const handleBlockClick=(m,row,exactSeek)=>{
+  const handleBlockClick=(m,row,exactSeek,corner)=>{
     setProgSelMin(m);
     setActiveVideoDate(row.date);
     if(exactSeek){
@@ -2617,6 +2679,8 @@ function ProgramTrackerPage({progKey,weatherData}){
     }else{
       cornerSeekRef.current=null;
     }
+    // コーナーブロックをクリックした時だけ、そのコーナーの推移を目立たせる(視聴率ダッシュボードのhlと同じ挙動)
+    setHl(corner?{start:t2m(corner.startMin),end:t2m(corner.endMin),date:row.date,color:row.color}:null);
   };
 
   useEffect(()=>{
@@ -2657,6 +2721,16 @@ function ProgramTrackerPage({progKey,weatherData}){
           <span style={{fontSize:11.5,color:"#0066cc",fontFamily:"monospace",fontWeight:600}}>{m2t(progSelMin)}</span>
         </div>}
       </div>
+      <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 18px",background:"#e5f2fa",borderBottom:"1px solid #9fc5dd",flexWrap:"wrap"}}>
+        <span style={{fontSize:10.5,color:"#56778e",fontWeight:700}}>表示範囲 {m2t(Math.round(winStart))}–{m2t(Math.round(winEnd))}</span>
+        <button onClick={()=>handlePan(-viewWidth*.25)} disabled={winStart<=domainStart} style={{width:28,height:24,border:"1px solid #9fc5dd",background:"#fff",color:"#173b5d",cursor:winStart<=domainStart?"default":"pointer",opacity:winStart<=domainStart?.35:1}}>◀</button>
+        <button onClick={()=>handlePan(viewWidth*.25)} disabled={winEnd>=domainEnd} style={{width:28,height:24,border:"1px solid #9fc5dd",background:"#fff",color:"#173b5d",cursor:winEnd>=domainEnd?"default":"pointer",opacity:winEnd>=domainEnd?.35:1}}>▶</button>
+        <span style={{fontSize:10,color:"#56778e",marginLeft:"auto"}}>zoom</span>
+        <span style={{fontSize:15,color:"#56778e"}}>−</span>
+        <input className="tvp-zoom-range" type="range" min="0" max={effectiveZoomWidths.length-1} step="1" value={Math.min(zoomLevel,effectiveZoomWidths.length-1)} onChange={e=>setZoomLevel(Number(e.target.value))}/>
+        <span style={{fontSize:15,color:"#56778e"}}>＋</span>
+        <span style={{minWidth:42,fontSize:10,fontFamily:"monospace",color:"#173b5d"}}>{Math.round(viewWidth)}分</span>
+      </div>
     </div>
     <div style={{display:"flex",alignItems:"flex-start",minHeight:"calc(100vh - 140px)"}}>
       <div style={{flex:"1 1 0",display:"flex",flexDirection:"column",minWidth:0,overflow:"visible",padding:"16px 18px"}}>
@@ -2664,8 +2738,8 @@ function ProgramTrackerPage({progKey,weatherData}){
           <h1 style={{fontSize:22,fontWeight:600,color:"#1d1d1f",letterSpacing:"-0.374px"}}>番組別 － {progDef.label}</h1>
           <p style={{fontSize:13,color:"#7a7a7a",marginTop:4,letterSpacing:"-0.2px"}}>NBN視聴率推移を、選択日・前日・1週間前・4週間前で重ねて比較できます。左のメニューから他の番組にも切り替えられます。</p>
         </div>
-        <div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:16,marginBottom:16}}>
-          <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:10}}>
+        <div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:"16px 0",marginBottom:16}}>
+          <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:10,padding:"0 16px"}}>
             {compareDates.map((cd,i)=>{
               const s=series[i];
               return <div key={cd.label} style={{display:"flex",alignItems:"center",gap:6,fontSize:11}}>
@@ -2679,23 +2753,10 @@ function ProgramTrackerPage({progKey,weatherData}){
             ?<div style={{padding:"60px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>読み込み中...</div>
             :series.every(s=>!s.points)
               ?<div style={{padding:"60px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>該当する放送・視聴率データがありません</div>
-              :<ProgramCompareChart series={series} domainStart={domainStart} domainEnd={domainEnd} selMin={progSelMin} onSelect={setProgSelMin}/>}
+              :<ProgramCompareChart series={series} domainStart={winStart} domainEnd={winEnd} selMin={progSelMin}
+                  onSelect={m=>{setProgSelMin(m);setHl(null);}} onPan={handlePan} hl={hl}/>}
         </div>
-        {refSeries?.prog&&<ProgramDateTimeline rows={rows} domainStart={domainStart} domainEnd={domainEnd} selMin={progSelMin} onBlockClick={handleBlockClick}/>}
-        {refSeries?.prog&&<div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:16}}>
-          <div style={{fontSize:13,fontWeight:600,color:"#1d1d1f",marginBottom:2}}>{refSeries.prog.title}</div>
-          <div style={{fontSize:11,color:"#9CA3AF",fontFamily:"monospace",marginBottom:10}}>{refDate} {m2t(refSeries.prog.startAbs-localMidnightAbsMin(refDate))}–{m2t(refSeries.prog.endAbs-localMidnightAbsMin(refDate))}</div>
-          {refCorners.length===0&&<div style={{padding:"20px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>この日の分析結果はありません</div>}
-          {refCorners.map((c,i)=><div key={i} onClick={()=>setCornerModal({corner:c,idx:i,navList:refCorners})}
-            style={{padding:"9px 4px",borderTop:i>0?"1px solid #F3F4F6":"none",cursor:"pointer",borderRadius:6}}
-            onMouseEnter={e=>e.currentTarget.style.background="#FAFBFC"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
-              <span style={{fontSize:10,color:"#9CA3AF",fontFamily:"monospace"}}>{c.startMin}–{c.endMin}</span>
-              <span style={{fontSize:12.5,fontWeight:600,color:"#111827"}}>{c.title}</span>
-            </div>
-            {c.summary&&<div style={{fontSize:11.5,color:"#6B7280",lineHeight:1.6}}>{c.summary}</div>}
-          </div>)}
-        </div>}
+        {refSeries?.prog&&<ProgramDateTimeline rows={rows} domainStart={winStart} domainEnd={winEnd} selMin={progSelMin} onBlockClick={handleBlockClick}/>}
       </div>
       <div style={{width:"clamp(260px, 14.2857vw, 420px)",flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column",position:"sticky",top:"calc(var(--topbar-height) + 52px)",maxHeight:"calc(100vh - var(--topbar-height) - 52px)",overflowY:"auto"}}>
         <div style={{padding:"10px 10px 12px",borderBottom:"1px solid #D7E5EE",background:"#F7FBFE"}}>
