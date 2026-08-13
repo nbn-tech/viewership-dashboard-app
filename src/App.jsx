@@ -2428,11 +2428,23 @@ function ProgramDateTimeline({rows,domainStart,domainEnd,selMin,onBlockClick}){
   const tickStep=total<=30?5:total<=60?10:total<=120?15:30;
   const ticks=[];for(let m=Math.ceil(domainStart/tickStep)*tickStep;m<=domainEnd;m+=tickStep)ticks.push(m);
   const cursorLeft=selMin==null?-1:((selMin-domainStart)/total)*100;
+  // 実際に表示されているコーナーのジャンルだけを凡例に出す(スポーツ中継が無い番組でそのジャンルを出さない等)
+  const usedSegs=useMemo(()=>{
+    const s=new Set();
+    rows.forEach(r=>(r.corners||[]).forEach(c=>s.add((c.segment&&SEG[c.segment])?c.segment:"other")));
+    return SEG_ORDER.filter(k=>s.has(k));
+  },[rows]);
   return <div style={{margin:"0 0 16px",border:"1px solid #9fc5dd",background:"rgba(242,249,255,.92)",overflow:"hidden",borderRadius:8}}>
     <div style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",borderBottom:"1px solid #9fc5dd",fontSize:12,fontWeight:700,color:"#173b5d"}}>
       <span>放送内容タイムライン</span>
       <span style={{fontSize:9.5,fontWeight:400,color:"#56778e",fontFamily:"monospace"}}>{m2t(domainStart)}–{m2t(domainEnd)}</span>
     </div>
+    {usedSegs.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",padding:"5px 10px",borderBottom:"1px solid #9fc5dd",background:"#e5f2fa"}}>
+      {usedSegs.map(k=><div key={k} style={{display:"flex",alignItems:"center",gap:4}}>
+        <span style={{width:8,height:8,borderRadius:2,background:SEG[k].c,flexShrink:0}}/>
+        <span style={{fontSize:9,color:"#173b5d"}}>{SEG[k].lb}</span>
+      </div>)}
+    </div>}
     <div style={{position:"relative"}}>
       <div style={{display:"flex",height:26,borderBottom:"1px solid #9fc5dd",background:"#e5f2fa"}}>
         <div style={{width:TIMELINE_LABEL_WIDTH,flexShrink:0,padding:"7px 8px",borderRight:"1px solid #9fc5dd",fontSize:8.5,fontWeight:700,color:"#56778e"}}>時刻</div>
@@ -2634,8 +2646,10 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
     if(!s?.prog)return{...cd,loading:!!s?.loading,relStart:null,relEnd:null,corners:[]};
     const dayMid=localMidnightAbsMin(cd.date);
     const sM=s.prog.startAbs-dayMid,eM=s.prog.endAbs-dayMid;
+    // segmentが未設定のコーナーは、ダッシュボードのタイムラインと同様タイトル・タグから推定する(全部「その他」になるのを防ぐ)
     const corners=(cornerCache[cd.date]||[])
       .filter(c=>c.stId==="NBN"&&c.startMin&&t2m(c.startMin)>=sM-2&&t2m(c.startMin)<eM+2)
+      .map(c=>({...c,segment:(c.segment&&SEG[c.segment])?c.segment:classifySegment(c.title,c.tags||[])}))
       .sort((a,b)=>t2m(a.startMin)-t2m(b.startMin));
     return{...cd,loading:cornerCache[cd.date]==null,relStart:s.relStart,relEnd:s.relEnd,corners};
   }),[compareDates,series,cornerCache]);
