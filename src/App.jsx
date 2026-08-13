@@ -2421,9 +2421,10 @@ function ProgramCompareChart({series,domainStart,domainEnd,selMin,onSelect,onPan
 // ドデスカ等の分析結果を、選択日・前日・1週間前・4週間前を縦に並べて表示するタイムライン。
 // ダッシュボードの「放送内容タイムライン」(局を縦に並べる)と同じ見た目・操作感で、局の代わりに比較日を縦に並べる。
 // コーナーのブロックをクリックすると、そのコーナーの正確な秒数から動画再生できる(onBlockClickの第3引数)
-function ProgramDateTimeline({rows,domainStart,domainEnd,selMin,onBlockClick}){
+function ProgramDateTimeline({rows,domainStart,domainEnd,selMin,onBlockClick,onPan}){
   const[expandedKey,setExpandedKey]=useState(null);
   const[hoveredBlock,setHoveredBlock]=useState(null);
+  const wrapRef=useRef(null);
   const total=Math.max(1,domainEnd-domainStart);
   const tickStep=total<=30?5:total<=60?10:total<=120?15:30;
   const ticks=[];for(let m=Math.ceil(domainStart/tickStep)*tickStep;m<=domainEnd;m+=tickStep)ticks.push(m);
@@ -2434,7 +2435,22 @@ function ProgramDateTimeline({rows,domainStart,domainEnd,selMin,onBlockClick}){
     rows.forEach(r=>(r.corners||[]).forEach(c=>s.add((c.segment&&SEG[c.segment])?c.segment:"other")));
     return SEG_ORDER.filter(k=>s.has(k));
   },[rows]);
-  return <div style={{margin:"0 0 16px",border:"1px solid #9fc5dd",background:"rgba(242,249,255,.92)",overflow:"hidden",borderRadius:8}}>
+  // 上のグラフと同様、ズームして表示範囲が狭い時にホイール／トラックパッドの横スクロールで左右に移動できるようにする
+  useEffect(()=>{
+    const el=wrapRef.current;
+    if(!el||!onPan)return;
+    const handler=ev=>{
+      const delta=Math.abs(ev.deltaX)>Math.abs(ev.deltaY)?ev.deltaX:ev.deltaY;
+      if(delta===0)return;
+      ev.preventDefault();
+      const rect=el.getBoundingClientRect();
+      const plotWidth=Math.max(1,rect.width-TIMELINE_LABEL_WIDTH);
+      onPan(delta*(total/plotWidth));
+    };
+    el.addEventListener('wheel',handler,{passive:false});
+    return()=>el.removeEventListener('wheel',handler);
+  },[onPan,total]);
+  return <div ref={wrapRef} style={{margin:"0 0 16px",border:"1px solid #9fc5dd",background:"rgba(242,249,255,.92)",overflow:"hidden",borderRadius:8}}>
     <div style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",borderBottom:"1px solid #9fc5dd",fontSize:12,fontWeight:700,color:"#173b5d"}}>
       <span>放送内容タイムライン</span>
       <span style={{fontSize:9.5,fontWeight:400,color:"#56778e",fontFamily:"monospace"}}>{m2t(domainStart)}–{m2t(domainEnd)}</span>
@@ -2788,7 +2804,7 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
               :<ProgramCompareChart series={series.filter(s=>progSel.includes(s.offset))} domainStart={winStart} domainEnd={winEnd} selMin={progSelMin}
                   onSelect={m=>{setProgSelMin(m);setHl(null);}} onPan={handlePan} hl={hl}/>}
         </div>
-        {refSeries?.prog&&<ProgramDateTimeline rows={rows} domainStart={winStart} domainEnd={winEnd} selMin={progSelMin} onBlockClick={handleBlockClick}/>}
+        {refSeries?.prog&&<ProgramDateTimeline rows={rows} domainStart={winStart} domainEnd={winEnd} selMin={progSelMin} onBlockClick={handleBlockClick} onPan={handlePan}/>}
       </div>
       <div style={{width:"clamp(260px, 14.2857vw, 420px)",flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column",position:"sticky",top:"calc(var(--topbar-height) + 52px)",maxHeight:"calc(100vh - var(--topbar-height) - 52px)",overflowY:"auto"}}>
         <div style={{padding:"10px 10px 12px",borderBottom:"1px solid #D7E5EE",background:"#F7FBFE"}}>
