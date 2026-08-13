@@ -2321,37 +2321,43 @@ function AnnotationResultModal({result,progName,onClose}){
 // 「ドデスカ」は日中の再放送特集(例:「ドデスカ！メ〜ロメロ！セレクション」)等、タイトルの
 // どこかに"ドデスカ"を含むだけの別番組が他にもあるため、includesではなくstartsWithで本編だけに絞る
 const PROGRAM_DEFS=[
-  {key:"dodesuka",label:"ドデスカ",match:t=>t.startsWith("ドデスカ！")},
+  {key:"dodesuka",label:"ドデスカ",match:t=>t.startsWith("ドデスカ！"),excludeSunday:true},
   {key:"dodesukaplus",label:"ドデスカ+",match:t=>t.startsWith("ドデスカ＋")||t.startsWith("ドデスカ+")},
   {key:"choco",label:"チョコレートサムネット",match:t=>t.includes("チョコレートサムネット")},
 ];
+// 「1か月前」は暦日で-30日すると曜日がズレる(30が7の倍数でない)ため、必ず同じ曜日になる-28日(4週間前)にする
 const PROGRAM_COMPARE_OFFSETS=[
   {label:"選択日",offset:0,color:"#0066cc"},
   {label:"前日",offset:-1,color:"#16A34A"},
   {label:"1週間前",offset:-7,color:"#EA580C"},
-  {label:"1か月前",offset:-30,color:"#9333EA"},
+  {label:"4週間前",offset:-28,color:"#9333EA"},
 ];
 
-// 複数系列(選択日/前日/1週間前/1か月前)を「番組開始からの経過分」で重ね描きする折れ線グラフ
-function ProgramCompareChart({series}){
+// 複数系列(選択日/前日/1週間前/4週間前)を実時刻の横軸で重ね描きする折れ線グラフ。
+// 横軸の範囲は選択日(基準系列)の実際の放送時間に合わせる(平日は6:00-8:00、土曜は放送されている時間のみ等)
+function ProgramCompareChart({series,domainStart,domainEnd}){
   const cRef=useRef(null);
   const[w,setW]=useState(900);
   useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setW(e.contentRect.width);});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
   const h=320,p={t:20,r:16,b:30,l:40};
   const cW=Math.max(1,w-p.l-p.r),cH=h-p.t-p.b;
-  const available=series.filter(s=>s.points&&s.points.length);
-  const maxDur=Math.max(1,...available.map(s=>s.points[s.points.length-1].elapsed));
+  const total=Math.max(1,domainEnd-domainStart);
+  const available=series
+    .filter(s=>s.points&&s.points.length)
+    .map(s=>({...s,points:s.points.filter(pt=>pt.minuteOfDay>=domainStart&&pt.minuteOfDay<=domainEnd)}))
+    .filter(s=>s.points.length);
   const maxVal=Math.max(5,...available.flatMap(s=>s.points.map(pt=>pt.v||0)))+1;
-  const xS=e=>p.l+(e/maxDur)*cW;
+  const xS=m=>p.l+((m-domainStart)/total)*cW;
   const yS=v=>p.t+cH-(v/maxVal)*cH;
   const yT=[];for(let v=0;v<=maxVal;v+=Math.ceil(maxVal/5))yT.push(v);
-  const xT=[];for(let m=0;m<=maxDur;m+=Math.max(5,Math.round(maxDur/8/5)*5))xT.push(m);
+  const tickStep=total<=30?5:total<=60?10:total<=120?15:30;
+  const xT=[];for(let m=Math.ceil(domainStart/tickStep)*tickStep;m<=domainEnd;m+=tickStep)xT.push(m);
   return <div ref={cRef} style={{width:"100%",height:h}}>
     <svg width={w} height={h}>
       <rect x={0} y={0} width={w} height={h} fill="#FAFBFC" rx={8}/>
       {yT.map(v=><g key={v}><line x1={p.l} x2={w-p.r} y1={yS(v)} y2={yS(v)} stroke="#E5E7EB" strokeDasharray="2,4"/><text x={p.l-6} y={yS(v)+4} fill="#9CA3AF" fontSize="10" textAnchor="end" fontFamily="monospace">{v}%</text></g>)}
-      {xT.map(m=><text key={m} x={xS(m)} y={h-8} fill="#9CA3AF" fontSize="9.5" textAnchor="middle" fontFamily="monospace">+{m}分</text>)}
-      {available.map(s=><path key={s.label} d={s.points.map((pt,i)=>`${i===0?"M":"L"}${xS(pt.elapsed)},${yS(pt.v||0)}`).join(" ")} fill="none" stroke={s.color} strokeWidth={s.offset===0?2.5:1.5} opacity={s.offset===0?1:0.75}/>)}
+      {xT.map(m=><text key={m} x={xS(m)} y={h-8} fill="#9CA3AF" fontSize="9.5" textAnchor="middle" fontFamily="monospace">{m2t(m)}</text>)}
+      {available.map(s=><path key={s.label} d={s.points.map((pt,i)=>`${i===0?"M":"L"}${xS(pt.minuteOfDay)},${yS(pt.v||0)}`).join(" ")} fill="none" stroke={s.color} strokeWidth={s.offset===0?2.5:1.5} opacity={s.offset===0?1:0.75}/>)}
     </svg>
   </div>;
 }
@@ -2359,6 +2365,12 @@ function ProgramCompareChart({series}){
 function ProgramTrackerPage({progKey}){
   const[refDate,setRefDate]=useState(GUIDE_DATE_MAX);
   const progDef=PROGRAM_DEFS.find(p=>p.key===progKey);
+  // 放送が無い曜日(例:ドデスカの日曜)は選択日から外す。選べる日付の一覧をカレンダーに渡すことで
+  // 前後ボタン・カレンダーグリッドの両方で自動的にスキップされる
+  const pickerDates=useMemo(()=>progDef.excludeSunday?DASHBOARD_DATES.filter(d=>new Date(d).getDay()!==0):DASHBOARD_DATES,[progDef]);
+  useEffect(()=>{
+    if(progDef.excludeSunday&&new Date(refDate).getDay()===0)setRefDate(d=>shiftDateStr(d,-1));
+  },[progDef,refDate]);
   const compareDates=useMemo(()=>PROGRAM_COMPARE_OFFSETS.map(c=>({...c,date:shiftDateStr(refDate,c.offset)})),[refDate]);
   const datesKey=compareDates.map(c=>c.date).join(",");
 
@@ -2401,11 +2413,14 @@ function ProgramTrackerPage({progKey}){
     const prog=progs.find(p=>p.stId==="NBN"&&progDef.match(p.title));
     if(!prog)return{...cd,loading:false,points:null,prog:null};
     const relStart=prog.startAbs-dayMid,relEnd=prog.endAbs-dayMid;
-    const points=ratings.filter(r=>r.minute>=relStart&&r.minute<relEnd).map(r=>({elapsed:r.minute-relStart,v:r.NBN}));
-    return{...cd,loading:false,points:points.length?points:null,prog};
+    const points=ratings.filter(r=>r.minute>=relStart&&r.minute<relEnd).map(r=>({minuteOfDay:r.minute,v:r.NBN}));
+    return{...cd,loading:false,points:points.length?points:null,prog,relStart,relEnd};
   }),[compareDates,epgCache,ratingCache,progKey]);
 
   const refSeries=series[0];
+  // 横軸の範囲は選択日(基準系列)の実際の放送時間に合わせる。読み込み中/番組なしの間は
+  // ドデスカの標準的な平日枠(6:00-8:00)を仮表示しておく
+  const domainStart=refSeries?.relStart??360,domainEnd=refSeries?.relEnd??480;
   const refCorners=useMemo(()=>{
     if(!refSeries?.prog||!cornerCache[refDate])return[];
     const dayMid=localMidnightAbsMin(refDate);
@@ -2423,7 +2438,7 @@ function ProgramTrackerPage({progKey}){
       <p style={{fontSize:13,color:"#7a7a7a",marginTop:4,letterSpacing:"-0.2px"}}>NBN視聴率推移を、選択日・前日・1週間前・1か月前で重ねて比較できます。左のメニューから他の番組にも切り替えられます。</p>
     </div>
     <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",marginBottom:14}}>
-      <CalendarPicker value={refDate} onChange={setRefDate} dates={DASHBOARD_DATES}/>
+      <CalendarPicker value={refDate} onChange={setRefDate} dates={pickerDates}/>
     </div>
     <div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:16,marginBottom:16}}>
       <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:10}}>
@@ -2440,7 +2455,7 @@ function ProgramTrackerPage({progKey}){
         ?<div style={{padding:"60px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>読み込み中...</div>
         :series.every(s=>!s.points)
           ?<div style={{padding:"60px 0",textAlign:"center",color:"#9CA3AF",fontSize:12}}>該当する放送・視聴率データがありません</div>
-          :<ProgramCompareChart series={series}/>}
+          :<ProgramCompareChart series={series} domainStart={domainStart} domainEnd={domainEnd}/>}
     </div>
     {refSeries?.prog&&<div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:16}}>
       <div style={{fontSize:13,fontWeight:600,color:"#1d1d1f",marginBottom:2}}>{refSeries.prog.title}</div>
