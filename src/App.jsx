@@ -1579,6 +1579,12 @@ async function _annotationListRequest({ dateFrom, dateTo, limit = 1000 }) {
   }));
 }
 
+// AI生成テキストは「+3.4pt流出」のようにpt数値の前へ+/-符号を付けてしまうことがあり、プロンプトの指示だけでは
+// 守られない場合があるため、返ってきたテキストから符号を機械的に取り除く(表示前の最終防波堤)
+function stripPtSign(text){
+  return text ? text.replace(/[+\-−＋－]\s?(\d+(?:\.\d+)?)\s?pt/g, "$1pt") : text;
+}
+
 const apiClient = {
   // 視聴率データダウンロードの自由文をClaudeで構造化
   async parseDownloadConditions(text, today, minDate, maxDate) {
@@ -1619,44 +1625,47 @@ const apiClient = {
     const prompt=`あなたは名古屋テレビ(NBN)の視聴率担当アナリストです。以下は在名7局の${periodLabel}の番組・コーナー別占拠率データです。NBN現場スタッフ向けの視聴率レポートを作成してください。\n\n【データの読み方(必ず守ること)】\n- 指標は占拠率(その時間帯に視聴中のテレビ全世帯のうち何%がその局を見ているか)\n- 「裏局↓マイナス(NBNへ流入)」= 視聴者がNBNに流れてきた\n- 「裏局↑プラス(NBNから流出)」= 視聴者がNBNから他局へ流れた\n\n${ctx}\n\n【出力形式(必ず守ること)】\n・■ で始まる行はセクション見出しとして使用\n・具体的な時刻・番組名・数値を必ず記載(例: 7:03 CTV「ZIP!」終了後に1.4pt流入)\n・pt(ポイント)は占拠率の変化幅(percentage point)を表す。流入・流出という言葉自体が向きを表すので、数値の前に+/-の符号は付けないこと\n・→ を使って流れや因果を表現\n\n以下の2セクションのみ作成してください(他のセクションは含めないこと):\n\n■ NBN各番組の動き\n(番組ごとに冒頭・中盤・終盤の流れ、ピーク・ボトムの時刻と数値、急上昇・急降下した箇所)\n\n■ 競合各局の動き\n(各局の主要番組の概況、NBNへの影響)`;
     if(API_CONFIG.useMock){
       const text=await _callClaudeDirect([{role:"user",content:prompt}],8000);
-      return{prompt,text};
+      return{prompt,text:stripPtSign(text)};
     }
     const{text}=await _callBackend("/api/analysis/overview",{periodLabel,ctx});
-    return{prompt,text};
+    return{prompt,text:stripPtSign(text)};
   },
 
   // ハイライト分析
   async generateHighlight(prevPrompt, prevText){
     const followup=`続けて、以下の4セクションを追加してください(総評・示唆は含めないこと)。\n\n■ 流入・流出まとめ\n(NBN視点で、どの局の何の番組終了/開始時に視聴者が動いたか、時刻と数値を箇条書きで。pt(ポイント)は占拠率の変化幅を表す単位。「流入」「流出」という言葉自体が向きを表すので、数値の前に+/-の符号は付けないこと。例: 「7:03 CTV「ZIP!」終了後に1.4pt流入」)\n\n■ 最高占拠率のタイミング\n(何時何分・どのコーナー・何%・なぜ高かったか)\n\n■ 急上昇コーナー TOP3\n(コーナー名・時間帯・上昇幅・要因)\n\n■ 急降下コーナー TOP3\n(コーナー名・時間帯・下降幅・要因)`;
     if(API_CONFIG.useMock){
-      return await _callClaudeDirect([
+      const text=await _callClaudeDirect([
         {role:"user",content:prevPrompt},
         {role:"assistant",content:prevText},
         {role:"user",content:followup},
       ],6000);
+      return stripPtSign(text);
     }
     const{text}=await _callBackend("/api/analysis/highlight",{prevPrompt,prevText,followup});
-    return text;
+    return stripPtSign(text);
   },
 
   // 総評・今後の示唆（根拠分析をもとに結論だけ生成）
   async generateConclusion(combinedAnalysis){
     const prompt=`以下はNBNの視聴率分析レポートです。この内容をもとに、現場スタッフ向けの総評と今後の示唆を作成してください。\n\n${combinedAnalysis}\n\n【出力形式(必ず守ること)】\n・■ で始まる行はセクション見出しとして使用\n・具体的な番組名・コーナー名・数値を使って記載\n・pt(ポイント)は占拠率の変化幅を表す単位。「流入」「流出」「上昇」「低下」などの言葉自体が向きを表すので、数値の前に+/-の符号は付けないこと(例:「-3.2ptの流出」ではなく「3.2ptの流出」、「+5.4ptの上昇」ではなく「5.4ptの上昇」)\n・2セクションのみ出力\n\n■ 総評\n(この期間のNBNのパフォーマンスを3〜4行で評価。良かった点・課題点を具体的に)\n\n■ 今後の示唆\n(編成・制作担当者への提言を箇条書きで3〜4点。具体的な番組名・コーナー名・時間帯を使って記載)`;
     if(API_CONFIG.useMock){
-      return await _callClaudeDirect([{role:"user",content:prompt}],2000);
+      const text=await _callClaudeDirect([{role:"user",content:prompt}],2000);
+      return stripPtSign(text);
     }
     const{text}=await _callBackend("/api/analysis/conclusion",{combinedAnalysis});
-    return text;
+    return stripPtSign(text);
   },
 
   // トピック分析
   async generateTopicAnalysis(query, rows){
     const tprompt=`テレビ視聴率アナリストとして、「${query}」というトピックに関する在名7局の過去放送実績を分析してください。\n\n【データの読み方(必ず守ること)】\n- 指標は占拠率(その時間帯の総視聴者のうち何%がその局を見ているか)\n- 「裏局↓マイナス」= 裏局の占拠率が下がった = 視聴者が裏局から自局に移動した(自局への流入)\n- 「裏局↑プラス」= 裏局の占拠率が上がった = 視聴者が自局から裏局に移動した(自局からの流出)\n- 自局DIFFがプラスなら自局が視聴者を獲得、マイナスなら自局が視聴者を失ったことを示す\n- 裏局がプラスでも自局もプラスなら全体的な視聴者増(テレビ視聴者全体が増えた)の可能性がある\n- pt(ポイント)は占拠率の変化幅を表す単位。文中で「流入」「流出」に数値(pt)を添えて書く時は、その言葉自体が向きを表すので数値の前に+/-の符号は付けないこと(例:「-3.4pt流入」ではなく「3.4pt流入」)\n\n【局別データ】\n${rows}\n\n上記の解釈ルールに従い、以下の観点で分析してください:\n1. このトピックは占拠率を取りやすいか取りにくいか\n2. 各局の傾向の違い\n3. 裏番組からの流入・流出パターン(どの局の何の番組放送中に視聴者が動いたか、自局視点で正確に)\n4. 今後の放送への示唆\n400字程度でまとめてください。`;
     if(API_CONFIG.useMock){
-      return await _callClaudeDirect([{role:"user",content:tprompt}],800);
+      const text=await _callClaudeDirect([{role:"user",content:tprompt}],800);
+      return stripPtSign(text);
     }
     const{text}=await _callBackend("/api/analysis/topic",{query,rows});
-    return text;
+    return stripPtSign(text);
   },
 }
 
