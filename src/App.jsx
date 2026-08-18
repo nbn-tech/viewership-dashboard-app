@@ -1121,10 +1121,24 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
         const st=ST.find(x=>x.id===sid),programs=tpl[sid]||[];
         const hasAnalysis=programs.some(([, , ,corners])=>corners.length>0);
         const showCorners=hasAnalysis&&!!cornerView[sid];
-        const fineCorners=showCorners?programs.flatMap(([name,s,e,corners],pi)=>corners.length
-          ?corners.map(([title,cs,ce,segment,tags,summary,objectKey,cStartSec,cEndSec],ci)=>({title,start:cs,end:ce,segment,tags:tags||[],summary:summary||"",objectKey,startSec:cStartSec,endSec:cEndSec,key:`${pi}-${ci}`}))
-          :[{title:name,start:s,end:e,segment:"other",tags:[],summary:"",noAnalysis:true,key:`${pi}-empty`}]
-        ):[];
+        const fineCorners=showCorners?programs.flatMap(([name,s,e,corners],pi)=>{
+          if(!corners.length)return[{title:name,start:s,end:e,segment:"other",tags:[],summary:"",noAnalysis:true,key:`${pi}-empty`}];
+          // コーナーが番組の一部分しかカバーしていない場合(分析が途中で途切れている等)、
+          // 抜けている区間を「解析データなし」の穴埋めブロックで埋める。そうしないと残り時間が
+          // 完全な空白になり、番組が丸ごと無いように見えてしまう(実際は番組自体は連続放送されている)
+          const sorted=[...corners].sort((a,b)=>t2m(a[1])-t2m(b[1]));
+          const out=[];
+          let cursor=t2m(s);
+          sorted.forEach(([title,cs,ce,segment,tags,summary,objectKey,cStartSec,cEndSec],ci)=>{
+            const csM=t2m(cs);
+            if(csM>cursor+1)out.push({title:name,start:m2t(cursor),end:cs,segment:"other",tags:[],summary:"",noAnalysis:true,key:`${pi}-gap${ci}`});
+            out.push({title,start:cs,end:ce,segment,tags:tags||[],summary:summary||"",objectKey,startSec:cStartSec,endSec:cEndSec,key:`${pi}-${ci}`});
+            cursor=Math.max(cursor,t2m(ce));
+          });
+          const eM=t2m(e);
+          if(eM>cursor+1)out.push({title:name,start:m2t(cursor),end:e,segment:"other",tags:[],summary:"",noAnalysis:true,key:`${pi}-gapend`});
+          return out;
+        }):[];
         const majorGroups=[];
         fineCorners.forEach(c=>{
           const last=majorGroups[majorGroups.length-1],label=c.noAnalysis?c.title:(SEG[c.segment]?.lb||"その他");
