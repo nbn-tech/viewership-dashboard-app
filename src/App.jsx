@@ -2388,11 +2388,12 @@ function weekAxisLabel(monday){
 
 // 帯番組の「曜日別 週次推移」グラフ。横軸は週(月曜日基準)、月〜金それぞれを1本の折れ線にして、
 // 同じ横軸目盛りに5つの点が並ぶ形で重ね描きする(TV pop互換の見せ方)
-function ProgramWeeklyTrendChart({weeks}){
+function ProgramWeeklyTrendChart({weeks,onSelectDate}){
   const cRef=useRef(null);
   // 初期値をnullにし、実際のコンテナ幅を測るまでSVGを描画しない。900px固定の初期値のままだと、
   // 測定が終わるまでの一瞬だけグラフが横に広がって表示されてしまう(ResizeObserverが効く前のチラつき)
   const[w,setW]=useState(null);
+  const[hover,setHover]=useState(null); // {i,di,v,date}
   useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setW(e.contentRect.width);});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
   const h=200,p={t:16,r:16,b:30,l:PROGRAM_LABEL_WIDTH};
   const cW=Math.max(1,(w??0)-p.l-p.r),cH=h-p.t-p.b;
@@ -2409,14 +2410,32 @@ function ProgramWeeklyTrendChart({weeks}){
       {yT.map(v=><g key={v}><line x1={p.l} x2={w-p.r} y1={yS(v)} y2={yS(v)} stroke="#E5E7EB" strokeDasharray="2,4"/><text x={p.l-6} y={yS(v)+4} fill="#9CA3AF" fontSize="10" textAnchor="end" fontFamily="monospace">{v}%</text></g>)}
       {weeks.map((wk,i)=><text key={wk.monday} x={xS(i)} y={h-8} fill="#9CA3AF" fontSize="9" textAnchor={i===0?"start":i===n-1?"end":"middle"} fontFamily="monospace">{weekAxisLabel(wk.monday)}</text>)}
       {WEEKDAY_LABELS.map((lb,di)=>{
-        const pts=weeks.map((wk,i)=>({i,v:wk.values[di]})).filter(pt=>typeof pt.v==="number");
+        const pts=weeks.map((wk,i)=>({i,v:wk.values[di],date:wk.dates[di]})).filter(pt=>typeof pt.v==="number");
         if(!pts.length)return null;
         const d=pts.map((pt,k)=>`${k===0?"M":"L"}${xS(pt.i)},${yS(pt.v)}`).join(" ");
         return <g key={lb}>
           <path d={d} fill="none" stroke={WEEKDAY_COLORS[di]} strokeWidth={2}/>
-          {pts.map(pt=><circle key={pt.i} cx={xS(pt.i)} cy={yS(pt.v)} r={3} fill={WEEKDAY_COLORS[di]}/>)}
+          {pts.map(pt=><g key={pt.i}>
+            <circle cx={xS(pt.i)} cy={yS(pt.v)} r={3} fill={WEEKDAY_COLORS[di]} pointerEvents="none"/>
+            {/* あたり判定を広げるための透明な大きい円。ホバーで日付・平均視聴率、クリックでその日へ移動できる */}
+            <circle cx={xS(pt.i)} cy={yS(pt.v)} r={9} fill="transparent" style={{cursor:onSelectDate?"pointer":"default"}}
+              onMouseEnter={()=>setHover({...pt,di})} onMouseLeave={()=>setHover(null)}
+              onClick={()=>onSelectDate&&onSelectDate(pt.date)}/>
+          </g>)}
         </g>;
       })}
+      {hover&&(()=>{
+        const cx=xS(hover.i),cy=yS(hover.v);
+        const dow=["日","月","火","水","木","金","土"][new Date(hover.date).getDay()];
+        const boxW=104,boxH=34;
+        const bx=Math.min(Math.max(cx-boxW/2,p.l),w-p.r-boxW);
+        const by=cy-boxH-10<p.t?cy+12:cy-boxH-10;
+        return <g pointerEvents="none">
+          <rect x={bx} y={by} width={boxW} height={boxH} rx={5} fill="rgba(255,255,255,0.97)" stroke="#E5E7EB"/>
+          <text x={bx+8} y={by+14} fontSize="10" fontFamily="monospace" fill="#374151" fontWeight="600">{hover.date}（{dow}）</text>
+          <text x={bx+8} y={by+27} fontSize="11.5" fontFamily="monospace" fill={WEEKDAY_COLORS[hover.di]} fontWeight="700">平均{hover.v.toFixed(1)}%</text>
+        </g>;
+      })()}
     </svg>
   </div>;
 }
@@ -2758,6 +2777,7 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
     if(!progDef.weeklyTrend)return null;
     return weeklyWeeks.map(week=>({
       monday:week.monday,
+      dates:week.dates,
       values:week.dates.map(date=>{
         const progs=epgCache[date];
         const ratings=ratingCache[`${date}|${demoMetric}`];
@@ -2937,7 +2957,7 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
               <span style={{color:"#374151",fontWeight:600}}>{lb}曜日</span>
             </div>)}
           </div>
-          <ProgramWeeklyTrendChart weeks={weeklySeries}/>
+          <ProgramWeeklyTrendChart weeks={weeklySeries} onSelectDate={setRefDate}/>
         </div>}
         <div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:"16px 0",marginBottom:16}}>
           <div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center",marginBottom:10,padding:"0 16px"}}>
