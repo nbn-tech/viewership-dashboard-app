@@ -2392,8 +2392,9 @@ const PROGRAM_COMPARE_OFFSETS=[
 // 「東海テレビ」等の局名向け)より、こちらは「選択日\n2026-08-18」程度の短い表示で足りるため、その分
 // 左マージンを詰めて全体を左に寄せる(ダッシュボード側の見た目には影響しない専用定数)
 const PROGRAM_LABEL_WIDTH=76;
-// 「曜日別 週次推移」グラフの設定。帯番組(月〜金)を対象に、直近何週ぶん遡って表示するか
-const WEEKLY_TREND_WEEKS=6;
+// 「曜日別推移」グラフの設定。帯番組(月〜金)を対象に、表示範囲の種類ごとに何週ぶん表示するか
+// (1か月表示はどの月でも1週目〜最終週をカバーできるよう6週、3か月表示は約13週)
+const TREND_RANGE_WEEKS={month1:6,month3:13};
 const WEEKDAY_LABELS=["月","火","水","木","金"];
 const WEEKDAY_COLORS=["#0EA5E9","#EF4444","#22C55E","#F59E0B","#8B5CF6"];
 
@@ -2723,41 +2724,48 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
   const compareDates=useMemo(()=>compareOffsets.map(c=>({...c,date:shiftDateStr(refDate,c.offset)})),[refDate,compareOffsets]);
   const datesKey=compareDates.map(c=>c.date).join(",");
 
-  // 「曜日別 週次/月次推移」(帯番組向け)。週次は選択日を含む週から遡ってN週ぶん、月次は選択日を含む月
-  // から遡ってNヶ月ぶん、月〜金の日付を並べる。月次は各曜日ごとにその月の該当曜日を全部集めて平均する
-  const[weeklyUnit,setWeeklyUnit]=useState("week"); // "week" | "month"
-  const[weeklyRangeWeeks,setWeeklyRangeWeeks]=useState(WEEKLY_TREND_WEEKS);
-  const[weeklyRangeMonths,setWeeklyRangeMonths]=useState(3);
+  // 「曜日別推移」(帯番組向け)。表示範囲は「1か月表示」(特定の月を選んで表示)と「3か月表示」
+  // (選択日を含む週を基準に約3か月分さかのぼる)の2種類。どちらも集計はせず、日ごとの値をそのままプロットする。
+  // ‹/›ボタンで表示範囲を1週間ずつずらせる(trendWeekOffset)
+  const[trendRangeType,setTrendRangeType]=useState("month1"); // "month1" | "month3"
+  const[trendMonth,setTrendMonth]=useState(()=>refDate.slice(0,7)); // "YYYY-MM"(1か月表示で使う)
+  const[trendWeekOffset,setTrendWeekOffset]=useState(0);
+  useEffect(()=>{setTrendWeekOffset(0);},[trendRangeType,trendMonth,refDate]);
+  // 1か月表示の月選択肢: 直近12か月ぶん(データ提供範囲外は除外)
+  const trendMonthOptions=useMemo(()=>{
+    const opts=[];
+    const[my,mm]=GUIDE_DATE_MAX.slice(0,7).split("-").map(Number);
+    for(let i=0;i<12;i++){
+      const d=new Date(my,mm-1-i,1);
+      const y=d.getFullYear(),mo=d.getMonth()+1;
+      const val=`${y}-${String(mo).padStart(2,"0")}`;
+      if(val<GUIDE_DATE_MIN.slice(0,7))break;
+      opts.push({value:val,label:`${y}年${mo}月`});
+    }
+    return opts;
+  },[]);
   const weeklyPeriods=useMemo(()=>{
     if(!progDef.weeklyTrend)return[];
-    if(weeklyUnit==="week"){
-      const refMonday=mondayOf(refDate);
-      const periods=[];
-      for(let w=weeklyRangeWeeks-1;w>=0;w--){
-        const monday=shiftDateStr(refMonday,-7*w);
-        periods.push({label:weekAxisLabel(monday),datesByWeekday:[0,1,2,3,4].map(d=>[shiftDateStr(monday,d)])});
-      }
-      return periods;
-    }
-    const[ry,rm]=refDate.split("-").map(Number);
+    const numWeeks=TREND_RANGE_WEEKS[trendRangeType];
+    // 1か月表示: 選んだ月の1日を含む週の月曜を起点にする(月初が週の途中でも1週目から表示される)
+    // 3か月表示: 選択日を含む週から約(numWeeks-1)週さかのぼった週の月曜を起点にする
+    const baseMonday=trendRangeType==="month1"
+      ?mondayOf(`${trendMonth}-01`)
+      :shiftDateStr(mondayOf(refDate),-(numWeeks-1)*7);
+    const startMonday=shiftDateStr(baseMonday,trendWeekOffset*7);
     const periods=[];
-    for(let m=weeklyRangeMonths-1;m>=0;m--){
-      const base=new Date(ry,rm-1-m,1);
-      const y=base.getFullYear(),mo=base.getMonth()+1;
-      const daysInMonth=new Date(y,mo,0).getDate();
-      const datesByWeekday=[[],[],[],[],[]];
-      for(let day=1;day<=daysInMonth;day++){
-        const dow=new Date(y,mo-1,day).getDay(); // 0=日〜6=土
-        if(dow>=1&&dow<=5){
-          const ds=`${y}-${String(mo).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
-          if(ds>=GUIDE_DATE_MIN&&ds<=GUIDE_DATE_MAX)datesByWeekday[dow-1].push(ds);
-        }
-      }
-      periods.push({label:`${y}年${mo}月`,datesByWeekday});
+    for(let w=0;w<numWeeks;w++){
+      const monday=shiftDateStr(startMonday,7*w);
+      periods.push({label:weekAxisLabel(monday),dates:[0,1,2,3,4].map(d=>shiftDateStr(monday,d))});
     }
     return periods;
-  },[progDef,refDate,weeklyUnit,weeklyRangeWeeks,weeklyRangeMonths]);
-  const weeklyDates=useMemo(()=>weeklyPeriods.flatMap(p=>p.datesByWeekday.flat()),[weeklyPeriods]);
+  },[progDef,trendRangeType,trendMonth,trendWeekOffset,refDate]);
+  const weeklyDates=useMemo(()=>weeklyPeriods.flatMap(p=>p.dates),[weeklyPeriods]);
+  // ‹/›ボタンの範囲外無効化用: これ以上遡る/進めるとデータ提供範囲を外れる場合はボタンを無効にする。
+  // 進む方向は「今週(GUIDE_DATE_MAXを含む週)より先には進めない」という基準にする(月曜日どうしで比較。
+  // 金曜日基準にすると、今日が金曜でない限り現在の週自体が既にはみ出す扱いになってしまうため)
+  const trendCanGoBack=weeklyPeriods.length>0&&shiftDateStr(weeklyPeriods[0].dates[0],-7)>=GUIDE_DATE_MIN;
+  const trendCanGoForward=weeklyPeriods.length>0&&shiftDateStr(weeklyPeriods[weeklyPeriods.length-1].dates[0],7)<=mondayOf(GUIDE_DATE_MAX);
   const weeklyDatesKey=weeklyDates.join(",");
 
   const[epgCache,setEpgCache]=useState({});
@@ -2814,9 +2822,9 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
     return{...cd,loading:false,points:points.length?points:null,prog,relStart,relEnd};
   }),[compareDates,epgCache,ratingCache,progKey,demoMetric,metric]);
 
-  // 「曜日別 週次/月次推移」: 各期間×各曜日について、その日(月次の場合はその曜日に該当する全日)の
-  // 番組放送時間内の平均視聴率(または占拠率)を出す。undefined=読み込み中の日が含まれる、
-  // null=対象日がすべて番組休止(祝日等)、{v,navDate,dateLabel}=表示する値がある場合
+  // 「曜日別推移」: 各週×各曜日について、その日の番組放送時間内の平均視聴率(または占拠率)をそのままプロットする
+  // (月をまたいでも集計はしない)。undefined=読み込み中、null=その日は番組が無かった(祝日等)、
+  // {v,navDate,dateLabel}=表示する値がある場合
   const weeklySeries=useMemo(()=>{
     if(!progDef.weeklyTrend)return null;
     const dayAvg=date=>{
@@ -2837,16 +2845,11 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
     };
     return weeklyPeriods.map(period=>({
       label:period.label,
-      values:period.datesByWeekday.map((dates,di)=>{
-        if(!dates.length)return null;
-        const dayVals=dates.map(dayAvg);
-        if(dayVals.some(v=>v===undefined))return undefined;
-        const known=dayVals.filter(v=>v!=null);
-        if(!known.length)return null;
-        const v=known.reduce((s,x)=>s+x,0)/known.length;
-        const navDate=dates[dates.length-1];
-        const dateLabel=dates.length>1?`${period.label} ${WEEKDAY_LABELS[di]}曜日(${known.length}日平均)`:`${navDate}（${WEEKDAY_LABELS[di]}）`;
-        return{v,navDate,dateLabel};
+      values:period.dates.map((date,di)=>{
+        const v=dayAvg(date);
+        if(v===undefined)return undefined;
+        if(v==null)return null;
+        return{v,navDate:date,dateLabel:`${date}（${WEEKDAY_LABELS[di]}）`};
       }),
     }));
   },[progDef,weeklyPeriods,epgCache,ratingCache,demoMetric,metric]);
@@ -3005,18 +3008,23 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
         {progDef.weeklyTrend&&weeklySeries&&<div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:16,marginBottom:16}}>
           <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"flex-start",justifyContent:"space-between",marginBottom:2}}>
             <div>
-              <div style={{fontSize:13,fontWeight:600,color:"#1d1d1f",marginBottom:2}}>曜日別 {weeklyUnit==="week"?"週次":"月次"}推移</div>
-              <p style={{fontSize:11.5,color:"#9CA3AF"}}>月〜金それぞれの{progDef.label}平均視聴率を、{weeklyUnit==="week"?"週":"月"}単位で並べて比較できます。</p>
+              <div style={{fontSize:13,fontWeight:600,color:"#1d1d1f",marginBottom:2}}>曜日別推移</div>
+              <p style={{fontSize:11.5,color:"#9CA3AF"}}>月〜金それぞれの{progDef.label}視聴率を、日ごとにそのまま並べて比較できます。</p>
             </div>
             <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}>
               <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #e0e0e0"}}>
-                {[{id:"week",l:"週次"},{id:"month",l:"月次"}].map(u=><button key={u.id} onClick={()=>setWeeklyUnit(u.id)} style={seg(weeklyUnit===u.id)}>{u.l}</button>)}
+                {[{id:"month1",l:"1か月表示"},{id:"month3",l:"3か月表示"}].map(u=><button key={u.id} onClick={()=>setTrendRangeType(u.id)} style={seg(trendRangeType===u.id)}>{u.l}</button>)}
               </div>
-              <select value={weeklyUnit==="week"?weeklyRangeWeeks:weeklyRangeMonths}
-                onChange={e=>weeklyUnit==="week"?setWeeklyRangeWeeks(Number(e.target.value)):setWeeklyRangeMonths(Number(e.target.value))}
+              {trendRangeType==="month1"&&<select value={trendMonth} onChange={e=>setTrendMonth(e.target.value)}
                 style={{padding:"4px 10px",borderRadius:8,border:"1px solid #e0e0e0",background:"#fff",color:"#1d1d1f",fontSize:12,fontFamily:"inherit",cursor:"pointer"}}>
-                {(weeklyUnit==="week"?[4,6,8,12]:[3,6,12]).map(n=><option key={n} value={n}>直近{n}{weeklyUnit==="week"?"週間":"か月"}</option>)}
-              </select>
+                {trendMonthOptions.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>}
+              <div style={{display:"flex",gap:4}}>
+                <button onClick={()=>setTrendWeekOffset(o=>o-1)} disabled={!trendCanGoBack} title="1週間前へ"
+                  style={{width:26,height:26,borderRadius:6,border:"1px solid #e0e0e0",background:"#fff",color:"#374151",cursor:trendCanGoBack?"pointer":"default",opacity:trendCanGoBack?1:.35}}>‹</button>
+                <button onClick={()=>setTrendWeekOffset(o=>o+1)} disabled={!trendCanGoForward} title="1週間後へ"
+                  style={{width:26,height:26,borderRadius:6,border:"1px solid #e0e0e0",background:"#fff",color:"#374151",cursor:trendCanGoForward?"pointer":"default",opacity:trendCanGoForward?1:.35}}>›</button>
+              </div>
             </div>
           </div>
           <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",marginBottom:8,marginTop:6}}>
