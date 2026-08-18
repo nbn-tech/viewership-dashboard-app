@@ -2371,6 +2371,10 @@ const PROGRAM_COMPARE_OFFSETS=[
   {label:"4週間前",offset:-28,color:"#9333EA"},
 ];
 
+// 番組別ページのグラフ・タイムライン共通の左ラベル列幅。ダッシュボードのTIMELINE_LABEL_WIDTH(96px、
+// 「東海テレビ」等の局名向け)より、こちらは「選択日\n2026-08-18」程度の短い表示で足りるため、その分
+// 左マージンを詰めて全体を左に寄せる(ダッシュボード側の見た目には影響しない専用定数)
+const PROGRAM_LABEL_WIDTH=76;
 // 「曜日別 週次推移」グラフの設定。帯番組(月〜金)を対象に、直近何週ぶん遡って表示するか
 const WEEKLY_TREND_WEEKS=6;
 const WEEKDAY_LABELS=["月","火","水","木","金"];
@@ -2390,7 +2394,7 @@ function ProgramWeeklyTrendChart({weeks}){
   // 測定が終わるまでの一瞬だけグラフが横に広がって表示されてしまう(ResizeObserverが効く前のチラつき)
   const[w,setW]=useState(null);
   useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setW(e.contentRect.width);});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
-  const h=200,p={t:16,r:16,b:30,l:TIMELINE_LABEL_WIDTH};
+  const h=200,p={t:16,r:16,b:30,l:PROGRAM_LABEL_WIDTH};
   const cW=Math.max(1,(w??0)-p.l-p.r),cH=h-p.t-p.b;
   const n=weeks.length;
   const allVals=weeks.flatMap(wk=>wk.values).filter(v=>typeof v==="number");
@@ -2429,7 +2433,7 @@ function ProgramCompareChart({series,domainStart,domainEnd,selMin,onSelect,onPan
   const hasDragged=useRef(false);
   useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setW(e.contentRect.width);});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
   // 放送内容タイムラインの日付列と同じ幅を左に確保し、両者の時刻軸を同じX座標に揃える
-  const h=320,p={t:20,r:0,b:30,l:TIMELINE_LABEL_WIDTH};
+  const h=320,p={t:20,r:0,b:30,l:PROGRAM_LABEL_WIDTH};
   const cW=Math.max(1,(w??0)-p.l-p.r),cH=h-p.t-p.b;
   const total=Math.max(1,domainEnd-domainStart);
   const mpp=total/cW;
@@ -2529,7 +2533,7 @@ function ProgramDateTimeline({rows,domainStart,domainEnd,selMin,onBlockClick,onP
       if(delta===0)return;
       ev.preventDefault();
       const rect=el.getBoundingClientRect();
-      const plotWidth=Math.max(1,rect.width-TIMELINE_LABEL_WIDTH);
+      const plotWidth=Math.max(1,rect.width-PROGRAM_LABEL_WIDTH);
       onPan(delta*(total/plotWidth));
     };
     el.addEventListener('wheel',handler,{passive:false});
@@ -2548,19 +2552,20 @@ function ProgramDateTimeline({rows,domainStart,domainEnd,selMin,onBlockClick,onP
     </div>}
     <div style={{position:"relative"}}>
       <div style={{display:"flex",height:26,borderBottom:"1px solid #9fc5dd",background:"#e5f2fa"}}>
-        <div style={{width:TIMELINE_LABEL_WIDTH,flexShrink:0,padding:"7px 8px",borderRight:"1px solid #9fc5dd",fontSize:8.5,fontWeight:700,color:"#56778e"}}>時刻</div>
+        <div style={{width:PROGRAM_LABEL_WIDTH,flexShrink:0,padding:"7px 8px",borderRight:"1px solid #9fc5dd",fontSize:8.5,fontWeight:700,color:"#56778e"}}>時刻</div>
         <div style={{position:"relative",flex:1,minWidth:0}}>
-          {ticks.map(m=>{const left=((m-domainStart)/total)*100;return <div key={m} style={{position:"absolute",left:`${left}%`,top:0,bottom:0,borderLeft:"1px solid #b9d4e5"}}>
-            <span style={{position:"absolute",top:6,left:4,fontSize:8.5,fontFamily:"monospace",color:"#56778e",whiteSpace:"nowrap"}}>{m2t(m)}</span>
+          {/* 右端の目盛りだけ文字をtickの左側に寄せる(左寄せのままだと右端で文字が枠外に切れてしまうため) */}
+          {ticks.map((m,ti)=>{const left=((m-domainStart)/total)*100;const isLast=ti===ticks.length-1;return <div key={m} style={{position:"absolute",left:`${left}%`,top:0,bottom:0,borderLeft:"1px solid #b9d4e5"}}>
+            <span style={{position:"absolute",top:6,...(isLast?{right:4}:{left:4}),fontSize:8.5,fontFamily:"monospace",color:"#56778e",whiteSpace:"nowrap"}}>{m2t(m)}</span>
           </div>;})}
         </div>
       </div>
-      {ticks.map(m=>{const left=((m-domainStart)/total)*100;return <div key={`grid-${m}`} style={{position:"absolute",top:26,bottom:0,left:`calc(${TIMELINE_LABEL_WIDTH}px + (100% - ${TIMELINE_LABEL_WIDTH}px) * ${left/100})`,width:1,background:"rgba(159,197,221,.48)",pointerEvents:"none",zIndex:2}}/>;})}
+      {ticks.map(m=>{const left=((m-domainStart)/total)*100;return <div key={`grid-${m}`} style={{position:"absolute",top:26,bottom:0,left:`calc(${PROGRAM_LABEL_WIDTH}px + (100% - ${PROGRAM_LABEL_WIDTH}px) * ${left/100})`,width:1,background:"rgba(159,197,221,.48)",pointerEvents:"none",zIndex:2}}/>;})}
       {rows.map((row,ri)=>{
         const hasProg=row.relStart!=null&&row.relEnd!=null;
         return <div key={row.label}>
           <div style={{display:"flex",height:56,borderBottom:"1px solid #b9d4e5"}}>
-            <div style={{width:TIMELINE_LABEL_WIDTH,flexShrink:0,padding:"7px 8px",background:"#e5f2fa",color:row.color,fontSize:10,fontWeight:700,borderRight:"1px solid #9fc5dd"}}>
+            <div style={{width:PROGRAM_LABEL_WIDTH,flexShrink:0,padding:"7px 8px",background:"#e5f2fa",color:row.color,fontSize:10,fontWeight:700,borderRight:"1px solid #9fc5dd"}}>
               <div>{row.label}</div>
               <div style={{fontSize:8,fontWeight:400,color:"#56778e",fontFamily:"monospace",marginTop:2}}>{row.date}</div>
             </div>
@@ -2592,7 +2597,7 @@ function ProgramDateTimeline({rows,domainStart,domainEnd,selMin,onBlockClick,onP
             if(!c)return null;
             const sg=SEG[c.segment]||SEG.other;
             return <div style={{display:"flex",borderBottom:"1px solid #b9d4e5",background:"#fff"}}>
-              <div style={{width:TIMELINE_LABEL_WIDTH,flexShrink:0,borderRight:"1px solid #9fc5dd",background:"#e5f2fa"}}/>
+              <div style={{width:PROGRAM_LABEL_WIDTH,flexShrink:0,borderRight:"1px solid #9fc5dd",background:"#e5f2fa"}}/>
               <div style={{flex:1,padding:"10px 14px",color:"#173b5d"}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
                   <span style={{fontSize:11.5,fontWeight:700,color:sg.c}}>{c.title}</span>
@@ -2606,7 +2611,7 @@ function ProgramDateTimeline({rows,domainStart,domainEnd,selMin,onBlockClick,onP
           })()}
         </div>;
       })}
-      {cursorLeft>=0&&cursorLeft<=100&&<div style={{position:"absolute",top:0,bottom:0,left:`calc(${TIMELINE_LABEL_WIDTH}px + (100% - ${TIMELINE_LABEL_WIDTH}px) * ${cursorLeft/100})`,width:1,background:"#ef4444",pointerEvents:"none",zIndex:5}}/>}
+      {cursorLeft>=0&&cursorLeft<=100&&<div style={{position:"absolute",top:0,bottom:0,left:`calc(${PROGRAM_LABEL_WIDTH}px + (100% - ${PROGRAM_LABEL_WIDTH}px) * ${cursorLeft/100})`,width:1,background:"#ef4444",pointerEvents:"none",zIndex:5}}/>}
     </div>
   </div>;
 }
@@ -2944,7 +2949,9 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
                 style={{display:"flex",alignItems:"center",gap:6,padding:"3px 9px",borderRadius:16,border:`1.5px solid ${active?cd.color:"#E5E7EB"}`,background:active?`${cd.color}0D`:"transparent",color:active?cd.color:"#9CA3AF",cursor:"pointer",fontSize:11,fontWeight:600}}>
                 <span style={{width:7,height:7,borderRadius:"50%",background:active?cd.color:"#D1D5DB"}}/>
                 {cd.label}
-                <span style={{fontSize:9.5,fontWeight:400,fontFamily:"monospace",opacity:0.75}}>{cd.date}{s?.loading?"（読込中…）":!s?.points?"（番組なし）":""}</span>
+                {/* 読み込み中は日付だけ表示する(「（読込中…）」を出すと文字幅が伸びて、データが揃うまでの
+                    一瞬だけボタン列が2段に折り返ってしまうため。読み込み中かどうかはチャート側の表示で分かる) */}
+                <span style={{fontSize:9.5,fontWeight:400,fontFamily:"monospace",opacity:0.75}}>{cd.date}{!s?.loading&&!s?.points?"（番組なし）":""}</span>
               </button>;
             })}
             <select value={demoMetric} onChange={e=>setDemoMetric(e.target.value)} style={{marginLeft:"auto",padding:"4px 10px",borderRadius:8,border:"1px solid #e0e0e0",background:"#fff",color:"#1d1d1f",fontSize:12,fontFamily:"inherit",cursor:"pointer"}}>
