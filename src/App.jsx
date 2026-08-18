@@ -1056,7 +1056,8 @@ function buildFullDayAbsTpl(epgByDate,cornersByDate,dates){
 
 const TIMELINE_LABEL_WIDTH=96;
 
-function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineBlockClick,onHighlight,data,metric,loading,error,onRetry}){
+function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineBlockClick,onHighlight,data,metric,loading,error,onRetry,onPan}){
+  const wrapRef=useRef(null);
   const[expandedCorner,setExpandedCorner]=useState(null);
   const[hoveredBlock,setHoveredBlock]=useState(null);
   // 局ごとにコーナー別表示⇔番組名のみ表示を切り替える。デフォルトは番組名のみ(分析結果があっても)
@@ -1069,6 +1070,21 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
   const timeTicks=[];
   for(let minute=Math.ceil(rangeStart/tickStep)*tickStep;minute<=rangeEnd;minute+=tickStep)timeTicks.push(minute);
   useEffect(()=>setExpandedCorner(null),[tpl,rangeStart,rangeEnd]);
+  // 上のグラフと同様、トラックパッドの横スクロールでタイムラインを左右に移動できるようにする。
+  // 縦方向優勢のスクロール(通常のマウスホイール)は画面の縦スクロールに任せ、ここでは何もしない
+  useEffect(()=>{
+    const el=wrapRef.current;
+    if(!el||!onPan)return;
+    const handler=ev=>{
+      if(Math.abs(ev.deltaX)<=Math.abs(ev.deltaY))return;
+      ev.preventDefault();
+      const rect=el.getBoundingClientRect();
+      const plotWidth=Math.max(1,rect.width-TIMELINE_LABEL_WIDTH);
+      onPan(ev.deltaX*(total/plotWidth));
+    };
+    el.addEventListener('wheel',handler,{passive:false});
+    return()=>el.removeEventListener('wheel',handler);
+  },[onPan,total]);
   const valueAt=(sid,s,e)=>{
     const rows=data.filter(d=>d.minute>=s&&d.minute<e&&d[sid]!=null);
     return rows.length?rows.reduce((sum,d)=>sum+d[sid],0)/rows.length:null;
@@ -1094,7 +1110,7 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
     </button>;
   };
   const cursorLeft=selMin==null?-1:((selMin-rangeStart)/total)*100;
-  return <div style={{margin:"0 18px 16px",border:"1px solid #9fc5dd",background:"rgba(242,249,255,.92)",overflow:"hidden"}}>
+  return <div ref={wrapRef} style={{margin:"0 18px 16px",border:"1px solid #9fc5dd",background:"rgba(242,249,255,.92)",overflow:"hidden"}}>
     <div style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",borderBottom:"1px solid #9fc5dd",fontSize:12,fontWeight:700,color:"#173b5d"}}>
       <span>放送内容タイムライン</span>
       <span style={{fontSize:9.5,fontWeight:400,color:"#56778e",fontFamily:"monospace"}}>{wrapClock(Math.round(rangeStart))}–{wrapClock(Math.round(rangeEnd))}</span>
@@ -1212,16 +1228,17 @@ function Chart({data,sel,onClick,selMin,hl,metric,onPan}){
   // 1分値は「その分の開始位置」に置く。右端は最後の1分が終わる時刻なので、
   // タイムラインの [start, end) と同じ時間スケールになる。
   const mpp=data.length>0?data.length/cW:1;
-  // マウスホイール／トラックパッドの横スクロールでもグラフを左右に移動できるようにする。
+  // トラックパッドの横スクロール(または他ブラウザの横ホイール)でグラフを左右に移動できるようにする。
+  // 縦方向優勢のスクロール(通常のマウスホイール)は画面の縦スクロールに任せ、ここでは何もしない
+  // (preventDefaultしてしまうと、グラフ上で縦スクロールしても画面が動かず横に流れてしまうため)。
   // ReactのonWheelはpassiveで登録されpreventDefaultが効かないため、ネイティブリスナーで対応する。
   useEffect(()=>{
     const el=ref.current;
     if(!el||!onPan)return;
     const handler=ev=>{
-      const delta=Math.abs(ev.deltaX)>Math.abs(ev.deltaY)?ev.deltaX:ev.deltaY;
-      if(delta===0)return;
+      if(Math.abs(ev.deltaX)<=Math.abs(ev.deltaY))return;
       ev.preventDefault();
-      onPan(delta*mpp);
+      onPan(ev.deltaX*mpp);
     };
     el.addEventListener('wheel',handler,{passive:false});
     return()=>el.removeEventListener('wheel',handler);
@@ -2469,16 +2486,16 @@ function ProgramCompareChart({series,domainStart,domainEnd,selMin,onSelect,onPan
   const yT=[];for(let v=0;v<=maxVal;v+=Math.ceil(maxVal/5))yT.push(v);
   const tickStep=total<=30?5:total<=60?10:total<=120?15:30;
   const xT=[];for(let m=Math.ceil(domainStart/tickStep)*tickStep;m<=domainEnd;m+=tickStep)xT.push(m);
-  // マウスホイール／トラックパッドの横スクロールでズームした範囲を左右にスクロールできるようにする
+  // トラックパッドの横スクロールでズームした範囲を左右にスクロールできるようにする。縦方向優勢の
+  // スクロール(通常のマウスホイール)は画面の縦スクロールに任せ、ここでは何もしない
   // (ReactのonWheelはpassiveで登録されpreventDefaultが効かないため、ネイティブリスナーで対応する)
   useEffect(()=>{
     const el=ref.current;
     if(!el||!onPan)return;
     const handler=ev=>{
-      const delta=Math.abs(ev.deltaX)>Math.abs(ev.deltaY)?ev.deltaX:ev.deltaY;
-      if(delta===0)return;
+      if(Math.abs(ev.deltaX)<=Math.abs(ev.deltaY))return;
       ev.preventDefault();
-      onPan(delta*mpp);
+      onPan(ev.deltaX*mpp);
     };
     el.addEventListener('wheel',handler,{passive:false});
     return()=>el.removeEventListener('wheel',handler);
@@ -2546,17 +2563,17 @@ function ProgramDateTimeline({rows,domainStart,domainEnd,selMin,onBlockClick,onP
     rows.forEach(r=>(r.corners||[]).forEach(c=>s.add((c.segment&&SEG[c.segment])?c.segment:"other")));
     return SEG_ORDER.filter(k=>s.has(k));
   },[rows]);
-  // 上のグラフと同様、ズームして表示範囲が狭い時にホイール／トラックパッドの横スクロールで左右に移動できるようにする
+  // 上のグラフと同様、ズームして表示範囲が狭い時はトラックパッドの横スクロールで左右に移動できるようにする。
+  // 縦方向優勢のスクロール(通常のマウスホイール)は画面の縦スクロールに任せ、ここでは何もしない
   useEffect(()=>{
     const el=wrapRef.current;
     if(!el||!onPan)return;
     const handler=ev=>{
-      const delta=Math.abs(ev.deltaX)>Math.abs(ev.deltaY)?ev.deltaX:ev.deltaY;
-      if(delta===0)return;
+      if(Math.abs(ev.deltaX)<=Math.abs(ev.deltaY))return;
       ev.preventDefault();
       const rect=el.getBoundingClientRect();
       const plotWidth=Math.max(1,rect.width-PROGRAM_LABEL_WIDTH);
-      onPan(delta*(total/plotWidth));
+      onPan(ev.deltaX*(total/plotWidth));
     };
     el.addEventListener('wheel',handler,{passive:false});
     return()=>el.removeEventListener('wheel',handler);
@@ -5359,7 +5376,7 @@ export default function App(){
           startMin={chartData.length?chartData[0].minute:winStart}
           endMin={chartData.length?chartData[chartData.length-1].minute+1:winEnd}
           selMin={selMin} onClickMinute={click} onTimelineBlockClick={timelineBlockClick} onHighlight={setHL} data={dData} metric={metric}
-          loading={dashDataLoading} error={dashDataError} onRetry={retryDashData}/>
+          loading={dashDataLoading} error={dashDataError} onRetry={retryDashData} onPan={handlePan}/>
       </div>
       <div style={{width:"clamp(260px, 14.2857vw, 420px)",flexShrink:0,borderLeft:"1px solid #E5E7EB",background:"#fff",display:"flex",flexDirection:"column",position:"sticky",top:"calc(var(--topbar-height) + 76px)",maxHeight:"calc(100vh - var(--topbar-height) - 76px)",overflowY:"auto"}}>
         {date==="2026-04-17"&&slot==="morning"&&<div style={{padding:"10px 10px 12px",borderBottom:"1px solid #D7E5EE",background:"#F7FBFE"}}>
