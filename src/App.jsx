@@ -2748,10 +2748,12 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
         .then(r=>r.ok?r.text():Promise.reject())
         .then(text=>{
           const xml=new DOMParser().parseFromString(text,'text/xml');
+          // サイズが極端に小さい(録画失敗などによる空ファイル)チャンクも境界判定のために残しつつ、
+          // valid:false としてマークする。ここで丸ごと除外すると、その時間帯をクリックした時に
+          // 直前(または直後)の全く別の時間のチャンクが誤って再生されてしまう
           const files=[...xml.querySelectorAll('Contents')]
             .map(c=>({key:c.querySelector('Key').textContent,size:parseInt(c.querySelector('Size').textContent)}))
-            .filter(f=>f.size>1000000)
-            .map(f=>{const fn=f.key.split('/').pop();const m=fn.match(/CH\d+_\d{8}_(\d{2})(\d{2})(\d{2})\.mp4$/);if(!m)return null;return{...f,fn,startSec:parseInt(m[1])*3600+parseInt(m[2])*60+parseInt(m[3])};})
+            .map(f=>{const fn=f.key.split('/').pop();const m=fn.match(/CH\d+_\d{8}_(\d{2})(\d{2})(\d{2})\.mp4$/);if(!m)return null;return{...f,fn,startSec:parseInt(m[1])*3600+parseInt(m[2])*60+parseInt(m[3]),valid:f.size>1000000};})
             .filter(Boolean).sort((a,b)=>a.startSec-b.startSec);
           setVideoFilesByDate(prev=>({...prev,[date]:files}));
         })
@@ -2791,7 +2793,9 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
     for(let i=0;i<files.length;i++){
       if(files[i].startSec<=tgt&&(i===files.length-1||files[i+1].startSec>tgt)){found=files[i];break;}
     }
-    if(!found){setVideoUrl(null);setNoVideoForTime(true);return;}
+    // 見つかったチャンクが録画失敗等で空(valid:false)の場合、直前の全く別の時間のチャンクへ
+    // フォールバックさせず、素直に「この時刻の動画はありません」を表示する
+    if(!found||!found.valid){setVideoUrl(null);setNoVideoForTime(true);return;}
     setNoVideoForTime(false);
     const offSec=tgt-found.startSec;
     const newUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${found.key}`;
@@ -2862,8 +2866,8 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
           </div>
           {!activeVideoDate&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>タイムラインのコーナーをクリックすると動画を表示します</div>}
           {activeVideoDate&&videoFilesByDate[activeVideoDate]===null&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>動画情報を読み込み中…</div>}
-          {activeVideoDate&&videoFilesByDate[activeVideoDate]?.length===0&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この日の動画データはありません</div>}
-          {activeVideoDate&&videoFilesByDate[activeVideoDate]?.length>0&&!videoUrl&&!noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>タイムラインの時刻をクリックすると動画を表示します</div>}
+          {activeVideoDate&&videoFilesByDate[activeVideoDate]&&!videoFilesByDate[activeVideoDate].some(f=>f.valid)&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この日の動画データはありません</div>}
+          {activeVideoDate&&videoFilesByDate[activeVideoDate]?.some(f=>f.valid)&&!videoUrl&&!noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>タイムラインの時刻をクリックすると動画を表示します</div>}
           {noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この時刻の動画はありません</div>}
           {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls
             onLoadedMetadata={()=>{if(videoRef.current&&pendingSeekRef.current!==null){videoRef.current.currentTime=pendingSeekRef.current;pendingSeekRef.current=null;}}}
@@ -5009,7 +5013,9 @@ export default function App(){
     for(let i=0;i<videoFiles.length;i++){
       if(videoFiles[i].startSec<=tgt&&(i===videoFiles.length-1||videoFiles[i+1].startSec>tgt)){found=videoFiles[i];break;}
     }
-    if(!found){setVideoUrl(null);setNoVideoForTime(true);return;}
+    // 見つかったチャンクが録画失敗等で空(valid:false)の場合、直前の全く別の時間のチャンクへ
+    // フォールバックさせず、素直に「この時刻の動画はありません」を表示する
+    if(!found||!found.valid){setVideoUrl(null);setNoVideoForTime(true);return;}
     setNoVideoForTime(false);
     const offSec=tgt-found.startSec;
     const newUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${found.key}`;
@@ -5024,10 +5030,12 @@ export default function App(){
       .then(r=>r.ok?r.text():Promise.reject())
       .then(text=>{
         const xml=new DOMParser().parseFromString(text,'text/xml');
+        // サイズが極端に小さい(録画失敗などによる空ファイル)チャンクも境界判定のために残しつつ、
+        // valid:false としてマークする。ここで丸ごと除外すると、その時間帯をクリックした時に
+        // 直前(または直後)の全く別の時間のチャンクが誤って再生されてしまう
         const files=[...xml.querySelectorAll('Contents')]
           .map(c=>({key:c.querySelector('Key').textContent,size:parseInt(c.querySelector('Size').textContent)}))
-          .filter(f=>f.size>1000000)
-          .map(f=>{const fn=f.key.split('/').pop();const m=fn.match(/CH\d+_\d{8}_(\d{2})(\d{2})(\d{2})\.mp4$/);if(!m)return null;return{...f,fn,startSec:parseInt(m[1])*3600+parseInt(m[2])*60+parseInt(m[3])};})
+          .map(f=>{const fn=f.key.split('/').pop();const m=fn.match(/CH\d+_\d{8}_(\d{2})(\d{2})(\d{2})\.mp4$/);if(!m)return null;return{...f,fn,startSec:parseInt(m[1])*3600+parseInt(m[2])*60+parseInt(m[3]),valid:f.size>1000000};})
           .filter(Boolean).sort((a,b)=>a.startSec-b.startSec);
         setVideoFiles(files);
       })
@@ -5189,8 +5197,8 @@ export default function App(){
           <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #D7E5EE",marginBottom:7}}>
             {VIDEO_CHANNELS.map(ch=><button key={ch} onClick={()=>setVideoCh(ch)} style={{flex:1,padding:"3px 0",border:"none",background:videoCh===ch?"#0066cc":"#fff",color:videoCh===ch?"#fff":"#61788A",cursor:"pointer",fontSize:9.5,fontWeight:700,fontFamily:"monospace"}}>{ch}</button>)}
           </div>
-          {videoFiles.length===0&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この日の動画データはありません</div>}
-          {videoFiles.length>0&&!videoUrl&&!noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>グラフの時刻をクリックすると動画を表示します</div>}
+          {!videoFiles.some(f=>f.valid)&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この日の動画データはありません</div>}
+          {videoFiles.some(f=>f.valid)&&!videoUrl&&!noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>グラフの時刻をクリックすると動画を表示します</div>}
           {noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この時刻の動画はありません</div>}
           {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls onLoadedMetadata={()=>{if(videoRef.current&&pendingSeekRef.current!==null){videoRef.current.currentTime=pendingSeekRef.current;pendingSeekRef.current=null;}}} onEnded={()=>{if(!videoFiles)return;const idx=videoFiles.findIndex(f=>`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${f.key}`===videoUrl);if(idx===-1||idx===videoFiles.length-1)return;const nxt=videoFiles[idx+1];const nxtUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}} style={{display:"block",width:"100%",aspectRatio:"16 / 9",objectFit:"contain",borderRadius:5,background:"#000"}}/>}
         </div>}
