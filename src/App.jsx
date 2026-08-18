@@ -2452,7 +2452,8 @@ function ProgramCompareChart({series,domainStart,domainEnd,selMin,onSelect,onPan
   const hasDragged=useRef(false);
   useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setW(e.contentRect.width);});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
   // 放送内容タイムラインの日付列と同じ幅を左に確保し、両者の時刻軸を同じX座標に揃える
-  const h=320,p={t:20,r:0,b:30,l:PROGRAM_LABEL_WIDTH};
+  // 右端にも少し余白を確保する(0のままだと右端の目盛りが枠ぎりぎりで見切れて見えるため)
+  const h=320,p={t:20,r:16,b:30,l:PROGRAM_LABEL_WIDTH};
   const cW=Math.max(1,(w??0)-p.l-p.r),cH=h-p.t-p.b;
   const total=Math.max(1,domainEnd-domainStart);
   const mpp=total/cW;
