@@ -2386,21 +2386,24 @@ function weekAxisLabel(monday){
 // 同じ横軸目盛りに5つの点が並ぶ形で重ね描きする(TV pop互換の見せ方)
 function ProgramWeeklyTrendChart({weeks}){
   const cRef=useRef(null);
-  const[w,setW]=useState(900);
+  // 初期値をnullにし、実際のコンテナ幅を測るまでSVGを描画しない。900px固定の初期値のままだと、
+  // 測定が終わるまでの一瞬だけグラフが横に広がって表示されてしまう(ResizeObserverが効く前のチラつき)
+  const[w,setW]=useState(null);
   useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setW(e.contentRect.width);});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
   const h=200,p={t:16,r:16,b:30,l:TIMELINE_LABEL_WIDTH};
-  const cW=Math.max(1,w-p.l-p.r),cH=h-p.t-p.b;
+  const cW=Math.max(1,(w??0)-p.l-p.r),cH=h-p.t-p.b;
   const n=weeks.length;
   const allVals=weeks.flatMap(wk=>wk.values).filter(v=>typeof v==="number");
   const maxVal=Math.max(5,...allVals)+1;
   const xS=i=>p.l+(n<=1?cW/2:(i/(n-1))*cW);
   const yS=v=>p.t+cH-(v/maxVal)*cH;
   const yT=[];for(let v=0;v<=maxVal;v+=Math.max(1,Math.ceil(maxVal/5)))yT.push(v);
+  if(w==null)return <div ref={cRef} style={{width:"100%",height:h}}/>;
   return <div ref={cRef} style={{width:"100%",height:h}}>
     <svg width={w} height={h}>
       <rect x={0} y={0} width={w} height={h} fill="#FAFBFC" rx={8}/>
       {yT.map(v=><g key={v}><line x1={p.l} x2={w-p.r} y1={yS(v)} y2={yS(v)} stroke="#E5E7EB" strokeDasharray="2,4"/><text x={p.l-6} y={yS(v)+4} fill="#9CA3AF" fontSize="10" textAnchor="end" fontFamily="monospace">{v}%</text></g>)}
-      {weeks.map((wk,i)=><text key={wk.monday} x={xS(i)} y={h-8} fill="#9CA3AF" fontSize="9" textAnchor="middle" fontFamily="monospace">{weekAxisLabel(wk.monday)}</text>)}
+      {weeks.map((wk,i)=><text key={wk.monday} x={xS(i)} y={h-8} fill="#9CA3AF" fontSize="9" textAnchor={i===0?"start":i===n-1?"end":"middle"} fontFamily="monospace">{weekAxisLabel(wk.monday)}</text>)}
       {WEEKDAY_LABELS.map((lb,di)=>{
         const pts=weeks.map((wk,i)=>({i,v:wk.values[di]})).filter(pt=>typeof pt.v==="number");
         if(!pts.length)return null;
@@ -2418,14 +2421,16 @@ function ProgramWeeklyTrendChart({weeks}){
 // 横軸の範囲は選択日(基準系列)の実際の放送時間に合わせる(平日は6:00-8:00、土曜は放送されている時間のみ等)
 function ProgramCompareChart({series,domainStart,domainEnd,selMin,onSelect,onPan,hl}){
   const ref=useRef(null),cRef=useRef(null);
-  const[w,setW]=useState(900);
+  // 初期値をnullにし、実際のコンテナ幅を測るまでSVGを描画しない。900px固定の初期値のままだと、
+  // 測定が終わるまでの一瞬だけグラフが横に広がって表示されてしまう(ResizeObserverが効く前のチラつき)
+  const[w,setW]=useState(null);
   const[dragging,setDragging]=useState(false);
   const dragX=useRef(0);
   const hasDragged=useRef(false);
   useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setW(e.contentRect.width);});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
   // 放送内容タイムラインの日付列と同じ幅を左に確保し、両者の時刻軸を同じX座標に揃える
   const h=320,p={t:20,r:0,b:30,l:TIMELINE_LABEL_WIDTH};
-  const cW=Math.max(1,w-p.l-p.r),cH=h-p.t-p.b;
+  const cW=Math.max(1,(w??0)-p.l-p.r),cH=h-p.t-p.b;
   const total=Math.max(1,domainEnd-domainStart);
   const mpp=total/cW;
   const available=series
@@ -2461,6 +2466,7 @@ function ProgramCompareChart({series,domainStart,domainEnd,selMin,onSelect,onPan
     onSelect(Math.round(domainStart+Math.max(0,Math.min(1,frac))*total));
   };
   const hlColor=hl?.color||"#1d1d1f";
+  if(w==null)return <div ref={cRef} style={{width:"100%",height:h}}/>;
   return <div ref={cRef} style={{width:"100%",height:h}}>
     <svg ref={ref} width={w} height={h} onClick={handleClick}
       style={{cursor:onPan?(dragging?"grabbing":"grab"):(onSelect?"crosshair":"default"),userSelect:"none"}}
@@ -2470,7 +2476,7 @@ function ProgramCompareChart({series,domainStart,domainEnd,selMin,onSelect,onPan
       onMouseLeave={()=>setDragging(false)}>
       <rect x={0} y={0} width={w} height={h} fill="#FAFBFC" rx={8}/>
       {yT.map(v=><g key={v}><line x1={p.l} x2={w-p.r} y1={yS(v)} y2={yS(v)} stroke="#E5E7EB" strokeDasharray="2,4"/><text x={p.l-6} y={yS(v)+4} fill="#9CA3AF" fontSize="10" textAnchor="end" fontFamily="monospace">{v}%</text></g>)}
-      {xT.map(m=><text key={m} x={xS(m)} y={h-8} fill="#9CA3AF" fontSize="9.5" textAnchor="middle" fontFamily="monospace">{m2t(m)}</text>)}
+      {xT.map((m,i)=><text key={m} x={xS(m)} y={h-8} fill="#9CA3AF" fontSize="9.5" textAnchor={i===0?"start":i===xT.length-1?"end":"middle"} fontFamily="monospace">{m2t(m)}</text>)}
       {hl&&<rect x={xS(hl.start)} y={p.t} width={Math.max(xS(hl.end)-xS(hl.start),2)} height={cH} fill={hlColor} opacity={0.07} rx={2}/>}
       {hl&&<line x1={xS(hl.start)} x2={xS(hl.start)} y1={p.t} y2={p.t+cH} stroke={hlColor} strokeWidth={1.5} opacity={0.4} strokeDasharray="4,3"/>}
       {hl&&<line x1={xS(hl.end)} x2={xS(hl.end)} y1={p.t} y2={p.t+cH} stroke={hlColor} strokeWidth={1.5} opacity={0.4} strokeDasharray="4,3"/>}
