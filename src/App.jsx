@@ -2429,7 +2429,11 @@ function ProgramWeeklyTrendChart({periods,onSelectDate}){
     <svg width={w} height={h}>
       <rect x={0} y={0} width={w} height={h} fill="#FAFBFC" rx={8}/>
       {yT.map(v=><g key={v}><line x1={p.l} x2={w-p.r} y1={yS(v)} y2={yS(v)} stroke="#E5E7EB" strokeDasharray="2,4"/><text x={p.l-6} y={yS(v)+4} fill="#9CA3AF" fontSize="10" textAnchor="end" fontFamily="monospace">{v}%</text></g>)}
-      {periods.map((pr,i)=><text key={pr.label} x={xS(i)} y={h-8} fill="#9CA3AF" fontSize="9" textAnchor={i===0?"start":i===n-1?"end":"middle"} fontFamily="monospace">{pr.label}</text>)}
+      {/* 目盛りが多い(3か月表示など)時は文字が重なるので、間引いて表示する(両端は必ず表示) */}
+      {(()=>{const labelStep=n>9?2:1;return periods.map((pr,i)=>{
+        if(labelStep>1&&i%labelStep!==0&&i!==n-1)return null;
+        return <text key={pr.label} x={xS(i)} y={h-8} fill="#9CA3AF" fontSize="9" textAnchor={i===0?"start":i===n-1?"end":"middle"} fontFamily="monospace">{pr.label}</text>;
+      });})()}
       {WEEKDAY_LABELS.map((lb,di)=>{
         const pts=periods.map((pr,i)=>{const cell=pr.values[di];return cell&&typeof cell.v==="number"?{i,...cell}:null;}).filter(Boolean);
         if(!pts.length)return null;
@@ -2725,12 +2729,14 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
   const datesKey=compareDates.map(c=>c.date).join(",");
 
   // 「曜日別推移」(帯番組向け)。表示範囲は「1か月表示」(特定の月を選んで表示)と「3か月表示」
-  // (選択日を含む週を基準に約3か月分さかのぼる)の2種類。どちらも集計はせず、日ごとの値をそのままプロットする。
-  // ‹/›ボタンで表示範囲を1週間ずつずらせる(trendWeekOffset)
+  // (今週を基準に約3か月分さかのぼる)の2種類。どちらも集計はせず、日ごとの値をそのままプロットする。
+  // ‹/›ボタンで表示範囲を1週間ずつずらせる(trendWeekOffset)。
+  // どちらの基準日も選択日(refDate)には連動させない: グラフの点をクリックするとrefDateが変わる仕様上、
+  // refDateに連動させるとクリックのたびにこのグラフの表示範囲自体が動いてしまい使いづらいため
   const[trendRangeType,setTrendRangeType]=useState("month1"); // "month1" | "month3"
   const[trendMonth,setTrendMonth]=useState(()=>refDate.slice(0,7)); // "YYYY-MM"(1か月表示で使う)
   const[trendWeekOffset,setTrendWeekOffset]=useState(0);
-  useEffect(()=>{setTrendWeekOffset(0);},[trendRangeType,trendMonth,refDate]);
+  useEffect(()=>{setTrendWeekOffset(0);},[trendRangeType,trendMonth]);
   // 1か月表示の月選択肢: 直近12か月ぶん(データ提供範囲外は除外)
   const trendMonthOptions=useMemo(()=>{
     const opts=[];
@@ -2748,18 +2754,20 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
     if(!progDef.weeklyTrend)return[];
     const numWeeks=TREND_RANGE_WEEKS[trendRangeType];
     // 1か月表示: 選んだ月の1日を含む週の月曜を起点にする(月初が週の途中でも1週目から表示される)
-    // 3か月表示: 選択日を含む週から約(numWeeks-1)週さかのぼった週の月曜を起点にする
+    // 3か月表示: 今週から約(numWeeks-1)週さかのぼった週の月曜を起点にする
     const baseMonday=trendRangeType==="month1"
       ?mondayOf(`${trendMonth}-01`)
-      :shiftDateStr(mondayOf(refDate),-(numWeeks-1)*7);
+      :shiftDateStr(mondayOf(GUIDE_DATE_MAX),-(numWeeks-1)*7);
     const startMonday=shiftDateStr(baseMonday,trendWeekOffset*7);
     const periods=[];
     for(let w=0;w<numWeeks;w++){
       const monday=shiftDateStr(startMonday,7*w);
-      periods.push({label:weekAxisLabel(monday),dates:[0,1,2,3,4].map(d=>shiftDateStr(monday,d))});
+      // 3か月表示は目盛りが13個と多く、「（月）」まで入れると横に重なって読みにくいため短い表記にする
+      const label=trendRangeType==="month3"?`${parseInt(monday.slice(5,7))}/${parseInt(monday.slice(8,10))}の週`:weekAxisLabel(monday);
+      periods.push({label,dates:[0,1,2,3,4].map(d=>shiftDateStr(monday,d))});
     }
     return periods;
-  },[progDef,trendRangeType,trendMonth,trendWeekOffset,refDate]);
+  },[progDef,trendRangeType,trendMonth,trendWeekOffset]);
   const weeklyDates=useMemo(()=>weeklyPeriods.flatMap(p=>p.dates),[weeklyPeriods]);
   // ‹/›ボタンの範囲外無効化用: これ以上遡る/進めるとデータ提供範囲を外れる場合はボタンを無効にする。
   // 進む方向は「今週(GUIDE_DATE_MAXを含む週)より先には進めない」という基準にする(月曜日どうしで比較。
