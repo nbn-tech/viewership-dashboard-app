@@ -2347,7 +2347,9 @@ const PROGRAM_DEFS=[
   // domainStart/domainEndを指定すると、横軸をその番組の実際の放送時間(土曜のみ短い等)に合わせず
   // 常に固定範囲で表示する。データが無い部分(土曜6:00-6:30等)は線が自然に途切れて見える
   // disallowDowは選択日から除外する曜日(0=日〜6=土)。放送が無い曜日をカレンダーで選べないようにする
-  {key:"dodesuka",label:"ドデスカ",match:t=>t.startsWith("ドデスカ！"),disallowDow:[0],domainStart:360,domainEnd:480},
+  // weeklyTrend:trueの番組は、視聴率推移グラフの上に「曜日別 週次推移」(月〜金の帯番組を各曜日ごとの
+  // 折れ線にして、横軸を週単位で並べたグラフ)を表示する
+  {key:"dodesuka",label:"ドデスカ",match:t=>t.startsWith("ドデスカ！"),disallowDow:[0],domainStart:360,domainEnd:480,weeklyTrend:true},
   // ドデスカ+は平日(月〜金)のみ15:40-19:00放送。土日は放送が無いため選択不可にする
   {key:"dodesukaplus",label:"ドデスカ+",match:t=>t.startsWith("ドデスカ＋")||t.startsWith("ドデスカ+"),disallowDow:[0,6],domainStart:940,domainEnd:1140},
   // チョコレートサムネットは日曜日のみ16:25-17:25放送。日曜以外は選択不可にする。
@@ -2368,6 +2370,49 @@ const PROGRAM_COMPARE_OFFSETS=[
   {label:"1週間前",offset:-7,color:"#EA580C"},
   {label:"4週間前",offset:-28,color:"#9333EA"},
 ];
+
+// 「曜日別 週次推移」グラフの設定。帯番組(月〜金)を対象に、直近何週ぶん遡って表示するか
+const WEEKLY_TREND_WEEKS=6;
+const WEEKDAY_LABELS=["月","火","水","木","金"];
+const WEEKDAY_COLORS=["#0EA5E9","#EF4444","#22C55E","#F59E0B","#8B5CF6"];
+
+// 週の月曜日の日付を「8/10（月）の週」の形式にする
+function weekAxisLabel(monday){
+  const[,m,d]=monday.split("-").map(Number);
+  return `${m}/${d}（月）の週`;
+}
+
+// 帯番組の「曜日別 週次推移」グラフ。横軸は週(月曜日基準)、月〜金それぞれを1本の折れ線にして、
+// 同じ横軸目盛りに5つの点が並ぶ形で重ね描きする(TV pop互換の見せ方)
+function ProgramWeeklyTrendChart({weeks}){
+  const cRef=useRef(null);
+  const[w,setW]=useState(900);
+  useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setW(e.contentRect.width);});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
+  const h=200,p={t:16,r:16,b:30,l:TIMELINE_LABEL_WIDTH};
+  const cW=Math.max(1,w-p.l-p.r),cH=h-p.t-p.b;
+  const n=weeks.length;
+  const allVals=weeks.flatMap(wk=>wk.values).filter(v=>typeof v==="number");
+  const maxVal=Math.max(5,...allVals)+1;
+  const xS=i=>p.l+(n<=1?cW/2:(i/(n-1))*cW);
+  const yS=v=>p.t+cH-(v/maxVal)*cH;
+  const yT=[];for(let v=0;v<=maxVal;v+=Math.max(1,Math.ceil(maxVal/5)))yT.push(v);
+  return <div ref={cRef} style={{width:"100%",height:h}}>
+    <svg width={w} height={h}>
+      <rect x={0} y={0} width={w} height={h} fill="#FAFBFC" rx={8}/>
+      {yT.map(v=><g key={v}><line x1={p.l} x2={w-p.r} y1={yS(v)} y2={yS(v)} stroke="#E5E7EB" strokeDasharray="2,4"/><text x={p.l-6} y={yS(v)+4} fill="#9CA3AF" fontSize="10" textAnchor="end" fontFamily="monospace">{v}%</text></g>)}
+      {weeks.map((wk,i)=><text key={wk.monday} x={xS(i)} y={h-8} fill="#9CA3AF" fontSize="9" textAnchor="middle" fontFamily="monospace">{weekAxisLabel(wk.monday)}</text>)}
+      {WEEKDAY_LABELS.map((lb,di)=>{
+        const pts=weeks.map((wk,i)=>({i,v:wk.values[di]})).filter(pt=>typeof pt.v==="number");
+        if(!pts.length)return null;
+        const d=pts.map((pt,k)=>`${k===0?"M":"L"}${xS(pt.i)},${yS(pt.v)}`).join(" ");
+        return <g key={lb}>
+          <path d={d} fill="none" stroke={WEEKDAY_COLORS[di]} strokeWidth={2}/>
+          {pts.map(pt=><circle key={pt.i} cx={xS(pt.i)} cy={yS(pt.v)} r={3} fill={WEEKDAY_COLORS[di]}/>)}
+        </g>;
+      })}
+    </svg>
+  </div>;
+}
 
 // 複数系列(選択日/前日/1週間前/4週間前)を実時刻の横軸で重ね描きする折れ線グラフ。
 // 横軸の範囲は選択日(基準系列)の実際の放送時間に合わせる(平日は6:00-8:00、土曜は放送されている時間のみ等)
@@ -2628,12 +2673,27 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
   const compareDates=useMemo(()=>compareOffsets.map(c=>({...c,date:shiftDateStr(refDate,c.offset)})),[refDate,compareOffsets]);
   const datesKey=compareDates.map(c=>c.date).join(",");
 
+  // 「曜日別 週次推移」(帯番組向け): 選択日を含む週から遡ってWEEKLY_TREND_WEEKS週ぶん、月〜金の日付を並べる
+  const weeklyWeeks=useMemo(()=>{
+    if(!progDef.weeklyTrend)return[];
+    const refMonday=mondayOf(refDate);
+    const weeks=[];
+    for(let w=WEEKLY_TREND_WEEKS-1;w>=0;w--){
+      const monday=shiftDateStr(refMonday,-7*w);
+      weeks.push({monday,dates:[0,1,2,3,4].map(d=>shiftDateStr(monday,d))});
+    }
+    return weeks;
+  },[progDef,refDate]);
+  const weeklyDates=useMemo(()=>weeklyWeeks.flatMap(w=>w.dates),[weeklyWeeks]);
+  const weeklyDatesKey=weeklyDates.join(",");
+
   const[epgCache,setEpgCache]=useState({});
   const[ratingCache,setRatingCache]=useState({});
   const[cornerCache,setCornerCache]=useState({});
 
   useEffect(()=>{
-    compareDates.forEach(({date})=>{
+    const allDates=[...new Set([...compareDates.map(c=>c.date),...weeklyDates])];
+    allDates.forEach(date=>{
       if(!(date in epgCache)){
         setEpgCache(prev=>({...prev,[date]:null}));
         const yyyymmdd=date.replace(/-/g,'');
@@ -2650,7 +2710,7 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[datesKey,demoMetric]);
+  },[datesKey,weeklyDatesKey,demoMetric]);
   // 分析結果(コーナー)は、選択日だけでなく4本の比較系列すべてぶん取得する(タイムラインを縦に並べて表示するため)
   useEffect(()=>{
     compareDates.forEach(({date})=>{
@@ -2680,6 +2740,31 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
     const points=ratings.filter(r=>r.minute>=relStart&&r.minute<relEnd).map(r=>({minuteOfDay:r.minute,v:valueOf(r)}));
     return{...cd,loading:false,points:points.length?points:null,prog,relStart,relEnd};
   }),[compareDates,epgCache,ratingCache,progKey,demoMetric,metric]);
+
+  // 「曜日別 週次推移」: 各週×各曜日について、その日の番組放送時間内の平均視聴率(または占拠率)を出す。
+  // undefined=読み込み中、null=その日は番組が無かった(祝日で休止等)、数値=その日の平均値
+  const weeklySeries=useMemo(()=>{
+    if(!progDef.weeklyTrend)return null;
+    return weeklyWeeks.map(week=>({
+      monday:week.monday,
+      values:week.dates.map(date=>{
+        const progs=epgCache[date];
+        const ratings=ratingCache[`${date}|${demoMetric}`];
+        if(progs==null||ratings==null)return undefined;
+        const dayMid=localMidnightAbsMin(date);
+        const prog=progs.find(p=>p.stId==="NBN"&&progDef.match(p.title));
+        if(!prog)return null;
+        const relStart=prog.startAbs-dayMid,relEnd=prog.endAbs-dayMid;
+        const valueOf=r=>{
+          if(metric!=="share")return r.NBN;
+          const t=ST.reduce((s,st)=>s+(r[st.id]||0),0);
+          return t>0?(r.NBN/t)*100:0;
+        };
+        const pts=ratings.filter(r=>r.minute>=relStart&&r.minute<relEnd);
+        return pts.length?pts.reduce((s,r)=>s+valueOf(r),0)/pts.length:null;
+      }),
+    }));
+  },[progDef,weeklyWeeks,epgCache,ratingCache,demoMetric,metric]);
 
   const refSeries=series[0];
   // 横軸の範囲: 番組定義にdomainStart/domainEndがあれば常にその固定範囲(例:ドデスカは土曜も6:00-8:00)。
@@ -2832,6 +2917,17 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
           <h1 style={{fontSize:22,fontWeight:600,color:"#1d1d1f",letterSpacing:"-0.374px"}}>番組別 － {progDef.label}</h1>
           <p style={{fontSize:13,color:"#7a7a7a",marginTop:4,letterSpacing:"-0.2px"}}>NBN視聴率推移を、選択日・前日・1週間前・4週間前で重ねて比較できます。左のメニューから他の番組にも切り替えられます。</p>
         </div>
+        {progDef.weeklyTrend&&weeklySeries&&<div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:16,marginBottom:16}}>
+          <div style={{fontSize:13,fontWeight:600,color:"#1d1d1f",marginBottom:2}}>曜日別 週次推移</div>
+          <p style={{fontSize:11.5,color:"#9CA3AF",marginBottom:8}}>月〜金それぞれの{progDef.label}平均視聴率を、週単位で並べて比較できます。</p>
+          <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",marginBottom:8}}>
+            {WEEKDAY_LABELS.map((lb,i)=><div key={lb} style={{display:"flex",alignItems:"center",gap:5,fontSize:11}}>
+              <span style={{width:10,height:2.5,background:WEEKDAY_COLORS[i],display:"inline-block",borderRadius:2}}/>
+              <span style={{color:"#374151",fontWeight:600}}>{lb}曜日</span>
+            </div>)}
+          </div>
+          <ProgramWeeklyTrendChart weeks={weeklySeries}/>
+        </div>}
         <div style={{background:"#fff",border:"1px solid #e0e0e0",borderRadius:18,padding:"16px 0",marginBottom:16}}>
           <div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center",marginBottom:10,padding:"0 16px"}}>
             <span style={{color:"#9CA3AF",fontSize:10,fontFamily:"monospace",marginRight:2}}>表示設定</span>
