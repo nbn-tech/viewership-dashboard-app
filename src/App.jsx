@@ -862,7 +862,9 @@ async function fetchInoutFlow(date,slot,baseStId){
       const matrix={},ratings={};
       toRows.forEach(({toKey,row:r})=>{
         const m={};
-        colOrder.forEach(({colIdx,key})=>{const v=r[colIdx];if(typeof v==="number"&&v>0)m[key]=v;});
+        // 0も含めて必ず値を入れる(v>0で弾くとsummarizeInoutFlowの平均が
+        // 「値が乗った分だけ」で割られてしまい、区間合計(avg×分数)が過大評価される)
+        colOrder.forEach(({colIdx,key})=>{const v=r[colIdx];if(typeof v==="number")m[key]=v;});
         matrix[toKey]=m;
         const rv=r[14]; // 平均視聴率(TO側、視聴率そのもの。判定到達率(col11)は使わない)
         if(typeof rv==="number")ratings[toKey]=rv;
@@ -1316,7 +1318,7 @@ function InoutFlowChart({points,dayMid,winStart,winEnd}){
   const barW=Math.max(1,cW/total);
   const colorFor=key=>key==="OFF"?"#9CA3AF":key==="OTHER"?"#D1D5DB":(ST.find(s=>s.id===key)?.c||"#999");
   const visible=useMemo(()=>points
-    .map(pt=>({...pt,absMin:dayMid+pt.minute}))
+    .map(pt=>({...pt,...flowForStation(pt,"NBN"),absMin:dayMid+pt.minute}))
     .filter(pt=>pt.absMin>=winStart&&pt.absMin<winEnd),[points,dayMid,winStart,winEnd]);
   const maxVal=useMemo(()=>{
     let m=0.3;
@@ -3208,9 +3210,12 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
       const ps=rData.filter(d=>d.minute>=psM&&d.minute<peM);
       if(!ps.length)continue;
       const pavg=ps.reduce((s,d)=>s+d["NBN"],0)/ps.length;
-      const ppeak=Math.max(...ps.map(d=>d["NBN"]));
+      // 最高値がどのコーナーに属するか(あるいはコーナー間の未分析の隙間か)をAIに推測させず、
+      // 実際に最高値を記録した分をそのまま明記する(推測によるピーク時刻の誤認を防ぐ)
+      const ppeakRow=ps.reduce((best,d)=>d["NBN"]>best["NBN"]?d:best,ps[0]);
+      const ppeak=ppeakRow["NBN"];
       const plow=Math.min(...ps.map(d=>d["NBN"]));
-      lines.push(`\n■ NBN「${progName}」(${progStart}–${progEnd}) AVG${pavg.toFixed(1)}% 最高${ppeak.toFixed(1)}% 最低${plow.toFixed(1)}%`);
+      lines.push(`\n■ NBN「${progName}」(${progStart}–${progEnd}) AVG${pavg.toFixed(1)}% 最高${ppeak.toFixed(1)}%(${ppeakRow.time}時点) 最低${plow.toFixed(1)}%`);
       for(const cn of corners){
         const[title,cs,ce,seg,,summary]=cn;
         if(SKIP_SEG.has(seg))continue;
@@ -3231,7 +3236,7 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
             .filter(([rid,f])=>rid!=="NBN"&&(f.avgIn*windowMin>=1.0||f.avgOut*windowMin>=1.0))
             .forEach(([rid,f])=>{
               const label=rid==="OTHER"?"その他局":rid==="OFF"?"視聴終了(OFF)":rid;
-              lines.push(`    [実測]裏${label}: 流入${(f.avgIn*windowMin).toFixed(1)}pt(${f.avgIn.toFixed(2)}%/分)・流出${(f.avgOut*windowMin).toFixed(1)}pt(${f.avgOut.toFixed(2)}%/分)`);
+              lines.push(`    [実測]裏${label}: このコーナー(${windowMin}分間)の合計で流入${(f.avgIn*windowMin).toFixed(1)}pt(1分あたり${f.avgIn.toFixed(2)}%)・流出${(f.avgOut*windowMin).toFixed(1)}pt(1分あたり${f.avgOut.toFixed(2)}%)`);
             });
         }else{
           const rivals=computeRivalFlow("NBN",sM,eM,rData,tpl);
@@ -3256,7 +3261,8 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
         const ps=rData.filter(d=>d.minute>=psM&&d.minute<peM);
         if(!ps.length)continue;
         const pavg=ps.reduce((s,d)=>s+d[sid],0)/ps.length;
-        const ppeak=Math.max(...ps.map(d=>d[sid]));
+        const ppeakRow=ps.reduce((best,d)=>d[sid]>best[sid]?d:best,ps[0]);
+        const ppeak=ppeakRow[sid];
         const topC=[];
         for(const cn of corners){
           const[title,cs,ce,seg,,summary]=cn;
@@ -3279,16 +3285,16 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
             if(realFlow){
               const sig=Object.entries(realFlow).filter(([rid,f])=>rid!==sid&&(f.avgIn*windowMin>=1.0||f.avgOut*windowMin>=1.0));
               if(sig.length){
-                flowTxt=" ["+sig.map(([rid,f])=>{
+                flowTxt=" [このコーナー("+windowMin+"分間)の合計実測: "+sig.map(([rid,f])=>{
                   const label=rid==="OTHER"?"その他局":rid==="OFF"?"視聴終了(OFF)":rid;
-                  return `実測${label}:流入${(f.avgIn*windowMin).toFixed(1)}pt/流出${(f.avgOut*windowMin).toFixed(1)}pt`;
+                  return `${label}:流入${(f.avgIn*windowMin).toFixed(1)}pt/流出${(f.avgOut*windowMin).toFixed(1)}pt`;
                 }).join(" ")+"]";
               }
             }
           }
           return `「${c.title}」(${c.cs}–${c.ce})${c.avg.toFixed(1)}%${c.summary?` — ${c.summary}`:""}${flowTxt}`;
         }).join(" / ");
-        lines.push(`  ${sid}「${progName}」(${progStart}–${progEnd}) AVG${pavg.toFixed(1)}% 最高${ppeak.toFixed(1)}%${top2?` 主要:${top2}`:""}`);
+        lines.push(`  ${sid}「${progName}」(${progStart}–${progEnd}) AVG${pavg.toFixed(1)}% 最高${ppeak.toFixed(1)}%(${ppeakRow.time}時点)${top2?` 主要:${top2}`:""}`);
       }
     }
   }
