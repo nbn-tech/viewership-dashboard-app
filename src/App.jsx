@@ -1509,6 +1509,18 @@ function getRatings(date,slot){
 // ALL_DATES分を初期ロード（Search/Analysisで使用）
 (()=>{for(const d of ALL_DATES)for(const s of ALL_SLOTS)getRatings(d,s);})();
 
+// AI分析はページ読み込み時のバックグラウンド同期(syncNewRatingsFromS3、全期間を巡回するため時間がかかる)の
+// 完了を待たずに実行されることがあり、その場合ビルド時データにも無い日は実データが未取得のままデモ生成値に
+// フォールバックしてしまう。分析対象の日付だけはその場でS3から確実に取得してREAL_RATINGSへ反映してから使う
+async function ensureRealRatings(date){
+  if(REAL_RATINGS[`${date}|morning`]&&REAL_RATINGS[`${date}|evening`])return;
+  try{
+    const slots=await fetchAndParseRatingXlsx(date);
+    if(slots.morning)REAL_RATINGS[`${date}|morning`]=slots.morning;
+    if(slots.evening)REAL_RATINGS[`${date}|evening`]=slots.evening;
+  }catch{/* 実データが無い日(未来日/欠測日)は従来通りデモ生成値にフォールバックする */}
+}
+
 function computeCornerStats(corner,cache,metric){
   // cache(=rCache)に無くても getRatings が実データ／デモ生成のどちらかを必ず返す(内部でcacheにも書き込む)
   const rData=cache[`${corner.date}|${corner.slot}`]||getRatings(corner.date,corner.slot);
@@ -3320,6 +3332,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
     setError(null);setLoading(true);setStreaming(true);
     setOverviewText("");setHighlightText("");setConclusionText("");setCachedAt(null);
     setAnalysisLabel(label);
+    await Promise.all(activeDates.map(ensureRealRatings));
     const ctx=await buildAnalysisContext(activeDates,slot,ratingsCache,tplByDate);
     const slotLabel=slot==="morning"?"朝帯（5:30-8:30）":"夕方帯（15:30-19:00）";
     const periodLabel=mode==="daily"?`${activeDates[0]} ${slotLabel}`:`${label}`;
@@ -3409,6 +3422,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
         catch{cornerMap[date]=[];}
       }
     }));
+    await Promise.all(neededDates.map(ensureRealRatings));
     setTopicEpgByDate(epgMap);setTopicCornersByDate(cornerMap);
     const tplCache={};
     const tplFor=(date,slotKey)=>{
