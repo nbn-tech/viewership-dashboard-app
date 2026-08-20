@@ -902,7 +902,10 @@ function extractTopInoutMoments(points,n=3,stId="NBN"){
   events.sort((a,b)=>b.v-a.v);
   return events.slice(0,n);
 }
-// 指定分区間[sM,eM)ぶんの平均流入・流出率(%/分)を局ごとに算出する(実測パネルデータ版、stId視点)
+// 指定分区間[sM,eM)ぶんの平均流入・流出率(%/分)を局ごとに算出する(実測パネルデータ版、stId視点)。
+// 実測データは朝帯なら05:30-08:30など決まった範囲しか無いため、コーナーがその範囲を超えて続く場合、
+// 実際にデータがある分数(coveredMinutes)は指定区間[sM,eM)の長さより短くなることがある。
+// 呼び出し側は必ずcoveredMinutesを使って合計量を計算すること(データが無い分まで推測して水増ししない)
 function summarizeInoutFlow(points,sM,eM,stId="NBN"){
   const seg=points.filter(p=>p.minute>=sM&&p.minute<eM);
   if(!seg.length)return null;
@@ -910,7 +913,7 @@ function summarizeInoutFlow(points,sM,eM,stId="NBN"){
   const keys=new Set();
   flows.forEach(({inflow,outflow})=>{Object.keys(inflow).forEach(k=>keys.add(k));Object.keys(outflow).forEach(k=>keys.add(k));});
   const avg=arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:0;
-  const out={};
+  const out={coveredMinutes:seg.length};
   keys.forEach(key=>{
     const ins=flows.map(f=>f.inflow[key]).filter(v=>typeof v==="number");
     const outs=flows.map(f=>f.outflow[key]).filter(v=>typeof v==="number");
@@ -1643,10 +1646,15 @@ async function _annotationListRequest({ dateFrom, dateTo, limit = 1000 }) {
   }));
 }
 
-// AI生成テキストは「+3.4pt流出」のようにpt数値の前へ+/-符号を付けてしまうことがあり、プロンプトの指示だけでは
-// 守られない場合があるため、返ってきたテキストから符号を機械的に取り除く(表示前の最終防波堤)
+// AI生成テキストは「+3.4pt流出」のように数値の前へ+/-符号を付けてしまうことがあり、プロンプトの指示だけでは
+// 守られない場合があるため、返ってきたテキストから符号を機械的に取り除く(表示前の最終防波堤)。
+// 表記は pt ではなく % に統一する(現場から「pt表記が分かりにくい」との声を受けて変更。AIが古い癖で
+// ptと書いてしまった場合も、符号の有無にかかわらずここで%に正規化する)
 function stripPtSign(text){
-  return text ? text.replace(/[+\-−＋－]\s?(\d+(?:\.\d+)?)\s?pt/g, "$1pt") : text;
+  if(!text)return text;
+  let out=text.replace(/[+\-−＋－]\s?(\d+(?:\.\d+)?)\s?(?:pt|%)/g,"$1%");
+  out=out.replace(/(\d+(?:\.\d+)?)\s?pt\b/g,"$1%");
+  return out;
 }
 
 const apiClient = {
@@ -1686,7 +1694,7 @@ const apiClient = {
 
   // 統括分析
   async generateOverview(periodLabel, ctx){
-    const prompt=`あなたは名古屋テレビ(NBN)の視聴率担当アナリストです。以下は在名7局の${periodLabel}の番組・コーナー別視聴率データです。NBN現場スタッフ向けの視聴率レポートを作成してください。\n\n【データの読み方(必ず守ること)】\n- 指標は視聴率(その時間帯にその局を見ていた世帯が、テレビを持つ全世帯のうち何%か)\n- 「裏局↓マイナス(NBNへ流入)」= 裏局の視聴率が下がり、NBNへ視聴者が動いた可能性がある\n- 「裏局↑プラス(NBNから流出)」= 裏局の視聴率が上がり、NBNから視聴者が動いた可能性がある\n\n${ctx}\n\n【出力形式(必ず守ること)】\n・■ で始まる行はセクション見出しとして使用\n・具体的な時刻・番組名・数値を必ず記載(例: 7:03 CTV「ZIP!」終了後に1.4pt流入)\n・pt(ポイント)は視聴率の変化幅(percentage point)を表す。流入・流出という言葉自体が向きを表すので、数値の前に+/-の符号は付けないこと\n・→ を使って流れや因果を表現\n\n以下の2セクションのみ作成してください(他のセクションは含めないこと):\n\n■ NBN各番組の動き\n(番組ごとに冒頭・中盤・終盤の流れ、ピーク・ボトムの時刻と数値、急上昇・急降下した箇所)\n\n■ 競合各局の動き\n(各局の主要番組の概況、NBNへの影響)`;
+    const prompt=`あなたは名古屋テレビ(NBN)の視聴率担当アナリストです。以下は在名7局の${periodLabel}の番組・コーナー別視聴率データです。NBN現場スタッフ向けの視聴率レポートを作成してください。\n\n【データの読み方(必ず守ること)】\n- 指標は視聴率(その時間帯にその局を見ていた世帯が、テレビを持つ全世帯のうち何%か)\n- 「裏局↓マイナス(NBNへ流入)」= 裏局の視聴率が下がり、NBNへ視聴者が動いた可能性がある\n- 「裏局↑プラス(NBNから流出)」= 裏局の視聴率が上がり、NBNから視聴者が動いた可能性がある\n- 各コーナーには「↑上昇」「↓低下」の表記が付いている。これはそのコーナー自身の視聴率がIN→OUTでどちらに動いたかを表しており、この表記をそのまま使うこと。数値の符号(+/-)から自分で方向を判断しないこと\n\n${ctx}\n\n【出力形式(必ず守ること)】\n・■ で始まる行はセクション見出しとして使用\n・具体的な時刻・番組名・数値を必ず記載(例: 7:03 CTV「ZIP!」終了後に1.4%流入)\n・視聴率の変化幅は%で表記すること(pt(ポイント)という表記は使わないこと)。流入・流出・上昇・低下という言葉自体が向きを表すので、数値の前に+/-の符号は付けないこと\n・→ を使って流れや因果を表現\n\n以下の2セクションのみ作成してください(他のセクションは含めないこと):\n\n■ NBN各番組の動き\n(番組ごとに冒頭・中盤・終盤の流れ、ピーク・ボトムの時刻と数値、急上昇・急降下した箇所)\n\n■ 競合各局の動き\n(各局の主要番組の概況、NBNへの影響)`;
     if(API_CONFIG.useMock){
       const text=await _callClaudeDirect([{role:"user",content:prompt}],8000);
       return{prompt,text:stripPtSign(text)};
@@ -1697,7 +1705,7 @@ const apiClient = {
 
   // ハイライト分析
   async generateHighlight(prevPrompt, prevText){
-    const followup=`続けて、以下の4セクションを追加してください(総評・示唆は含めないこと)。\n\n■ 流入・流出まとめ\n(NBN視点で、どの局の何の番組終了/開始時に視聴者が動いたか、時刻と数値を箇条書きで。pt(ポイント)は視聴率の変化幅を表す単位。「流入」「流出」という言葉自体が向きを表すので、数値の前に+/-の符号は付けないこと。例: 「7:03 CTV「ZIP!」終了後に1.4pt流入」)\n\n■ 最高視聴率のタイミング\n(何時何分・どのコーナー・何%・なぜ高かったか)\n\n■ 急上昇コーナー TOP3\n■ 急降下コーナー TOP3\n(この2つは対になるセクションです。判定は必ずそのコーナー自身のIN%→OUT%の実数値の大小だけで行うこと(他局比較の「流入」「流出」表現とは切り離して判断すること。他局からの流入が多くても、コーナー自身のOUT%がIN%より低ければそれは急降下であり、急上昇とは呼ばないこと)。OUT%がIN%より高いものを急上昇候補、低いものを急降下候補とし、その差の絶対値が大きい順にTOP3を選ぶこと。1つのコーナーは必ずどちらか一方のリストにのみ登場させ、同じコーナー名を両方のリストに重複して載せないこと。各項目には次を必ず明記すること: コーナー名／放送時間帯(開始〜終了、分単位。例: 07:30–07:45)／変化幅(pt)／データ中のIN%→OUT%の具体的な数値(例: 3.2%→4.6%)／要因)`;
+    const followup=`続けて、以下の4セクションを追加してください(総評・示唆は含めないこと)。\n\n■ 流入・流出まとめ\n(NBN視点で、どの局の何の番組終了/開始時に視聴者が動いたか、時刻と数値を箇条書きで。視聴率の変化幅は%で表記すること(pt表記は使わないこと)。「流入」「流出」という言葉自体が向きを表すので、数値の前に+/-の符号は付けないこと。例: 「7:03 CTV「ZIP!」終了後に1.4%流入」)\n\n■ 最高視聴率のタイミング\n(何時何分・どのコーナー・何%・なぜ高かったか)\n\n■ 急上昇コーナー TOP3\n■ 急降下コーナー TOP3\n(この2つは対になるセクションです。判定は必ずそのコーナー自身のIN%→OUT%の実数値の大小だけで行うこと(他局比較の「流入」「流出」表現とは切り離して判断すること。他局からの流入が多くても、コーナー自身のOUT%がIN%より低ければそれは急降下であり、急上昇とは呼ばないこと)。ctx中の各コーナーに付いている「↑上昇」「↓低下」の表記をそのまま使い、自分で符号から方向を判断しないこと。OUT%がIN%より高いものを急上昇候補、低いものを急降下候補とし、その差の絶対値が大きい順にTOP3を選ぶこと。1つのコーナーは必ずどちらか一方のリストにのみ登場させ、同じコーナー名を両方のリストに重複して載せないこと。各項目には次を必ず明記すること: コーナー名／放送時間帯(開始〜終了、分単位。例: 07:30–07:45)／変化幅(%)／データ中のIN%→OUT%の具体的な数値(例: 3.2%→4.6%)／要因)`;
     if(API_CONFIG.useMock){
       const text=await _callClaudeDirect([
         {role:"user",content:prevPrompt},
@@ -1714,7 +1722,7 @@ const apiClient = {
   // 「文章が長すぎて読む気がなくなる」という現場フィードバックを受けて追加。長文の根拠レポートとは別に、
   // NBN以外の局の実分析結果も含めて横断的に見た最重要ポイントだけを1〜2点、短い1段落で述べさせる
   async generateTrendSummary(overviewPrompt, overviewText){
-    const followup=`続けて、今度は非常に短いセクションを1つだけ追加してください(見出し・箇条書きは使わず、他のセクションは一切書かないこと)。\n\n在名7局(NBN・THK・CTV・CBC・NHK・NHKE・TVA)の実データを局横断で見て、この時間帯全体で最も重要な1〜2点だけを、短い1段落(100〜150字程度)で述べてください。\n・各局で共通して人気だった話題・コンテンツ傾向があれば最優先で挙げること\n・視聴者が局をまたいで移動した具体的な事実(実測データに時刻・局名・数値があれば明記)があれば、その理由を一言で\n・「〜と考えられます」のような曖昧な前置きや言い訳は避け、断定的かつ簡潔に書くこと\n・pt(ポイント)は視聴率の変化幅を表す単位。数値の前に+/-の符号は付けないこと`;
+    const followup=`続けて、今度は非常に短いセクションを1つだけ追加してください(見出し・箇条書きは使わず、他のセクションは一切書かないこと)。\n\n在名7局(NBN・THK・CTV・CBC・NHK・NHKE・TVA)の実データを局横断で見て、この時間帯全体で最も重要な1〜2点だけを、短い1段落(100〜150字程度)で述べてください。\n・各局で共通して人気だった話題・コンテンツ傾向があれば最優先で挙げること\n・視聴者が局をまたいで移動した具体的な事実(実測データに時刻・局名・数値があれば明記)があれば、その理由を一言で\n・「〜と考えられます」のような曖昧な前置きや言い訳は避け、断定的かつ簡潔に書くこと\n・視聴率の変化幅は%で表記すること(pt表記は使わないこと)。数値の前に+/-の符号は付けないこと`;
     if(API_CONFIG.useMock){
       const text=await _callClaudeDirect([
         {role:"user",content:overviewPrompt},
@@ -1729,7 +1737,7 @@ const apiClient = {
 
   // 総評・今後の示唆（根拠分析をもとに結論だけ生成）
   async generateConclusion(combinedAnalysis){
-    const prompt=`以下はNBNの視聴率分析レポートです。この内容をもとに、現場スタッフ向けの総評と今後の示唆を作成してください。\n\n${combinedAnalysis}\n\n【出力形式(必ず守ること)】\n・■ で始まる行はセクション見出しとして使用\n・具体的な番組名・コーナー名・数値を使って記載\n・pt(ポイント)は視聴率の変化幅を表す単位。「流入」「流出」「上昇」「低下」などの言葉自体が向きを表すので、数値の前に+/-の符号は付けないこと(例:「-3.2ptの流出」ではなく「3.2ptの流出」、「+5.4ptの上昇」ではなく「5.4ptの上昇」)\n・2セクションのみ出力\n\n■ 総評\n(この期間のNBNのパフォーマンスを3〜4行で評価。良かった点・課題点を具体的に)\n\n■ 今後の示唆\n(編成・制作担当者への提言を箇条書きで3〜4点。具体的な番組名・コーナー名・時間帯を使って記載)`;
+    const prompt=`以下はNBNの視聴率分析レポートです。この内容をもとに、現場スタッフ向けの総評と今後の示唆を作成してください。\n\n${combinedAnalysis}\n\n【出力形式(必ず守ること)】\n・■ で始まる行はセクション見出しとして使用\n・具体的な番組名・コーナー名・数値を使って記載\n・視聴率の変化幅は%で表記すること(pt表記は使わないこと)。「流入」「流出」「上昇」「低下」などの言葉自体が向きを表すので、数値の前に+/-の符号は付けないこと(例:「-3.2%の流出」ではなく「3.2%の流出」、「+5.4%の上昇」ではなく「5.4%の上昇」)。参照元のレポートに「↑上昇」「↓低下」の表記があれば、それをそのまま使い、自分で符号から方向を判断しないこと\n・2セクションのみ出力\n\n■ 総評\n(この期間のNBNのパフォーマンスを3〜4行で評価。良かった点・課題点を具体的に)\n\n■ 今後の示唆\n(編成・制作担当者への提言を箇条書きで3〜4点。具体的な番組名・コーナー名・時間帯を使って記載)`;
     if(API_CONFIG.useMock){
       const text=await _callClaudeDirect([{role:"user",content:prompt}],2000);
       return stripPtSign(text);
@@ -1740,7 +1748,7 @@ const apiClient = {
 
   // トピック分析
   async generateTopicAnalysis(query, rows){
-    const tprompt=`テレビ視聴率アナリストとして、「${query}」というトピックに関する在名7局の過去放送実績を分析してください。\n\n【データの読み方(必ず守ること)】\n- 指標は視聴率(その時間帯にその局を見ていた世帯が、テレビを持つ全世帯のうち何%か)\n- 「裏局↓マイナス」= 裏局の視聴率が下がった = 視聴者が裏局から自局に移動した可能性がある(自局への流入)\n- 「裏局↑プラス」= 裏局の視聴率が上がった = 視聴者が自局から裏局に移動した可能性がある(自局からの流出)\n- 自局DIFFがプラスなら自局が視聴者を獲得、マイナスなら自局が視聴者を失ったことを示す\n- 裏局がプラスでも自局もプラスなら全体的な視聴者増(テレビ視聴者全体が増えた)の可能性がある\n- pt(ポイント)は視聴率の変化幅を表す単位。文中で「流入」「流出」に数値(pt)を添えて書く時は、その言葉自体が向きを表すので数値の前に+/-の符号は付けないこと(例:「-3.4pt流入」ではなく「3.4pt流入」)\n\n【局別データ】\n${rows}\n\n上記の解釈ルールに従い、以下の観点で分析してください:\n1. このトピックは視聴率を取りやすいか取りにくいか\n2. 各局の傾向の違い\n3. 裏番組からの流入・流出パターン(どの局の何の番組放送中に視聴者が動いたか、自局視点で正確に)\n4. 今後の放送への示唆\n400字程度でまとめてください。`;
+    const tprompt=`テレビ視聴率アナリストとして、「${query}」というトピックに関する在名7局の過去放送実績を分析してください。\n\n【データの読み方(必ず守ること)】\n- 指標は視聴率(その時間帯にその局を見ていた世帯が、テレビを持つ全世帯のうち何%か)\n- 「裏局↓マイナス」= 裏局の視聴率が下がった = 視聴者が裏局から自局に移動した可能性がある(自局への流入)\n- 「裏局↑プラス」= 裏局の視聴率が上がった = 視聴者が自局から裏局に移動した可能性がある(自局からの流出)\n- 自局DIFFがプラスなら自局が視聴者を獲得、マイナスなら自局が視聴者を失ったことを示す\n- 裏局がプラスでも自局もプラスなら全体的な視聴者増(テレビ視聴者全体が増えた)の可能性がある\n- 視聴率の変化幅は%で表記すること(pt表記は使わないこと)。文中で「流入」「流出」に数値を添えて書く時は、その言葉自体が向きを表すので数値の前に+/-の符号は付けないこと(例:「-3.4%流入」ではなく「3.4%流入」)\n\n【局別データ】\n${rows}\n\n上記の解釈ルールに従い、以下の観点で分析してください:\n1. このトピックは視聴率を取りやすいか取りにくいか\n2. 各局の傾向の違い\n3. 裏番組からの流入・流出パターン(どの局の何の番組放送中に視聴者が動いたか、自局視点で正確に)\n4. 今後の放送への示唆\n400字程度でまとめてください。`;
     if(API_CONFIG.useMock){
       const text=await _callClaudeDirect([{role:"user",content:tprompt}],800);
       return stripPtSign(text);
@@ -3225,25 +3233,32 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
         if(!slice.length)continue;
         const avg=slice.reduce((s,d)=>s+d["NBN"],0)/slice.length;
         const iV=slice[0]["NBN"],oV=slice[slice.length-1]["NBN"],df=oV-iV;
-        lines.push(`  ・「${title}」(${cs}–${ce}) IN${iV.toFixed(1)}% AVG${avg.toFixed(1)}% OUT${oV.toFixed(1)}% ${df>=0?"+":""}${df.toFixed(1)}pt`);
+        // 方向(上昇/低下)を単語で明記する。符号だけ渡すとAIが解釈を誤り、実際は上昇なのに
+        // 「流出」と書いてしまうことがあったため、AIに解釈させず断定した表記をそのまま使わせる
+        const dirTxt=df>=0?`↑上昇${Math.abs(df).toFixed(1)}%`:`↓低下${Math.abs(df).toFixed(1)}%`;
+        lines.push(`  ・「${title}」(${cs}–${ce}) IN${iV.toFixed(1)}% AVG${avg.toFixed(1)}% OUT${oV.toFixed(1)}%(${dirTxt})`);
         if(summary)lines.push(`    内容: ${summary}`);
         const realFlow=inoutPoints?summarizeInoutFlow(inoutPoints,sM,eM):null;
-        if(realFlow){
-          // 実測は1分あたりの流入・流出率(%/分)なので、旧来のdf(コーナー全体でのpt変化)と比較しやすいよう
-          // コーナーの長さ(分)を掛けた「コーナー全体での推定流入・流出量(pt)」も併記する
-          const windowMin=eM-sM;
+        const nominalWindow=eM-sM;
+        // 実測データは朝帯なら05:30-08:30などの決まった範囲しか無く、コーナーがその範囲を超えて
+        // 続く場合はcoveredMinutes(実際にデータがある分数)がコーナー全体の長さより短くなる。
+        // 半分未満しかカバーしていない場合は「実測」と称して水増しした数字を出さず、視聴率ベースの推定にフォールバックする
+        if(realFlow&&realFlow.coveredMinutes*2>=nominalWindow){
+          const windowMin=realFlow.coveredMinutes;
+          const rangeTxt=windowMin<nominalWindow?`${windowMin}分間ぶんの実測データのみ。コーナー全体は${nominalWindow}分`:`${windowMin}分間`;
           Object.entries(realFlow)
+            .filter(([rid])=>rid!=="coveredMinutes")
             .filter(([rid,f])=>rid!=="NBN"&&(f.avgIn*windowMin>=1.0||f.avgOut*windowMin>=1.0))
             .forEach(([rid,f])=>{
               const label=rid==="OTHER"?"その他局":rid==="OFF"?"視聴終了(OFF)":rid;
-              lines.push(`    [実測]裏${label}: このコーナー(${windowMin}分間)の合計で流入${(f.avgIn*windowMin).toFixed(1)}pt(1分あたり${f.avgIn.toFixed(2)}%)・流出${(f.avgOut*windowMin).toFixed(1)}pt(1分あたり${f.avgOut.toFixed(2)}%)`);
+              lines.push(`    [実測]裏${label}: このコーナー(${rangeTxt})の合計で流入${(f.avgIn*windowMin).toFixed(1)}%(1分あたり${f.avgIn.toFixed(2)}%)・流出${(f.avgOut*windowMin).toFixed(1)}%(1分あたり${f.avgOut.toFixed(2)}%)`);
             });
         }else{
           const rivals=computeRivalFlow("NBN",sM,eM,rData,tpl);
           rivals
             .filter(r=>Math.abs(r.df)>=1.0)
             .forEach(r=>{
-              const flow=r.df<=-1.0?`↓${Math.abs(r.df).toFixed(1)}pt(NBNへ流入)`:`↑${Math.abs(r.df).toFixed(1)}pt(NBNから流出)`;
+              const flow=r.df<=-1.0?`↓${Math.abs(r.df).toFixed(1)}%(NBNへ流入)`:`↑${Math.abs(r.df).toFixed(1)}%(NBNから流出)`;
               const corner=r.cornerTitle?`「${r.cornerTitle}」`:"";
               lines.push(`    裏${r.rid}${corner}: ${r.iV.toFixed(1)}→${r.oV.toFixed(1)}% ${flow}`);
             });
@@ -3280,14 +3295,18 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
         const top2=topC.slice(0,2).map(c=>{
           let flowTxt="";
           if(inoutPoints){
-            const sM=t2m(c.cs),eM=t2m(c.ce),windowMin=eM-sM;
+            const sM=t2m(c.cs),eM=t2m(c.ce),nominalWindow=eM-sM;
             const realFlow=summarizeInoutFlow(inoutPoints,sM,eM,sid);
-            if(realFlow){
-              const sig=Object.entries(realFlow).filter(([rid,f])=>rid!==sid&&(f.avgIn*windowMin>=1.0||f.avgOut*windowMin>=1.0));
+            // 実測データの範囲(朝帯なら05:30-08:30など)を超えて続くコーナーでは、半分未満しか
+            // カバーしていない実測値を「コーナー全体の合計」として水増しして出さない
+            if(realFlow&&realFlow.coveredMinutes*2>=nominalWindow){
+              const windowMin=realFlow.coveredMinutes;
+              const rangeTxt=windowMin<nominalWindow?`${windowMin}分間ぶんの実測データのみ`:`${windowMin}分間`;
+              const sig=Object.entries(realFlow).filter(([rid])=>rid!=="coveredMinutes").filter(([rid,f])=>rid!==sid&&(f.avgIn*windowMin>=1.0||f.avgOut*windowMin>=1.0));
               if(sig.length){
-                flowTxt=" [このコーナー("+windowMin+"分間)の合計実測: "+sig.map(([rid,f])=>{
+                flowTxt=` [このコーナー(${rangeTxt})の合計実測: `+sig.map(([rid,f])=>{
                   const label=rid==="OTHER"?"その他局":rid==="OFF"?"視聴終了(OFF)":rid;
-                  return `${label}:流入${(f.avgIn*windowMin).toFixed(1)}pt/流出${(f.avgOut*windowMin).toFixed(1)}pt`;
+                  return `${label}:流入${(f.avgIn*windowMin).toFixed(1)}%/流出${(f.avgOut*windowMin).toFixed(1)}%`;
                 }).join(" ")+"]";
               }
             }
@@ -3529,12 +3548,12 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
     // AIプロンプト用テキスト: 裏局DIFFがマイナス=自局に流入、プラス=自局から流出
     const rows=Object.entries(byStation).map(([sid,s])=>{
       const n=s.count;
-      let txt=`【${sid}】${n}件 視聴率AVG${(s.sumAVG/n).toFixed(1)}% DIFF${(s.sumDIFF/n)>=0?"+":""}${(s.sumDIFF/n).toFixed(1)}pt`;
+      let txt=`【${sid}】${n}件 視聴率AVG${(s.sumAVG/n).toFixed(1)}% DIFF${(s.sumDIFF/n)>=0?"+":""}${(s.sumDIFF/n).toFixed(1)}%`;
       const flowLines=Object.entries(s.rivalFlow).map(([rid,f])=>{
         const avgDF=f.sumDIFF/f.count;
-        const flow=avgDF<=-1.0?`裏${rid}↓${Math.abs(avgDF).toFixed(1)}pt【自局への流入】`:
-                   avgDF>=1.0?`裏${rid}↑${Math.abs(avgDF).toFixed(1)}pt【自局からの流出】`:
-                   `裏${rid}±${Math.abs(avgDF).toFixed(1)}pt【ほぼ横ばい】`;
+        const flow=avgDF<=-1.0?`裏${rid}↓${Math.abs(avgDF).toFixed(1)}%【自局への流入】`:
+                   avgDF>=1.0?`裏${rid}↑${Math.abs(avgDF).toFixed(1)}%【自局からの流出】`:
+                   `裏${rid}±${Math.abs(avgDF).toFixed(1)}%【ほぼ横ばい】`;
         const titles=f.titles.slice(0,2).join("・");
         return `  ${flow}（裏番組:${titles||"—"} IN${(f.sumIN/f.count).toFixed(1)}%→OUT${(f.sumOUT/f.count).toFixed(1)}%）`;
       });
@@ -3810,9 +3829,9 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
                   <div style={{fontSize:8.5,color:"#9CA3AF",fontFamily:"monospace",marginBottom:1}}>裏番組の動き（放送中の流入・流出）</div>
                   {rivalEntries.map(r=>{
                     const rst=ST.find(st2=>st2.id===r.rid);
-                    const isInflow=r.avgDF<=-1.0; // 裏が下がる(視聴率-1pt以上) = 自局へ流入の可能性
-                    const isOutflow=r.avgDF>=1.0;  // 裏が上がる(視聴率+1pt以上) = 自局から流出の可能性
-                    const flowLabel=isInflow?`↓ ${Math.abs(r.avgDF).toFixed(1)}pt → 自局への流入か`:isOutflow?`↑ ${Math.abs(r.avgDF).toFixed(1)}pt → 自局から流出か`:`± ${Math.abs(r.avgDF).toFixed(1)}pt`;
+                    const isInflow=r.avgDF<=-1.0; // 裏が下がる(視聴率-1%以上) = 自局へ流入の可能性
+                    const isOutflow=r.avgDF>=1.0;  // 裏が上がる(視聴率+1%以上) = 自局から流出の可能性
+                    const flowLabel=isInflow?`↓ ${Math.abs(r.avgDF).toFixed(1)}% → 自局への流入か`:isOutflow?`↑ ${Math.abs(r.avgDF).toFixed(1)}% → 自局から流出か`:`± ${Math.abs(r.avgDF).toFixed(1)}%`;
                     const flowColor=isInflow?"#16A34A":isOutflow?"#DC2626":"#9CA3AF";
                     const titleText=r.titles.slice(0,2).join("・");
                     return <div key={r.rid} style={{display:"flex",alignItems:"flex-start",gap:6,fontSize:9.5}}>
