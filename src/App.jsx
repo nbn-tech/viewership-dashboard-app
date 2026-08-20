@@ -1708,6 +1708,23 @@ const apiClient = {
     return stripPtSign(text);
   },
 
+  // 今朝のポイント(局横断・端的サマリー): 詳細レポートの最上部に置く、現場向けの超要約。
+  // 「文章が長すぎて読む気がなくなる」という現場フィードバックを受けて追加。長文の根拠レポートとは別に、
+  // NBN以外の局の実分析結果も含めて横断的に見た最重要ポイントだけを1〜2点、短い1段落で述べさせる
+  async generateTrendSummary(overviewPrompt, overviewText){
+    const followup=`続けて、今度は非常に短いセクションを1つだけ追加してください(見出し・箇条書きは使わず、他のセクションは一切書かないこと)。\n\n在名7局(NBN・THK・CTV・CBC・NHK・NHKE・TVA)の実データを局横断で見て、この時間帯全体で最も重要な1〜2点だけを、短い1段落(100〜150字程度)で述べてください。\n・各局で共通して人気だった話題・コンテンツ傾向があれば最優先で挙げること\n・視聴者が局をまたいで移動した具体的な事実(実測データに時刻・局名・数値があれば明記)があれば、その理由を一言で\n・「〜と考えられます」のような曖昧な前置きや言い訳は避け、断定的かつ簡潔に書くこと\n・pt(ポイント)は視聴率の変化幅を表す単位。数値の前に+/-の符号は付けないこと`;
+    if(API_CONFIG.useMock){
+      const text=await _callClaudeDirect([
+        {role:"user",content:overviewPrompt},
+        {role:"assistant",content:overviewText},
+        {role:"user",content:followup},
+      ],500);
+      return stripPtSign(text);
+    }
+    const{text}=await _callBackend("/api/analysis/highlight",{prevPrompt:overviewPrompt,prevText:overviewText,followup});
+    return stripPtSign(text);
+  },
+
   // 総評・今後の示唆（根拠分析をもとに結論だけ生成）
   async generateConclusion(combinedAnalysis){
     const prompt=`以下はNBNの視聴率分析レポートです。この内容をもとに、現場スタッフ向けの総評と今後の示唆を作成してください。\n\n${combinedAnalysis}\n\n【出力形式(必ず守ること)】\n・■ で始まる行はセクション見出しとして使用\n・具体的な番組名・コーナー名・数値を使って記載\n・pt(ポイント)は視聴率の変化幅を表す単位。「流入」「流出」「上昇」「低下」などの言葉自体が向きを表すので、数値の前に+/-の符号は付けないこと(例:「-3.2ptの流出」ではなく「3.2ptの流出」、「+5.4ptの上昇」ではなく「5.4ptの上昇」)\n・2セクションのみ出力\n\n■ 総評\n(この期間のNBNのパフォーマンスを3〜4行で評価。良かった点・課題点を具体的に)\n\n■ 今後の示唆\n(編成・制作担当者への提言を箇条書きで3〜4点。具体的な番組名・コーナー名・時間帯を使って記載)`;
@@ -3284,7 +3301,7 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
 function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
   mode,setMode,selDate,setSelDate,slot,setSlot,
   tab,setTab,overviewText,setOverviewText,highlightText,setHighlightText,
-  conclusionText,setConclusionText,
+  conclusionText,setConclusionText,trendSummaryText,setTrendSummaryText,
   topicQuery,setTopicQuery,topicResult,setTopicResult,analysisLabel,setAnalysisLabel,
   topicCandidates,setTopicCandidates,topicSelected,setTopicSelected,topicStep,setTopicStep}){
   const[loading,setLoading]=useState(false);
@@ -3337,17 +3354,18 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
     try{
       const raw=localStorage.getItem(cacheKey);
       if(raw){
-        const{ov,hl,cl,lb,savedAt}=JSON.parse(raw);
+        const{ov,hl,cl,ts,lb,savedAt}=JSON.parse(raw);
         setOverviewText(ov||"");
         setHighlightText(hl||"");
         setConclusionText(cl||"");
+        setTrendSummaryText(ts||"");
         setAnalysisLabel(lb||label);
         setCachedAt(savedAt||null);
       }else{
-        setOverviewText("");setHighlightText("");setConclusionText("");setCachedAt(null);
+        setOverviewText("");setHighlightText("");setConclusionText("");setTrendSummaryText("");setCachedAt(null);
       }
     }catch{
-      setOverviewText("");setHighlightText("");setConclusionText("");setCachedAt(null);
+      setOverviewText("");setHighlightText("");setConclusionText("");setTrendSummaryText("");setCachedAt(null);
     }
   // eslint-disable-next-line
   },[cacheKey]);
@@ -3358,8 +3376,8 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
       try{
         const raw=localStorage.getItem(cacheKey);
         if(raw){
-          const{ov,hl,cl,lb,savedAt}=JSON.parse(raw);
-          setOverviewText(ov||"");setHighlightText(hl||"");setConclusionText(cl||"");
+          const{ov,hl,cl,ts,lb,savedAt}=JSON.parse(raw);
+          setOverviewText(ov||"");setHighlightText(hl||"");setConclusionText(cl||"");setTrendSummaryText(ts||"");
           setAnalysisLabel(lb||label);setCachedAt(savedAt||null);
           return;
         }
@@ -3367,7 +3385,7 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
     }
     if(dataLoading){setError("データ読み込み中です。しばらくしてからもう一度お試しください");return;}
     setError(null);setLoading(true);setStreaming(true);
-    setOverviewText("");setHighlightText("");setConclusionText("");setCachedAt(null);
+    setOverviewText("");setHighlightText("");setConclusionText("");setTrendSummaryText("");setCachedAt(null);
     setAnalysisLabel(label);
     await Promise.all(activeDates.map(ensureRealRatings));
     const ctx=await buildAnalysisContext(activeDates,slot,ratingsCache,tplByDate);
@@ -3378,15 +3396,20 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
       // Phase 1: NBNの動き + 競合の動き
       const{prompt:p1,text:t1}=await apiClient.generateOverview(periodLabel,ctx);
       setOverviewText(t1);
-      // Phase 2: 流入流出まとめ + ハイライト (Phase1の続き)
-      const t2=await apiClient.generateHighlight(p1,t1);
+      // Phase 1.5: 今朝のポイント(局横断・端的サマリー) + Phase 2: 流入流出まとめ・ハイライト
+      // どちらもPhase1(p1/t1)だけに依存するので並行実行する
+      const[t0,t2]=await Promise.all([
+        apiClient.generateTrendSummary(p1,t1),
+        apiClient.generateHighlight(p1,t1),
+      ]);
+      setTrendSummaryText(t0);
       setHighlightText(t2);
       // Phase 3: 総評・今後の示唆 (Phase1+2をまとめて渡す)
       const t3=await apiClient.generateConclusion(t1+"\n\n"+t2);
       setConclusionText(t3);
       // キャッシュに保存
       const savedAt=new Date().toLocaleString("ja-JP",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});
-      localStorage.setItem(cacheKey,JSON.stringify({ov:t1,hl:t2,cl:t3,lb:label,savedAt}));
+      localStorage.setItem(cacheKey,JSON.stringify({ov:t1,hl:t2,cl:t3,ts:t0,lb:label,savedAt}));
       setCachedAt(savedAt);
     }catch(e){
       setError("分析エラー: "+e.message);
@@ -3579,6 +3602,19 @@ function AnalysisPage({page,setPage,metric,setMetric,ratingsCache,weatherData,
       </div>}
       {(overviewText||highlightText||conclusionText)&&<>
         <div style={{fontSize:11,color:"#9CA3AF",fontFamily:"monospace",marginBottom:16}}>分析対象: {analysisLabel||label}</div>
+
+        {/* ⓪ 今朝のポイント（局横断・端的サマリー。詳細レポートより先に読めるよう最上部に表示） */}
+        {trendSummaryText&&<div style={{marginBottom:20}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+            <span style={{background:"#0066cc",color:"#fff",fontSize:10,fontWeight:600,padding:"2px 10px",borderRadius:9999}}>今朝のポイント</span>
+          </div>
+          <div style={{background:"#fff",border:"1px solid #e0e0e0",borderLeft:"4px solid #0066cc",borderRadius:8,padding:"14px 18px",lineHeight:1.7,fontSize:15,fontWeight:600,color:"#111827"}}>
+            {renderMd(trendSummaryText)}
+          </div>
+        </div>}
+        {!trendSummaryText&&loading&&overviewText&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0",color:"#0066cc",fontSize:12,marginBottom:16}}>
+          <div style={{width:14,height:14,border:"2px solid #BAE6FD",borderTopColor:"#0066cc",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>今朝のポイントを生成中…
+        </div>}
 
         {/* ① 総評・今後の示唆（常に上・展開済み） */}
         {conclusionText&&<div style={{marginBottom:20}}>
@@ -5071,6 +5107,7 @@ export default function App(){
   const[aOverview,setAOverview]=useState("");
   const[aHighlight,setAHighlight]=useState("");
   const[aConclusion,setAConclusion]=useState("");
+  const[aTrendSummary,setATrendSummary]=useState("");
   const[aTopicQuery,setATopicQuery]=useState("");
   const[aTopicResult,setATopicResult]=useState(null);
   const[aTopicCandidates,setATopicCandidates]=useState([]); // step2の候補一覧
@@ -5378,6 +5415,7 @@ export default function App(){
         tab={aTab} setTab={setATab} overviewText={aOverview} setOverviewText={setAOverview}
         highlightText={aHighlight} setHighlightText={setAHighlight}
         conclusionText={aConclusion} setConclusionText={setAConclusion}
+        trendSummaryText={aTrendSummary} setTrendSummaryText={setATrendSummary}
         topicQuery={aTopicQuery} setTopicQuery={setATopicQuery}
         topicResult={aTopicResult} setTopicResult={setATopicResult}
         analysisLabel={aLabel} setAnalysisLabel={setALabel}
