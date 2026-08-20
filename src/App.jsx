@@ -813,7 +813,12 @@ async function fetchFullDayRatingObjects(date,demo="ALL"){
 // 視聴質パネル調査(個人視聴率メーター)による「基準局への流入／からの流出」実測データ。
 // S3: inout/{yyyymmdd}{startHHMM}{endHHMM}_{局}_inout.xlsx (局はTHK/CTV/CBC/NHK/NBN/NHKE/TVA、
 // NHKEは現状データなし)。現状は朝帯(05:30-08:30)ぶんのみ確認済みで、無い日/局は404/403になるため
-// 呼び出し側は例外を握って占拠率ベースの推定にフォールバックする。
+// 呼び出し側は例外を握って視聴率ベースの推定にフォールバックする。
+// 「流入流出表（各ケース）」シートを使う: 1分ごとに全局(7局+その他合計+OFF)間の視聴者移動を
+// 表す9×9の遷移マトリクスが載っており、基準局だけの集計しか出さない「流入流出連続グラフ」シートより
+// 詳細かつ、1分ごとに正確に1ブロックずつ進む(連続グラフ側にあった「同じ時点が重複出現する」クセが無い)。
+// 注意: シート内の「判定到達率」は視聴率とは別の(パネル側の判定処理上の)指標であり、視聴率として
+// 使ってよいのは各TO側ブロック末尾の「平均視聴率」列のみ。
 const INOUT_STATION_JP={THK:"東海テレビ",CTV:"中京テレビ",CBC:"ＣＢＣ",NHK:"ＮＨＫ総合",NBN:"メ～テレ",NHKE:"ＮＨＫＥテレ",TVA:"テレビ愛知"};
 async function fetchInoutFlow(date,slot,baseStId){
   const yyyymmdd=date.replace(/-/g,'');
@@ -824,75 +829,89 @@ async function fetchInoutFlow(date,slot,baseStId){
   if(!res.ok)throw new Error(`HTTP ${res.status}`);
   const buf=await res.arrayBuffer();
   const wb=XLSX.read(buf,{type:"array"});
-  const sheet=wb.Sheets["流入流出連続グラフ（各ケース）"];
+  const sheet=wb.Sheets["流入流出表（各ケース）"];
   if(!sheet)throw new Error("シートが見つかりません");
   const rows=XLSX.utils.sheet_to_json(sheet,{header:1,defval:null});
-  // 基準局によって局の列順が入れ替わる(基準局が必ず中央の列に来る)ため、ヘッダ行を都度読み取って
-  // 列→局ID(またはOTHER/OFF)の対応を作る
   const jpToId={};Object.entries(INOUT_STATION_JP).forEach(([id,jp])=>{jpToId[jp]=id;});
-  // "基準局：メ～テレ"等のメタ行にも局名が1つだけ現れるため、局名が複数(実際は7つ)並ぶ本当のヘッダ行だけを対象にする
-  const headerRowIdx=rows.findIndex(r=>r&&r.filter(v=>typeof v==="string"&&jpToId[v]).length>=3);
-  if(headerRowIdx===-1)throw new Error("ヘッダ行が見つかりません");
-  const cols=[];
-  rows[headerRowIdx].forEach((v,idx)=>{
-    if(v==null||v==="")return;
-    if(jpToId[v])cols.push({colIdx:idx,key:jpToId[v]});
-    else if(v==="その他合計")cols.push({colIdx:idx,key:"OTHER"});
-    else if(v==="OFF")cols.push({colIdx:idx,key:"OFF"});
-  });
-  // 時点ブロックの行数は可変(空行の有無等)なので、"時点N"ラベル行を区切りとして、
-  // その中の行を1列目のラベル文字列(判定到達率/基準局への流入/基準局からの流出)で判定する。
-  // 注意: このExcelは10分おきに同じ"時点N"(同じ時刻)のブロックが重複して出現する既知のクセがあるため、
-  // 配列のインデックス(何番目のブロックか)から時刻を計算してはいけない。必ず各ブロックの
-  // ラベル行自身に書かれている時刻文字列(例:"2026/07/27(月)\r\n08:13～08:14")をパースして使う
+  const keyOf=v=>jpToId[v]||(v==="その他合計"?"OTHER":v==="OFF"?"OFF":null);
+
   const points=[];
-  let cur=null;
-  for(let r=headerRowIdx+1;r<rows.length;r++){
-    const row=rows[r];
+  let toMinute=null,colOrder=null,toRows=[];
+  for(const row of rows){
     if(!row)continue;
-    if(typeof row[0]==="string"&&row[0].startsWith("時点")){
-      if(cur&&cur.minute!=null)points.push(cur);
-      const timeLabel=row[1];
-      const tm=typeof timeLabel==="string"?timeLabel.match(/(\d{1,2}):(\d{2})/):null;
-      const minute=tm?tvt2m(`${tm[1].padStart(2,"0")}:${tm[2]}`):null;
-      cur={minute,reach:{},inflow:{},outflow:{}};
+    // 各1分ブロックの先頭にある「放送局」行(番組名の対応表)にFROM/TOの時刻ラベルが入っている
+    // (例:"07:03～1分"/"07:04～1分")。ここから確定でTO側(=このブロックが表す分)の絶対分を得る
+    if(row[0]==="放送局"&&typeof row[4]==="string"&&row[4].includes("分")){
+      const tm=typeof row[12]==="string"?row[12].match(/(\d{1,2}):(\d{2})/):null;
+      toMinute=tm?tvt2m(`${tm[1].padStart(2,"0")}:${tm[2]}`):null;
+      colOrder=null;toRows=[];
       continue;
     }
-    if(!cur)continue;
-    const label=row[1];
-    const apply=obj=>cols.forEach(({colIdx,key})=>{const v=row[colIdx];if(typeof v==="number")obj[key]=v;});
-    if(label==="判定到達率")apply(cur.reach);
-    else if(label==="基準局への流入")apply(cur.inflow);
-    else if(label==="基準局からの流出")apply(cur.outflow);
+    // 9局(7局+その他合計+OFF)ぶんの局名が並ぶ、遷移マトリクスのFROM列見出し行
+    if(row[0]==="放送局"&&row.slice(1,10).every(v=>keyOf(v))){
+      colOrder=[];
+      for(let c=1;c<=9;c++)colOrder.push({colIdx:c,key:keyOf(row[c])});
+      toRows=[];
+      continue;
+    }
+    // TO側9局ぶんの内訳行(局名で始まる行を1つずつ集める)。基準局だけでなく全局×全局の
+    // 遷移をそのままmatrixに保持しておく(基準局視点に絞り込むのはflowForStation側で行う)
+    if(colOrder&&keyOf(row[0])){
+      toRows.push({toKey:keyOf(row[0]),row});
+      if(toRows.length<9)continue;
+      const matrix={},ratings={};
+      toRows.forEach(({toKey,row:r})=>{
+        const m={};
+        colOrder.forEach(({colIdx,key})=>{const v=r[colIdx];if(typeof v==="number"&&v>0)m[key]=v;});
+        matrix[toKey]=m;
+        const rv=r[14]; // 平均視聴率(TO側、視聴率そのもの。判定到達率(col11)は使わない)
+        if(typeof rv==="number")ratings[toKey]=rv;
+      });
+      if(toMinute!=null)points.push({minute:toMinute,matrix,ratings});
+      colOrder=null;toRows=[];
+    }
   }
-  if(cur&&cur.minute!=null)points.push(cur);
-  // 同じ時刻が重複するブロックは後勝ちでまとめ、時刻順に並べ直す
+  // 同じ分が重複していた場合は後勝ちでまとめ、時刻順に並べ直す
   const byMinute=new Map();
   points.forEach(p=>byMinute.set(p.minute,p));
   return[...byMinute.values()].sort((a,b)=>a.minute-b.minute);
 }
+// 全局×全局の遷移マトリクスから、任意の1局を主語にした流入(他局→stId)・流出(stId→他局)を取り出す
+function flowForStation(point,stId){
+  const inflow={},outflow={};
+  const toRow=point.matrix[stId];
+  if(toRow)Object.entries(toRow).forEach(([k,v])=>{if(k!==stId)inflow[k]=v;});
+  Object.entries(point.matrix).forEach(([toKey,row])=>{
+    if(toKey===stId)return;
+    const v=row[stId];
+    if(typeof v==="number")outflow[toKey]=v;
+  });
+  return{inflow,outflow};
+}
 // 実測データの中で特に動きが大きかった時点(局・方向別)を上位N件抽出する。
 // AIレポートに「実際にこのデータを見た」と分かる具体的な時刻・数値を引用させるために使う
-function extractTopInoutMoments(points,n=3){
+function extractTopInoutMoments(points,n=3,stId="NBN"){
   const events=[];
   points.forEach(p=>{
-    Object.entries(p.inflow).forEach(([rid,v])=>{if(rid!=="NBN"&&typeof v==="number"&&v>0)events.push({minute:p.minute,rid,dir:"in",v});});
-    Object.entries(p.outflow).forEach(([rid,v])=>{if(rid!=="NBN"&&typeof v==="number"&&v>0)events.push({minute:p.minute,rid,dir:"out",v});});
+    const{inflow,outflow}=flowForStation(p,stId);
+    Object.entries(inflow).forEach(([rid,v])=>{if(rid!==stId&&typeof v==="number"&&v>0)events.push({minute:p.minute,rid,dir:"in",v});});
+    Object.entries(outflow).forEach(([rid,v])=>{if(rid!==stId&&typeof v==="number"&&v>0)events.push({minute:p.minute,rid,dir:"out",v});});
   });
   events.sort((a,b)=>b.v-a.v);
   return events.slice(0,n);
 }
-// 指定分区間[sM,eM)ぶんの平均流入・流出率(%/分)を局ごとに算出する(実測パネルデータ版)
-function summarizeInoutFlow(points,sM,eM){
+// 指定分区間[sM,eM)ぶんの平均流入・流出率(%/分)を局ごとに算出する(実測パネルデータ版、stId視点)
+function summarizeInoutFlow(points,sM,eM,stId="NBN"){
   const seg=points.filter(p=>p.minute>=sM&&p.minute<eM);
   if(!seg.length)return null;
+  const flows=seg.map(p=>flowForStation(p,stId));
   const keys=new Set();
-  seg.forEach(p=>{Object.keys(p.inflow).forEach(k=>keys.add(k));Object.keys(p.outflow).forEach(k=>keys.add(k));});
+  flows.forEach(({inflow,outflow})=>{Object.keys(inflow).forEach(k=>keys.add(k));Object.keys(outflow).forEach(k=>keys.add(k));});
   const avg=arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:0;
   const out={};
   keys.forEach(key=>{
-    const ins=seg.map(p=>p.inflow[key]).filter(v=>typeof v==="number");
-    const outs=seg.map(p=>p.outflow[key]).filter(v=>typeof v==="number");
+    const ins=flows.map(f=>f.inflow[key]).filter(v=>typeof v==="number");
+    const outs=flows.map(f=>f.outflow[key]).filter(v=>typeof v==="number");
     if(!ins.length&&!outs.length)return;
     out[key]={avgIn:avg(ins),avgOut:avg(outs)};
   });
@@ -3233,7 +3252,25 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
           topC.push({title,cs,ce,avg:a,summary});
         }
         topC.sort((a,b)=>b.avg-a.avg);
-        const top2=topC.slice(0,2).map(c=>`「${c.title}」(${c.cs}–${c.ce})${c.avg.toFixed(1)}%${c.summary?` — ${c.summary}`:""}`).join(" / ");
+        // 競合コーナーについても、実測流入流出データ(inout/)が取れていれば9×9の全局遷移マトリクスから
+        // その局視点での流入・流出(NBNとの間も含む)を引用する。無ければ何も付けない(推定へのフォールバックはしない)
+        const top2=topC.slice(0,2).map(c=>{
+          let flowTxt="";
+          if(inoutPoints){
+            const sM=t2m(c.cs),eM=t2m(c.ce),windowMin=eM-sM;
+            const realFlow=summarizeInoutFlow(inoutPoints,sM,eM,sid);
+            if(realFlow){
+              const sig=Object.entries(realFlow).filter(([rid,f])=>rid!==sid&&(f.avgIn*windowMin>=1.0||f.avgOut*windowMin>=1.0));
+              if(sig.length){
+                flowTxt=" ["+sig.map(([rid,f])=>{
+                  const label=rid==="OTHER"?"その他局":rid==="OFF"?"視聴終了(OFF)":rid;
+                  return `実測${label}:流入${(f.avgIn*windowMin).toFixed(1)}pt/流出${(f.avgOut*windowMin).toFixed(1)}pt`;
+                }).join(" ")+"]";
+              }
+            }
+          }
+          return `「${c.title}」(${c.cs}–${c.ce})${c.avg.toFixed(1)}%${c.summary?` — ${c.summary}`:""}${flowTxt}`;
+        }).join(" / ");
         lines.push(`  ${sid}「${progName}」(${progStart}–${progEnd}) AVG${pavg.toFixed(1)}% 最高${ppeak.toFixed(1)}%${top2?` 主要:${top2}`:""}`);
       }
     }
