@@ -3166,10 +3166,12 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
 // 視聴率ベースで裏番組の流入・流出を計算(AI分析用。sDataという変数名だが実体は視聴率データ)
 function computeRivalFlow(sid,sM,eM,sData,tpl){
   // sData: 視聴率データ、tpl: buildDayTplで組み立てた実データ
+  // 終端(eM)は「コーナー終了時点」を指す表示(例:06:51–06:58)と合わせるため、computeCornerStats
+  // (CornerModalで使用)と同じくeM自身も含めて取得する(<eMだと終了時点の1分前の値になってしまう)
   const rivals=[];
   for(const rid of ST.map(s=>s.id)){
     if(rid===sid)continue;
-    const sl=sData.filter(d=>d.minute>=sM&&d.minute<eM);
+    const sl=sData.filter(d=>d.minute>=sM&&d.minute<=eM);
     if(!sl.length)continue;
     const iV=sl[0][rid],oV=sl[sl.length-1][rid],df=oV-iV;
     const midMin=Math.floor((sM+eM)/2);
@@ -3219,7 +3221,7 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
     const nbnProgs=tpl["NBN"]||[];
     for(const[progName,progStart,progEnd,corners] of nbnProgs){
       const psM=t2m(progStart),peM=t2m(progEnd);
-      const ps=rData.filter(d=>d.minute>=psM&&d.minute<peM);
+      const ps=rData.filter(d=>d.minute>=psM&&d.minute<=peM);
       if(!ps.length)continue;
       const pavg=ps.reduce((s,d)=>s+d["NBN"],0)/ps.length;
       // 最高値がどのコーナーに属するか(あるいはコーナー間の未分析の隙間か)をAIに推測させず、
@@ -3233,7 +3235,9 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
         if(SKIP_SEG.has(seg))continue;
         const sM=t2m(cs),eM=t2m(ce);
         if(eM-sM<5)continue;
-        const slice=rData.filter(d=>d.minute>=sM&&d.minute<eM);
+        // 終端(eM)は「コーナー終了時点」の表示(例:06:51–06:58)と揃えるため、CornerModalと同じく
+        // eM自身も含めて取得する(<eMだと表示上の終了時刻より1分前の値がOUTになってしまう)
+        const slice=rData.filter(d=>d.minute>=sM&&d.minute<=eM);
         if(!slice.length)continue;
         const avg=slice.reduce((s,d)=>s+d["NBN"],0)/slice.length;
         const iV=slice[0]["NBN"],oV=slice[slice.length-1]["NBN"],df=oV-iV;
@@ -3292,7 +3296,7 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
       const progs=tpl[sid]||[];
       for(const[progName,progStart,progEnd,corners] of progs){
         const psM=t2m(progStart),peM=t2m(progEnd);
-        const ps=rData.filter(d=>d.minute>=psM&&d.minute<peM);
+        const ps=rData.filter(d=>d.minute>=psM&&d.minute<=peM);
         if(!ps.length)continue;
         const pavg=ps.reduce((s,d)=>s+d[sid],0)/ps.length;
         const ppeakRow=ps.reduce((best,d)=>d[sid]>best[sid]?d:best,ps[0]);
@@ -3303,7 +3307,7 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
           if(SKIP_SEG.has(seg))continue;
           const sM=t2m(cs),eM=t2m(ce);
           if(eM-sM<5)continue;
-          const sl=rData.filter(d=>d.minute>=sM&&d.minute<eM);
+          const sl=rData.filter(d=>d.minute>=sM&&d.minute<=eM);
           if(!sl.length)continue;
           const a=sl.reduce((s,d)=>s+d[sid],0)/sl.length;
           topC.push({title,cs,ce,avg:a,summary});
