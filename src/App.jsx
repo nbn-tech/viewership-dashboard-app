@@ -3294,7 +3294,7 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
         const sig=Object.entries(realFlow).filter(([rid])=>rid!=="coveredMinutes").filter(([rid,f])=>rid!=="NBN"&&(f.avgIn*windowMin>=0.1||f.avgOut*windowMin>=0.1));
         sig.forEach(([rid,f])=>{
           const label=rid==="OTHER"?"その他局":rid==="OFF"?"視聴終了(OFF)":rid;
-          out.push(`    [実測]裏${label}: このコーナー(${rangeTxt})の合計で流入${(f.avgIn*windowMin).toFixed(1)}%(1分あたり${f.avgIn.toFixed(2)}%)・流出${(f.avgOut*windowMin).toFixed(1)}%(1分あたり${f.avgOut.toFixed(2)}%)`);
+          out.push(`    [実測]裏${label}: このコーナー(${rangeTxt})の合計で流入${(f.avgIn*windowMin).toFixed(1)}%・流出${(f.avgOut*windowMin).toFixed(1)}%`);
         });
         if(!sig.length)out.push(`    [実測]このコーナー(${rangeTxt})では有意な流入・流出は確認されなかった`);
       }else{
@@ -3343,7 +3343,7 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
             if(realFlow&&realFlow.coveredMinutes*2>=nominalWindow){
               const windowMin=realFlow.coveredMinutes;
               const rangeTxt=windowMin<nominalWindow?`${windowMin}分間ぶんの実測データのみ`:`${windowMin}分間`;
-              const sig=Object.entries(realFlow).filter(([rid])=>rid!=="coveredMinutes").filter(([rid,f])=>rid!==sid&&(f.avgIn*windowMin>=1.0||f.avgOut*windowMin>=1.0));
+              const sig=Object.entries(realFlow).filter(([rid])=>rid!=="coveredMinutes").filter(([rid,f])=>rid!==sid&&(f.avgIn*windowMin>=0.1||f.avgOut*windowMin>=0.1));
               if(sig.length){
                 flowTxt=` [このコーナー(${rangeTxt})の合計実測: `+sig.map(([rid,f])=>{
                   const label=rid==="OTHER"?"その他局":rid==="OFF"?"視聴終了(OFF)":rid;
