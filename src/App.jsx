@@ -1707,7 +1707,7 @@ const apiClient = {
 
   // ハイライト分析
   async generateHighlight(prevPrompt, prevText){
-    const followup=`続けて、以下の4セクションを追加してください(総評・示唆は含めないこと)。\n\n■ 流入・流出まとめ\n(NBN視点で、どの局の何の番組終了/開始時に視聴者が動いたか、時刻と数値を箇条書きで。視聴率の変化幅は%で表記すること(pt表記は使わないこと)。「流入」「流出」という言葉自体が向きを表すので、数値の前に+/-の符号は付けないこと。例: 「7:03 CTV「ZIP!」終了後に1.4%流入」)\n\n■ 最高視聴率のタイミング\n(何時何分・どのコーナー・何%・なぜ高かったか)\n\n■ 急上昇コーナー TOP3\n■ 急降下コーナー TOP3\n(この2つは対になるセクションです。判定は必ずそのコーナー自身のIN%→OUT%の実数値の大小だけで行うこと(他局比較の「流入」「流出」表現とは切り離して判断すること。他局からの流入が多くても、コーナー自身のOUT%がIN%より低ければそれは急降下であり、急上昇とは呼ばないこと)。ctx中の各コーナーに付いている「↑上昇」「↓低下」の表記をそのまま使い、自分で符号から方向を判断しないこと。OUT%がIN%より高いものを急上昇候補、低いものを急降下候補とし、その差の絶対値が大きい順にTOP3を選ぶこと。1つのコーナーは必ずどちらか一方のリストにのみ登場させ、同じコーナー名を両方のリストに重複して載せないこと。各項目には次を必ず明記すること: コーナー名／放送時間帯(開始〜終了、分単位。例: 07:30–07:45)／変化幅(%)／データ中のIN%→OUT%の具体的な数値(例: 3.2%→4.6%)／要因)`;
+    const followup=`続けて、以下の4セクションを追加してください(総評・示唆は含めないこと)。\n\n■ 流入・流出まとめ\n(NBN視点で、どの局の何の番組終了/開始時に視聴者が動いたか、時刻と数値を箇条書きで。視聴率の変化幅は%で表記すること(pt表記は使わないこと)。「流入」「流出」という言葉自体が向きを表すので、数値の前に+/-の符号は付けないこと。例: 「7:03 CTV「ZIP!」終了後に1.4%流入」)\n\n■ 最高視聴率のタイミング\n(何時何分・どのコーナー・何%・なぜ高かったか)\n\n■ 急上昇コーナー TOP3\n■ 急降下コーナー TOP3\n(この2つのコーナー選定は、すでにデータ中の【急上昇コーナー TOP3(このリストが最終確定。並び替え・追加・削除・重複掲載は禁止)】【急降下コーナー TOP3(このリストが最終確定。並び替え・追加・削除・重複掲載は禁止)】として機械的に確定済みです。あなたはコーナーの選定・順位・上昇/低下の判定を一切やり直さないこと。この2つのリストに載っている順番・コーナー・数値をそのまま使い、各項目についてIN%→OUT%の数値と[実測]の記載があればそれも引用しつつ、要因(なぜこの動きになったか)だけを書き加えてください。各項目には次を必ず明記すること: コーナー名／放送時間帯(開始〜終了、分単位)／変化幅(%)／IN%→OUT%の具体的な数値／要因)`;
     if(API_CONFIG.useMock){
       const text=await _callClaudeDirect([
         {role:"user",content:prevPrompt},
@@ -3213,7 +3213,9 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
       }
     }
 
-    // NBN 詳細（番組ごと → コーナーごと・要約 + 裏局の有意な動き）
+    // NBN 詳細（番組ごと → コーナーごと・要約 + 裏局の有意な動き）。急上昇/急降下コーナーは
+    // 数値をすべてこちらで持っているので、AIに選ばせず後段でJS側で確定させる(nbnCornerStatsに集約)
+    const nbnCornerStats=[];
     const nbnProgs=tpl["NBN"]||[];
     for(const[progName,progStart,progEnd,corners] of nbnProgs){
       const psM=t2m(progStart),peM=t2m(progEnd);
@@ -3235,38 +3237,53 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
         if(!slice.length)continue;
         const avg=slice.reduce((s,d)=>s+d["NBN"],0)/slice.length;
         const iV=slice[0]["NBN"],oV=slice[slice.length-1]["NBN"],df=oV-iV;
+        nbnCornerStats.push({title,cs,ce,sM,eM,iV,oV,df,summary});
         // 方向(上昇/低下)を単語で明記する。符号だけ渡すとAIが解釈を誤り、実際は上昇なのに
         // 「流出」と書いてしまうことがあったため、AIに解釈させず断定した表記をそのまま使わせる
         const dirTxt=df>=0?`↑上昇${Math.abs(df).toFixed(1)}%`:`↓低下${Math.abs(df).toFixed(1)}%`;
         lines.push(`  ・「${title}」(${cs}–${ce}) IN${iV.toFixed(1)}% AVG${avg.toFixed(1)}% OUT${oV.toFixed(1)}%(${dirTxt})`);
         if(summary)lines.push(`    内容: ${summary}`);
-        const realFlow=inoutPoints?summarizeInoutFlow(inoutPoints,sM,eM):null;
-        const nominalWindow=eM-sM;
-        // 実測データは朝帯なら05:30-08:30などの決まった範囲しか無く、コーナーがその範囲を超えて
-        // 続く場合はcoveredMinutes(実際にデータがある分数)がコーナー全体の長さより短くなる。
-        // 半分未満しかカバーしていない場合は「実測」と称して水増しした数字を出さず、視聴率ベースの推定にフォールバックする
-        if(realFlow&&realFlow.coveredMinutes*2>=nominalWindow){
-          const windowMin=realFlow.coveredMinutes;
-          const rangeTxt=windowMin<nominalWindow?`${windowMin}分間ぶんの実測データのみ。コーナー全体は${nominalWindow}分`:`${windowMin}分間`;
-          Object.entries(realFlow)
-            .filter(([rid])=>rid!=="coveredMinutes")
-            .filter(([rid,f])=>rid!=="NBN"&&(f.avgIn*windowMin>=1.0||f.avgOut*windowMin>=1.0))
-            .forEach(([rid,f])=>{
-              const label=rid==="OTHER"?"その他局":rid==="OFF"?"視聴終了(OFF)":rid;
-              lines.push(`    [実測]裏${label}: このコーナー(${rangeTxt})の合計で流入${(f.avgIn*windowMin).toFixed(1)}%(1分あたり${f.avgIn.toFixed(2)}%)・流出${(f.avgOut*windowMin).toFixed(1)}%(1分あたり${f.avgOut.toFixed(2)}%)`);
-            });
-        }else{
-          const rivals=computeRivalFlow("NBN",sM,eM,rData,tpl);
-          rivals
-            .filter(r=>Math.abs(r.df)>=1.0)
-            .forEach(r=>{
-              const flow=r.df<=-1.0?`↓${Math.abs(r.df).toFixed(1)}%(NBNへ流入)`:`↑${Math.abs(r.df).toFixed(1)}%(NBNから流出)`;
-              const corner=r.cornerTitle?`「${r.cornerTitle}」`:"";
-              lines.push(`    裏${r.rid}${corner}: ${r.iV.toFixed(1)}→${r.oV.toFixed(1)}% ${flow}`);
-            });
-        }
+        // 一般コーナーの流入・流出は視聴率ベースの推定のみを使う(実測inoutの詳細引用は、後段で
+        // JS側が機械的に選ぶ急上昇/急降下TOP3の6コーナーだけに絞り、ノイズを減らす)
+        const rivals=computeRivalFlow("NBN",sM,eM,rData,tpl);
+        rivals
+          .filter(r=>Math.abs(r.df)>=1.0)
+          .forEach(r=>{
+            const flow=r.df<=-1.0?`↓${Math.abs(r.df).toFixed(1)}%(NBNへ流入)`:`↑${Math.abs(r.df).toFixed(1)}%(NBNから流出)`;
+            const corner=r.cornerTitle?`「${r.cornerTitle}」`:"";
+            lines.push(`    裏${r.rid}${corner}: ${r.iV.toFixed(1)}→${r.oV.toFixed(1)}% ${flow}`);
+          });
       }
     }
+
+    // 急上昇/急降下TOP3をJS側で確定する(AIに選ばせない→順位ミス・方向の取り違え・重複が構造的に無くなる)。
+    // この6コーナーだけ、実測inoutデータがあれば詳細に付ける
+    const rising=[...nbnCornerStats].filter(c=>c.df>0).sort((a,b)=>b.df-a.df).slice(0,3);
+    const falling=[...nbnCornerStats].filter(c=>c.df<0).sort((a,b)=>a.df-b.df).slice(0,3);
+    const describeTop=c=>{
+      const dirTxt=c.df>=0?`↑上昇${c.df.toFixed(1)}%`:`↓低下${Math.abs(c.df).toFixed(1)}%`;
+      const out=[`  ・「${c.title}」(${c.cs}–${c.ce}) IN${c.iV.toFixed(1)}%→OUT${c.oV.toFixed(1)}%(${dirTxt})`];
+      if(c.summary)out.push(`    内容: ${c.summary}`);
+      const realFlow=inoutPoints?summarizeInoutFlow(inoutPoints,c.sM,c.eM):null;
+      const nominalWindow=c.eM-c.sM;
+      if(realFlow&&realFlow.coveredMinutes*2>=nominalWindow){
+        const windowMin=realFlow.coveredMinutes;
+        const rangeTxt=windowMin<nominalWindow?`${windowMin}分間ぶんの実測データのみ。コーナー全体は${nominalWindow}分`:`${windowMin}分間`;
+        const sig=Object.entries(realFlow).filter(([rid])=>rid!=="coveredMinutes").filter(([rid,f])=>rid!=="NBN"&&(f.avgIn*windowMin>=1.0||f.avgOut*windowMin>=1.0));
+        sig.forEach(([rid,f])=>{
+          const label=rid==="OTHER"?"その他局":rid==="OFF"?"視聴終了(OFF)":rid;
+          out.push(`    [実測]裏${label}: このコーナー(${rangeTxt})の合計で流入${(f.avgIn*windowMin).toFixed(1)}%(1分あたり${f.avgIn.toFixed(2)}%)・流出${(f.avgOut*windowMin).toFixed(1)}%(1分あたり${f.avgOut.toFixed(2)}%)`);
+        });
+        if(!sig.length)out.push(`    [実測]このコーナー(${rangeTxt})では1%以上の有意な流入・流出は確認されなかった`);
+      }else{
+        out.push(`    実測データなし(視聴率の変化幅のみで判断)`);
+      }
+      return out.join("\n");
+    };
+    lines.push(`\n【急上昇コーナー TOP3(このリストが最終確定。並び替え・追加・削除・重複掲載は禁止)】`);
+    lines.push(rising.length?rising.map(describeTop).join("\n"):"  (該当なし)");
+    lines.push(`\n【急降下コーナー TOP3(このリストが最終確定。並び替え・追加・削除・重複掲載は禁止)】`);
+    lines.push(falling.length?falling.map(describeTop).join("\n"):"  (該当なし)");
 
     // 競合各局（番組サマリー＋上位2コーナー、要約付き）
     lines.push(`\n【競合各局の概況】`);
