@@ -3238,7 +3238,10 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
         const[title,cs,ce,seg,,summary]=cn;
         if(SKIP_SEG.has(seg))continue;
         const sM=t2m(cs),eM=t2m(ce);
-        if(eM-sM<5)continue;
+        // 以前は5分未満のコーナーを丸ごと除外していたが、実データでは1〜4分の短いコーナーが
+        // 大半を占め(ニュース速報・特集など)、急上昇/急降下TOP3の候補から漏れてしまっていた。
+        // 0分(開始=終了)のみ除外し、それ以外の短いコーナーもTOP3の対象に含める
+        if(eM-sM<1)continue;
         // 終端(eM)は「コーナー終了時点」の表示(例:06:51–06:58)と揃えるため、CornerModalと同じく
         // eM自身も含めて取得する(<eMだと表示上の終了時刻より1分前の値がOUTになってしまう)
         const slice=rData.filter(d=>d.minute>=sM&&d.minute<=eM);
@@ -3250,7 +3253,10 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
         // 「流出」と書いてしまうことがあったため、AIに解釈させず断定した表記をそのまま使わせる
         const dirTxt=df>=0?`↑上昇${Math.abs(df).toFixed(1)}%`:`↓低下${Math.abs(df).toFixed(1)}%`;
         lines.push(`  ・「${title}」(${cs}–${ce}) IN${iV.toFixed(1)}% AVG${avg.toFixed(1)}% OUT${oV.toFixed(1)}%(${dirTxt})`);
-        if(summary)lines.push(`    内容: ${summary}`);
+        // 内容(summary)はここでは付けない。1〜4分の短いコーナーも対象に含めるようにしたところ
+        // 1日の corner数が数件→数十件に増え、全コーナーに詳細説明を付けるとctxがMAX_CHARSを超えて
+        // 後半(競合各局の概況、特にNHK)が丸ごと切り捨てられてしまっていたため。内容の説明は
+        // 急上昇/急降下TOP3の6コーナー(describeTop)にだけ付ける
         // 一般コーナーの流入・流出は視聴率ベースの推定のみを使う(実測inoutの詳細引用は、後段で
         // JS側が機械的に選ぶ急上昇/急降下TOP3の6コーナーだけに絞り、ノイズを減らす)
         const rivals=computeRivalFlow("NBN",sM,eM,rData,tpl);
@@ -3311,7 +3317,7 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
           const[title,cs,ce,seg,,summary]=cn;
           if(SKIP_SEG.has(seg))continue;
           const sM=t2m(cs),eM=t2m(ce);
-          if(eM-sM<5)continue;
+          if(eM-sM<1)continue;
           const sl=rData.filter(d=>d.minute>=sM&&d.minute<=eM);
           if(!sl.length)continue;
           const a=sl.reduce((s,d)=>s+d[sid],0)/sl.length;
