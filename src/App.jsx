@@ -61,10 +61,12 @@ const seg = active => ({ padding:"4px 13px", border:"none", background:active?"#
 const STATION_MAP={"1":"THK","2":"NHKE","3":"NHK","4":"CTV","5":"CBC","6":"NBN","10":"TVA"};
 const CHANNEL_ID_MAP={"0x0C08":"NHKE","0x0C10":"THK","0x0C18":"CBC","0x0C20":"NBN","0x0C28":"CTV","0x8400":"NHK","0x8430":"TVA"};
 const GUIDE_ST_ORDER=["NBN","THK","CTV","CBC","NHK","NHKE","TVA"];
-// 録画パイプラインのチャンネル番号(movie/ch{N}/配下のフォルダ)→局コード。NHKEは録画対象外
-const VIDEO_CH_TO_STATION={ch1:"THK",ch4:"CTV",ch6:"NBN"};
-const VIDEO_STATION_TO_CH={NBN:"ch6",THK:"ch1",CTV:"ch4"};
-const VIDEO_CHANNELS=["ch1","ch2","ch3","ch4","ch5","ch6"];
+// 録画パイプラインのチャンネル番号(movie/ch{N}/配下のフォルダ)→局コード。STATION_MAPと同じ番号体系。
+// NHKE(ch2)・CBC(ch5)・TVA(ch10)はS3を確認した限り録画データが存在しない(パイプライン未対応)。
+// ボタン自体は表示するが、選択時は既存の「この日の動画データはありません」表示になる
+const VIDEO_STATION_TO_CH={NBN:"ch6",THK:"ch1",CTV:"ch4",CBC:"ch5",NHK:"ch3",NHKE:"ch2",TVA:"ch10"};
+const VIDEO_CH_TO_STATION=Object.fromEntries(Object.entries(VIDEO_STATION_TO_CH).map(([st,ch])=>[ch,st]));
+const VIDEO_CHANNELS=GUIDE_ST_ORDER.map(st=>VIDEO_STATION_TO_CH[st]);
 const ZOOM_WIDTHS=[120,105,90,75,60,50,40,35,25,20]; // 詳細グラフの表示幅（分）
 
 // 深夜 0:00〜4:59 は翌日扱い（分 + 1440）にして連続した時系列に変換
@@ -5517,7 +5519,7 @@ export default function App(){
             {videoUrl&&selMin!==null&&<span style={{fontSize:9.5,color:"#6B7280",fontFamily:"monospace",marginLeft:"auto"}}>{wrapClock(selMin)} にシーク済み</span>}
           </div>
           <div style={{display:"flex",borderRadius:9999,overflow:"hidden",border:"1px solid #D7E5EE",marginBottom:7}}>
-            {VIDEO_CHANNELS.map(ch=><button key={ch} onClick={()=>setVideoCh(ch)} style={{flex:1,padding:"3px 0",border:"none",background:videoCh===ch?"#0066cc":"#fff",color:videoCh===ch?"#fff":"#61788A",cursor:"pointer",fontSize:9.5,fontWeight:700,fontFamily:"monospace"}}>{ch}</button>)}
+            {VIDEO_CHANNELS.map(ch=><button key={ch} onClick={()=>setVideoCh(ch)} style={{flex:1,padding:"3px 0",border:"none",background:videoCh===ch?"#0066cc":"#fff",color:videoCh===ch?"#fff":"#61788A",cursor:"pointer",fontSize:9,fontWeight:700,fontFamily:"monospace"}}>{VIDEO_CH_TO_STATION[ch]}</button>)}
           </div>
           {!videoFiles.some(f=>f.valid)&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この日の動画データはありません</div>}
           {videoFiles.some(f=>f.valid)&&!videoUrl&&!noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>グラフの時刻をクリックすると動画を表示します</div>}
