@@ -3207,10 +3207,14 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
       if(topMoments.length){
         lines.push("【実測データの具体例(視聴質パネル調査による実測値。推定ではない)】");
         lines.push("以下のうち最低2〜3個を、時刻と数値をそのまま引用する形で本文中に明記してください(例: 「05:47時点でNHKからNBNへ1.2%の視聴者が実測で流入」):");
+        lines.push("各行末の[放送中]は、その時刻に実際に放送されていた番組名。番組が「これから始まる」「ちょうど終わった」などと自分で推測せず、この放送中情報だけを根拠にすること(特にNHKの連続テレビ小説は毎日08:00–08:15固定なので、08:00台の動きを「朝ドラ終了後」のように誤って書かないこと)。");
         topMoments.forEach(ev=>{
           const label=ev.rid==="OTHER"?"その他局":ev.rid==="OFF"?"視聴終了(OFF)":ev.rid;
           const dirTxt=ev.dir==="in"?`${label}からNBNへ流入`:`NBNから${label}へ流出`;
-          lines.push(`  ${m2t(ev.minute)} ${dirTxt} ${ev.v.toFixed(1)}%(実測・1分間)`);
+          const nbnProg=tplProgAt(tpl,"NBN",ev.minute).prog;
+          const rivalProg=(ev.rid!=="OTHER"&&ev.rid!=="OFF")?tplProgAt(tpl,ev.rid,ev.minute).prog:null;
+          const onAir=[nbnProg?`NBN「${nbnProg.name}」`:null,rivalProg?`${ev.rid}「${rivalProg.name}」`:null].filter(Boolean).join(" / ");
+          lines.push(`  ${m2t(ev.minute)} ${dirTxt} ${ev.v.toFixed(1)}%(実測・1分間)${onAir?` [放送中: ${onAir}]`:""}`);
         });
       }
     }
@@ -3273,12 +3277,13 @@ async function buildAnalysisContext(dates,slot,ratingsCache,tplByDate){
       if(realFlow&&realFlow.coveredMinutes*2>=nominalWindow){
         const windowMin=realFlow.coveredMinutes;
         const rangeTxt=windowMin<nominalWindow?`${windowMin}分間ぶんの実測データのみ。コーナー全体は${nominalWindow}分`:`${windowMin}分間`;
-        const sig=Object.entries(realFlow).filter(([rid])=>rid!=="coveredMinutes").filter(([rid,f])=>rid!=="NBN"&&(f.avgIn*windowMin>=1.0||f.avgOut*windowMin>=1.0));
+        // TOP3の6コーナーだけは詳細な実測値を見たいため、通常の1%閾値より緩く0.1%以上の動きも拾う
+        const sig=Object.entries(realFlow).filter(([rid])=>rid!=="coveredMinutes").filter(([rid,f])=>rid!=="NBN"&&(f.avgIn*windowMin>=0.1||f.avgOut*windowMin>=0.1));
         sig.forEach(([rid,f])=>{
           const label=rid==="OTHER"?"その他局":rid==="OFF"?"視聴終了(OFF)":rid;
           out.push(`    [実測]裏${label}: このコーナー(${rangeTxt})の合計で流入${(f.avgIn*windowMin).toFixed(1)}%(1分あたり${f.avgIn.toFixed(2)}%)・流出${(f.avgOut*windowMin).toFixed(1)}%(1分あたり${f.avgOut.toFixed(2)}%)`);
         });
-        if(!sig.length)out.push(`    [実測]このコーナー(${rangeTxt})では1%以上の有意な流入・流出は確認されなかった`);
+        if(!sig.length)out.push(`    [実測]このコーナー(${rangeTxt})では有意な流入・流出は確認されなかった`);
       }else{
         out.push(`    実測データなし(視聴率の変化幅のみで判断)`);
       }
