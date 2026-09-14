@@ -1496,6 +1496,12 @@ const GUIDE_DATE_MAX=(()=>{
   return t.toISOString().slice(0,10);
 })();
 
+// 番組表ランディング時の初期表示日: 当日ではなく前日（当日は放送途中でデータが揃わないため）
+const GUIDE_DATE_DEFAULT=(()=>{
+  const d=shiftDateStr(GUIDE_DATE_MAX,-1);
+  return d<GUIDE_DATE_MIN?GUIDE_DATE_MIN:d;
+})();
+
 // Dashboard 日付セレクタ用: 番組表と同じ範囲（GUIDE_DATE_MIN〜GUIDE_DATE_MAX）
 const DASHBOARD_DATES=(()=>{
   const d=[];
@@ -3974,7 +3980,7 @@ const PM_SLOT=_UP.get('slot')||(PM_START>=930?'evening':'morning');
 const GUIDE_PPM_STEPS=[2,3,4,6,8,12,16];
 
 function ProgramGuidePage({metric="rating",weatherData={}}){
-  const[guideDate,setGuideDate]=useState(GUIDE_DATE_MAX); // カレンダー表示・ハイライト用の「現在地」
+  const[guideDate,setGuideDate]=useState(GUIDE_DATE_DEFAULT); // カレンダー表示・ハイライト用の「現在地」
   const[loadedDates,setLoadedDates]=useState([]); // 連続タイムラインに結合済みの日付(YYYY-MM-DD)昇順
   const[epgCache,setEpgCache]=useState({}); // date -> programs[](絶対分)|null(読み込み中)
   const[ratingCache,setRatingCache]=useState({}); // date -> 終日視聴率{time,minute,局:値}[]|null(読み込み中)|[](データなし)
@@ -4026,7 +4032,7 @@ function ProgramGuidePage({metric="rating",weatherData={}}){
     win.forEach(ensureRatingsFetched);
   };
 
-  useEffect(()=>{ jumpTo(GUIDE_DATE_MAX);
+  useEffect(()=>{ jumpTo(GUIDE_DATE_DEFAULT);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
