@@ -67,6 +67,40 @@ const GUIDE_ST_ORDER=["NBN","THK","CTV","CBC","NHK","NHKE","TVA"];
 const VIDEO_STATION_TO_CH={NBN:"ch6",THK:"ch1",CTV:"ch4",CBC:"ch5",NHK:"ch3",NHKE:"ch2",TVA:"ch10"};
 const VIDEO_CH_TO_STATION=Object.fromEntries(Object.entries(VIDEO_STATION_TO_CH).map(([st,ch])=>[ch,st]));
 const VIDEO_CHANNELS=GUIDE_ST_ORDER.map(st=>VIDEO_STATION_TO_CH[st]);
+// 録画チャンクの実際の長さは分からない(ファイル名にはstart時刻しか無い)ため、クリックした時刻が
+// 一番近いチャンクの開始から明らかに離れすぎている(=そのチャンクがカバーしているはずがない)場合は
+// 「動画なし」として扱う。直前の全く別の時間のチャンクが誤って再生されるのを防ぐための安全マージン
+const MAX_VIDEO_CHUNK_GAP_SEC=60*60;
+// 指定局・指定日の動画チャンク一覧をS3から取得する。録画アップロード時にファイルが前後の日付フォルダに
+// 誤って入ってしまうことがあるため、対象日の前後1日ぶんのフォルダも探索し、フォルダ名ではなく
+// ファイル名に埋め込まれた日付を正としてその日に属するチャンクだけを抽出する
+async function fetchVideoFilesForDate(ch,date){
+  const yyyymmdd=date.replace(/-/g,'');
+  const neighborYmds=[shiftDateStr(date,-1),date,shiftDateStr(date,1)].map(d=>d.replace(/-/g,''));
+  const lists=await Promise.all(neighborYmds.map(async ymd=>{
+    try{
+      const res=await fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/?prefix=movie/${ch}/${ymd}/&list-type=2`);
+      if(!res.ok)return[];
+      const text=await res.text();
+      const xml=new DOMParser().parseFromString(text,'text/xml');
+      return[...xml.querySelectorAll('Contents')].map(c=>({key:c.querySelector('Key').textContent,size:parseInt(c.querySelector('Size').textContent)}));
+    }catch{return[];}
+  }));
+  // サイズが極端に小さい(録画失敗などによる空ファイル)チャンクも境界判定のために残しつつ、
+  // valid:false としてマークする。ここで丸ごと除外すると、その時間帯をクリックした時に
+  // 直前(または直後)の全く別の時間のチャンクが誤って再生されてしまう
+  return lists.flat()
+    .map(f=>{
+      const fn=f.key.split('/').pop();
+      const m=fn.match(/CH\d+_(\d{8})_(\d{2})(\d{2})(\d{2})\.mp4$/);
+      if(!m)return null;
+      // フォルダ名ではなく、ファイル名に埋め込まれた日付を正とする(アップロード時に日付フォルダを
+      // 間違えることがあるため)。対象日と一致しないファイルはここで除外する
+      if(m[1]!==yyyymmdd)return null;
+      return{...f,fn,startSec:parseInt(m[2])*3600+parseInt(m[3])*60+parseInt(m[4]),valid:f.size>1000000};
+    })
+    .filter(Boolean).sort((a,b)=>a.startSec-b.startSec);
+}
 const ZOOM_WIDTHS=[120,105,90,75,60,50,40,35,25,20]; // 詳細グラフの表示幅（分）
 
 // 深夜 0:00〜4:59 は翌日扱い（分 + 1440）にして連続した時系列に変換
@@ -2993,20 +3027,8 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
       if(date==="2026-04-17"||date<"2026-06-17"){if(!(date in videoFilesByDate))setVideoFilesByDate(prev=>({...prev,[date]:[]}));return;}
       if(date in videoFilesByDate)return;
       setVideoFilesByDate(prev=>({...prev,[date]:null}));
-      const yyyymmdd=date.replace(/-/g,'');
-      fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/?prefix=movie/ch6/${yyyymmdd}/&list-type=2`)
-        .then(r=>r.ok?r.text():Promise.reject())
-        .then(text=>{
-          const xml=new DOMParser().parseFromString(text,'text/xml');
-          // サイズが極端に小さい(録画失敗などによる空ファイル)チャンクも境界判定のために残しつつ、
-          // valid:false としてマークする。ここで丸ごと除外すると、その時間帯をクリックした時に
-          // 直前(または直後)の全く別の時間のチャンクが誤って再生されてしまう
-          const files=[...xml.querySelectorAll('Contents')]
-            .map(c=>({key:c.querySelector('Key').textContent,size:parseInt(c.querySelector('Size').textContent)}))
-            .map(f=>{const fn=f.key.split('/').pop();const m=fn.match(/CH\d+_\d{8}_(\d{2})(\d{2})(\d{2})\.mp4$/);if(!m)return null;return{...f,fn,startSec:parseInt(m[1])*3600+parseInt(m[2])*60+parseInt(m[3]),valid:f.size>1000000};})
-            .filter(Boolean).sort((a,b)=>a.startSec-b.startSec);
-          setVideoFilesByDate(prev=>({...prev,[date]:files}));
-        })
+      fetchVideoFilesForDate("ch6",date)
+        .then(files=>setVideoFilesByDate(prev=>({...prev,[date]:files})))
         .catch(()=>setVideoFilesByDate(prev=>({...prev,[date]:[]})));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3016,8 +3038,13 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
     setProgSelMin(m);
     setActiveVideoDate(row.date);
     if(exactSeek){
+      // objectKeyのファイルが(アップロード時のミスで)前後の日付フォルダに入っていることがあるため、
+      // 取得済みのvideoFiles一覧から実際のキー(正しいフォルダ込み)を探す。見つからない場合のみ、
+      // 従来通りその日のフォルダを素直に組み立てる(videoFiles未取得時などのフォールバック)
+      const matchedFile=(videoFilesByDate[row.date]||[]).find(f=>f.fn===exactSeek.objectKey);
       const yyyymmdd=row.date.replace(/-/g,'');
-      cornerSeekRef.current={url:`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/movie/ch6/${yyyymmdd}/${exactSeek.objectKey}`,sec:exactSeek.startSec};
+      const url=matchedFile?`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${matchedFile.key}`:`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/movie/ch6/${yyyymmdd}/${exactSeek.objectKey}`;
+      cornerSeekRef.current={url,sec:exactSeek.startSec};
     }else{
       cornerSeekRef.current=null;
     }
@@ -3039,12 +3066,14 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
     if(!files)return;
     // progSelMinはその日の0時からの分(時刻そのもの)なので、そのまま秒に変換すればよい
     const tgt=progSelMin*60;
-    let found=null;
+    let matched=null;
     for(let i=0;i<files.length;i++){
-      if(files[i].startSec<=tgt&&(i===files.length-1||files[i+1].startSec>tgt)){found=files[i];break;}
+      if(files[i].startSec<=tgt&&(i===files.length-1||files[i+1].startSec>tgt)){matched=files[i];break;}
     }
-    // 見つかったチャンクが録画失敗等で空(valid:false)の場合、直前の全く別の時間のチャンクへ
-    // フォールバックさせず、素直に「この時刻の動画はありません」を表示する
+    // 見つかったチャンクが録画失敗等で空(valid:false)の場合や、クリックした時刻がチャンクの開始から
+    // MAX_VIDEO_CHUNK_GAP_SEC以上離れている(=そのチャンクがカバーしているはずがない)場合は、
+    // 直前の全く別の時間のチャンクへフォールバックさせず、素直に「この時刻の動画はありません」を表示する
+    const found=(matched&&(tgt-matched.startSec)<=MAX_VIDEO_CHUNK_GAP_SEC)?matched:null;
     if(!found||!found.valid){setVideoUrl(null);setNoVideoForTime(true);return;}
     setNoVideoForTime(false);
     const offSec=tgt-found.startSec;
@@ -5356,8 +5385,13 @@ export default function App(){
     if(mappedCh)setVideoCh(mappedCh);
     else if(m!==selMin)suppressVideoSeekRef.current=true;
     if(exactSeek&&mappedCh){
+      // objectKeyのファイルが(アップロード時のミスで)前後の日付フォルダに入っていることがあるため、
+      // 取得済みのvideoFiles一覧(同じ局を見ている場合は正しく前後日を含めて取得済み)から実際のキーを
+      // 探す。見つからない場合のみ、従来通りその日のフォルダを素直に組み立てる(フォールバック)
+      const matchedFile=mappedCh===videoCh?(videoFiles||[]).find(f=>f.fn===exactSeek.objectKey):null;
       const yyyymmdd=date.replace(/-/g,'');
-      cornerSeekRef.current={url:`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/movie/${mappedCh}/${yyyymmdd}/${exactSeek.objectKey}`,sec:exactSeek.startSec};
+      const url=matchedFile?`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${matchedFile.key}`:`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/movie/${mappedCh}/${yyyymmdd}/${exactSeek.objectKey}`;
+      cornerSeekRef.current={url,sec:exactSeek.startSec};
     }else{
       cornerSeekRef.current=null;
     }
@@ -5379,12 +5413,14 @@ export default function App(){
       return;
     }
     if(!videoFiles||selMin===null)return;
-    const tgt=(selMin-dateMid)*60;let found=null;
+    const tgt=(selMin-dateMid)*60;let matched=null;
     for(let i=0;i<videoFiles.length;i++){
-      if(videoFiles[i].startSec<=tgt&&(i===videoFiles.length-1||videoFiles[i+1].startSec>tgt)){found=videoFiles[i];break;}
+      if(videoFiles[i].startSec<=tgt&&(i===videoFiles.length-1||videoFiles[i+1].startSec>tgt)){matched=videoFiles[i];break;}
     }
-    // 見つかったチャンクが録画失敗等で空(valid:false)の場合、直前の全く別の時間のチャンクへ
-    // フォールバックさせず、素直に「この時刻の動画はありません」を表示する
+    // 見つかったチャンクが録画失敗等で空(valid:false)の場合や、クリックした時刻がチャンクの開始から
+    // MAX_VIDEO_CHUNK_GAP_SEC以上離れている(=そのチャンクがカバーしているはずがない)場合は、
+    // 直前の全く別の時間のチャンクへフォールバックさせず、素直に「この時刻の動画はありません」を表示する
+    const found=(matched&&(tgt-matched.startSec)<=MAX_VIDEO_CHUNK_GAP_SEC)?matched:null;
     if(!found||!found.valid){setVideoUrl(null);setNoVideoForTime(true);return;}
     setNoVideoForTime(false);
     const offSec=tgt-found.startSec;
@@ -5394,22 +5430,12 @@ export default function App(){
   },[selMin,date,slot,videoFiles]);
   useEffect(()=>{
     if(date==="2026-04-17"||date<"2026-06-17"){setVideoFiles(null);setVideoUrl(null);setNoVideoForTime(false);prevVideoUrlRef.current=null;return;}
-    const yyyymmdd=date.replace(/-/g,'');
+    let cancelled=false;
     setVideoFiles(null);setVideoUrl(null);setNoVideoForTime(false);prevVideoUrlRef.current=null;
-    fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/?prefix=movie/${videoCh}/${yyyymmdd}/&list-type=2`)
-      .then(r=>r.ok?r.text():Promise.reject())
-      .then(text=>{
-        const xml=new DOMParser().parseFromString(text,'text/xml');
-        // サイズが極端に小さい(録画失敗などによる空ファイル)チャンクも境界判定のために残しつつ、
-        // valid:false としてマークする。ここで丸ごと除外すると、その時間帯をクリックした時に
-        // 直前(または直後)の全く別の時間のチャンクが誤って再生されてしまう
-        const files=[...xml.querySelectorAll('Contents')]
-          .map(c=>({key:c.querySelector('Key').textContent,size:parseInt(c.querySelector('Size').textContent)}))
-          .map(f=>{const fn=f.key.split('/').pop();const m=fn.match(/CH\d+_\d{8}_(\d{2})(\d{2})(\d{2})\.mp4$/);if(!m)return null;return{...f,fn,startSec:parseInt(m[1])*3600+parseInt(m[2])*60+parseInt(m[3]),valid:f.size>1000000};})
-          .filter(Boolean).sort((a,b)=>a.startSec-b.startSec);
-        setVideoFiles(files);
-      })
-      .catch(()=>setVideoFiles([]));
+    fetchVideoFilesForDate(videoCh,date)
+      .then(files=>{if(!cancelled)setVideoFiles(files);})
+      .catch(()=>{if(!cancelled)setVideoFiles([]);});
+    return()=>{cancelled=true;};
   },[date,videoCh]);
   const dates=DASHBOARD_DATES;
   const dow=ds=>["日","月","火","水","木","金","土"][new Date(ds).getDay()];
