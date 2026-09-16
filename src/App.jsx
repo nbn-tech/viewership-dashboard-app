@@ -1285,13 +1285,16 @@ function SegmentBand({stId,startMin,endMin,height=14,onHover,tpl}){
 function Chart({data,sel,onClick,selMin,hl,metric,onPan}){
   const ref=useRef(null),cRef=useRef(null);
   const[hv,setHv]=useState(null);
-  const[d,setD]=useState({w:900,h:340});
+  // 初期値をnullにし、実際のコンテナ幅を測るまでSVGを描画しない。900px固定の初期値のままだと、
+  // 測定が終わるまでの一瞬だけグラフが横に広がり、右側の放送動画パネルにはみ出して表示されてしまう
+  // (ResizeObserverが効く前のチラつき)
+  const[d,setD]=useState(null);
   const[dragging,setDragging]=useState(false);
   const dragX=useRef(0);
   const hasDragged=useRef(false);
   useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setD({w:e.contentRect.width,h:Math.min(400,Math.max(280,e.contentRect.height))});});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
   // タイムラインの局名列と同じ幅を左に確保し、両者の時刻軸を同じX座標に揃える
-  const p={t:28,r:0,b:38,l:TIMELINE_LABEL_WIDTH},cW=d.w-p.l-p.r,cH=d.h-p.t-p.b;
+  const p={t:28,r:0,b:38,l:TIMELINE_LABEL_WIDTH},cW=(d?.w??0)-p.l-p.r,cH=(d?.h??340)-p.t-p.b;
   // 1分値は「その分の開始位置」に置く。右端は最後の1分が終わる時刻なので、
   // タイムラインの [start, end) と同じ時間スケールになる。
   const mpp=data.length>0?data.length/cW:1;
@@ -1320,6 +1323,7 @@ function Chart({data,sel,onClick,selMin,hl,metric,onPan}){
   const si=data.findIndex(dt=>dt.minute===selMin);
   let hs=-1,he=-1;if(hl){hs=data.findIndex(dt=>dt.minute===hl.start);he=data.findIndex(dt=>dt.minute===hl.end);}
   const hc=(ST.find(s=>s.id===hl?.stationId)||{c:"#888"}).c;
+  if(d==null)return <div ref={cRef} style={{width:"100%",height:"100%",minHeight:280}}/>;
   return <div ref={cRef} style={{width:"100%",height:"100%",minHeight:280}}>
     <svg ref={ref} width={d.w} height={d.h} style={{cursor:onPan?(dragging?"grabbing":"grab"):"crosshair",display:"block",userSelect:"none"}}
       onClick={e=>{if(hasDragged.current){hasDragged.current=false;return;}const i=gi(e.clientX);if(i>=0&&data[i])onClick(data[i].minute);}}
@@ -1354,10 +1358,12 @@ function Chart({data,sel,onClick,selMin,hl,metric,onPan}){
 // 時間軸(winStart-winEnd)を共有し、位置が揃うようにしている
 function InoutFlowChart({points,dayMid,winStart,winEnd}){
   const cRef=useRef(null);
-  const[w,setW]=useState(900);
+  // 初期値をnullにし、実際のコンテナ幅を測るまでSVGを描画しない(900px固定だと測定完了までの
+  // 一瞬だけグラフが横に広がって表示されてしまう)
+  const[w,setW]=useState(null);
   useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setW(e.contentRect.width);});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
   const h=126,p={l:TIMELINE_LABEL_WIDTH,r:0,t:8,b:16};
-  const cW=Math.max(1,w-p.l-p.r);
+  const cW=Math.max(1,(w??0)-p.l-p.r);
   const midY=p.t+(h-p.t-p.b)/2;
   const total=Math.max(1,winEnd-winStart);
   const xAt=absMin=>p.l+((absMin-winStart)/total)*cW;
@@ -1380,6 +1386,7 @@ function InoutFlowChart({points,dayMid,winStart,winEnd}){
   const tickStep=total<=30?5:total<=60?10:total<=120?15:30;
   const timeTicks=useMemo(()=>{const arr=[];for(let m=Math.ceil(winStart/tickStep)*tickStep;m<winEnd;m+=tickStep)arr.push(m);return arr;},[winStart,winEnd,tickStep]);
   if(!visible.length)return null;
+  if(w==null)return <div style={{padding:"0 18px",marginBottom:6}}><div ref={cRef} style={{width:"100%",height:h,background:"#FAFBFC",border:"1px solid #E5E7EB",borderRadius:4}}/></div>;
   return <div style={{padding:"0 18px",marginBottom:6}}>
     <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3,flexWrap:"wrap"}}>
       <span style={{fontSize:10,fontWeight:700,color:"#173b5d"}}>【お試し】NBN流入流出（視聴質パネル実測・分単位）</span>
