@@ -100,9 +100,13 @@ async function fetchVideoFilesForDate(ch,date){
       if(fileDate===yyyymmdd&&rawSec>=5*3600)startSec=rawSec;
       else if(fileDate===nextYmd&&rawSec<5*3600)startSec=rawSec+24*3600;
       else return null;
-      return{...f,fn,startSec,valid:f.size>1000000};
+      return{...f,fn,startSec,valid:f.size>0};
     })
     .filter(Boolean).sort((a,b)=>a.startSec-b.startSec);
+}
+// ファイル名には開始時刻しかない。終了時刻は読み込んだ動画の実際の長さで判定する。
+function videoCoversOffset(video,offset){
+  return !Number.isFinite(video.duration)||offset<video.duration;
 }
 const ZOOM_WIDTHS=[120,105,90,75,60,50,40,35,25,20]; // 詳細グラフの表示幅（分）
 
@@ -1161,7 +1165,9 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
     const canExpand=isCorner&&!major;
     const blockKey=`${sid}-${key}`;
     const isHovered=hoveredBlock===blockKey;
-    return <button key={blockKey} onClick={ev=>{ev.stopPropagation();const minute=VIDEO_STATION_TO_CH[sid]?t2m(item.start):(isCorner?t2m(item.start):Math.round((s+e)/2));
+    return <button key={blockKey} onClick={ev=>{ev.stopPropagation();const rect=ev.currentTarget.getBoundingClientRect();
+      const clickedMinute=Math.max(s,Math.min(e-1,Math.floor(s+(e-s)*(ev.clientX-rect.left)/rect.width)));
+      const minute=isCorner?t2m(item.start):clickedMinute;
       // コーナー(分析結果)ブロックを押した場合のみ、分単位ではなくそのコーナーの録画チャンク内の正確な開始秒にシークする
       const exactSeek=(isCorner&&VIDEO_STATION_TO_CH[sid]&&item.objectKey!=null&&item.startSec!=null)?{objectKey:item.objectKey,startSec:item.startSec}:null;
       if(onTimelineBlockClick)onTimelineBlockClick(minute,sid,exactSeek);else onClickMinute(minute);if(isCorner)onHighlight?.({start:t2m(item.start),end:t2m(item.end),stationId:sid});if(canExpand)setExpandedCorner(prev=>prev?.key===blockKey?null:{...item,key:blockKey,sid});}} title={`${item.title} ${wrapClock(t2m(item.start))}–${wrapClock(t2m(item.end))}`}
@@ -3019,6 +3025,37 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
   const[activeVideoDate,setActiveVideoDate]=useState(null); // 現在動画パネルに表示している比較日
   const prevVideoUrlRef=useRef(null);
   const pendingSeekRef=useRef(null);
+  const requestedSeekRef=useRef(null);
+  const seekVideo=(url,sec)=>{
+    requestedSeekRef.current=sec;
+    const video=videoRef.current;
+    if(url===prevVideoUrlRef.current&&video){
+      if(!videoCoversOffset(video,sec)){requestedSeekRef.current=null;setVideoUrl(null);setNoVideoForTime(true);prevVideoUrlRef.current=null;return;}
+      video.currentTime=sec;
+    }else{pendingSeekRef.current=sec;prevVideoUrlRef.current=url;setVideoUrl(url);}
+    setNoVideoForTime(false);
+  };
+  const onVideoMetadata=()=>{
+    const video=videoRef.current,sec=pendingSeekRef.current;
+    if(!video||sec===null)return;
+    pendingSeekRef.current=null;
+    if(!videoCoversOffset(video,sec)){requestedSeekRef.current=null;setVideoUrl(null);setNoVideoForTime(true);prevVideoUrlRef.current=null;return;}
+    video.currentTime=sec;
+  };
+  const onVideoSeeked=()=>{
+    const video=videoRef.current,sec=requestedSeekRef.current;
+    if(!video||sec===null)return;
+    if(video.currentTime<sec-1.5||!videoCoversOffset(video,sec)){
+      requestedSeekRef.current=null;setVideoUrl(null);setNoVideoForTime(true);prevVideoUrlRef.current=null;return;
+    }
+    if(Number.isFinite(video.duration))requestedSeekRef.current=null;
+  };
+  const onVideoDurationChange=()=>{
+    const video=videoRef.current,sec=requestedSeekRef.current;
+    if(video&&sec!==null&&!videoCoversOffset(video,sec)){
+      requestedSeekRef.current=null;setVideoUrl(null);setNoVideoForTime(true);prevVideoUrlRef.current=null;
+    }
+  };
   // コーナー(分析結果)ブロックを押した時だけ使う、正確な動画URL＋開始秒(分単位ではなく秒単位)
   const cornerSeekRef=useRef(null);
   const[videoFilesByDate,setVideoFilesByDate]=useState({}); // date -> files[]|null(読込中)|[](動画なし)
@@ -3066,9 +3103,7 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
     if(cornerSeekRef.current){
       const{url,sec}=cornerSeekRef.current;
       cornerSeekRef.current=null;
-      setNoVideoForTime(false);
-      if(url===prevVideoUrlRef.current){if(videoRef.current)videoRef.current.currentTime=sec;}
-      else{pendingSeekRef.current=sec;prevVideoUrlRef.current=url;setVideoUrl(url);}
+      seekVideo(url,sec);
       return;
     }
     if(activeVideoDate==null||progSelMin==null)return;
@@ -3082,11 +3117,9 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
     }
     const found=matched;
     if(!found||!found.valid){setVideoUrl(null);setNoVideoForTime(true);return;}
-    setNoVideoForTime(false);
     const offSec=tgt-found.startSec;
     const newUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${found.key}`;
-    if(newUrl===prevVideoUrlRef.current){if(videoRef.current)videoRef.current.currentTime=offSec;}
-    else{pendingSeekRef.current=offSec;prevVideoUrlRef.current=newUrl;setVideoUrl(newUrl);}
+    seekVideo(newUrl,offSec);
   },[progSelMin,activeVideoDate,videoFilesByDate]);
 
   const activeRow=rows.find(r=>r.date===activeVideoDate);
@@ -3188,7 +3221,7 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
           {activeVideoDate&&videoFilesByDate[activeVideoDate]?.some(f=>f.valid)&&!videoUrl&&!noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>タイムラインの時刻をクリックすると動画を表示します</div>}
           {noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この時刻の動画はありません</div>}
           {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls
-            onLoadedMetadata={()=>{if(videoRef.current&&pendingSeekRef.current!==null){videoRef.current.currentTime=pendingSeekRef.current;pendingSeekRef.current=null;}}}
+            onLoadedMetadata={onVideoMetadata} onSeeked={onVideoSeeked} onDurationChange={onVideoDurationChange}
             onEnded={()=>{const files=videoFilesByDate[activeVideoDate];if(!files)return;const idx=files.findIndex(f=>`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${f.key}`===videoUrl);if(idx===-1||idx===files.length-1)return;const nxt=files[idx+1];const nxtUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}}
             style={{display:"block",width:"100%",aspectRatio:"16 / 9",objectFit:"contain",borderRadius:5,background:"#000"}}/>}
         </div>
@@ -5192,6 +5225,37 @@ export default function App(){
   const prevVideoUrlRef=useRef(null);
   const pendingSeekRef=useRef(null);
   const suppressVideoSeekRef=useRef(false);
+  const requestedSeekRef=useRef(null);
+  const seekVideo=(url,sec)=>{
+    requestedSeekRef.current=sec;
+    const video=videoRef.current;
+    if(url===prevVideoUrlRef.current&&video){
+      if(!videoCoversOffset(video,sec)){requestedSeekRef.current=null;setVideoUrl(null);setNoVideoForTime(true);prevVideoUrlRef.current=null;return;}
+      video.currentTime=sec;
+    }else{pendingSeekRef.current=sec;prevVideoUrlRef.current=url;setVideoUrl(url);}
+    setNoVideoForTime(false);
+  };
+  const onVideoMetadata=()=>{
+    const video=videoRef.current,sec=pendingSeekRef.current;
+    if(!video||sec===null)return;
+    pendingSeekRef.current=null;
+    if(!videoCoversOffset(video,sec)){requestedSeekRef.current=null;setVideoUrl(null);setNoVideoForTime(true);prevVideoUrlRef.current=null;return;}
+    video.currentTime=sec;
+  };
+  const onVideoSeeked=()=>{
+    const video=videoRef.current,sec=requestedSeekRef.current;
+    if(!video||sec===null)return;
+    if(video.currentTime<sec-1.5||!videoCoversOffset(video,sec)){
+      requestedSeekRef.current=null;setVideoUrl(null);setNoVideoForTime(true);prevVideoUrlRef.current=null;return;
+    }
+    if(Number.isFinite(video.duration))requestedSeekRef.current=null;
+  };
+  const onVideoDurationChange=()=>{
+    const video=videoRef.current,sec=requestedSeekRef.current;
+    if(video&&sec!==null&&!videoCoversOffset(video,sec)){
+      requestedSeekRef.current=null;setVideoUrl(null);setNoVideoForTime(true);prevVideoUrlRef.current=null;
+    }
+  };
   // 放送内容タイムラインでコーナー(分析結果)ブロックを押した時だけ使う、正確な動画URL＋開始秒(分単位ではなく秒単位)
   const cornerSeekRef=useRef(null);
   const[page,setPage]=useState(PROGRAM_MODE?"dashboard":"guide");
@@ -5410,9 +5474,7 @@ export default function App(){
     if(cornerSeekRef.current){
       const{url,sec}=cornerSeekRef.current;
       cornerSeekRef.current=null;
-      setNoVideoForTime(false);
-      if(url===prevVideoUrlRef.current){if(videoRef.current)videoRef.current.currentTime=sec;}
-      else{pendingSeekRef.current=sec;prevVideoUrlRef.current=url;setVideoUrl(url);}
+      seekVideo(url,sec);
       return;
     }
     if(date==="2026-04-17"&&slot==="morning"&&selMin!==null){
@@ -5426,11 +5488,9 @@ export default function App(){
     }
     const found=matched;
     if(!found||!found.valid){setVideoUrl(null);setNoVideoForTime(true);return;}
-    setNoVideoForTime(false);
     const offSec=tgt-found.startSec;
     const newUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${found.key}`;
-    if(newUrl===prevVideoUrlRef.current){if(videoRef.current)videoRef.current.currentTime=offSec;}
-    else{pendingSeekRef.current=offSec;prevVideoUrlRef.current=newUrl;setVideoUrl(newUrl);}
+    seekVideo(newUrl,offSec);
   },[selMin,date,slot,videoFiles]);
   useEffect(()=>{
     if(date==="2026-04-17"||date<"2026-06-17"){setVideoFiles(null);setVideoUrl(null);setNoVideoForTime(false);prevVideoUrlRef.current=null;return;}
@@ -5601,7 +5661,7 @@ export default function App(){
           {!videoFiles.some(f=>f.valid)&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この日の動画データはありません</div>}
           {videoFiles.some(f=>f.valid)&&!videoUrl&&!noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>グラフの時刻をクリックすると動画を表示します</div>}
           {noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この時刻の動画はありません</div>}
-          {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls onLoadedMetadata={()=>{if(videoRef.current&&pendingSeekRef.current!==null){videoRef.current.currentTime=pendingSeekRef.current;pendingSeekRef.current=null;}}} onEnded={()=>{if(!videoFiles)return;const idx=videoFiles.findIndex(f=>`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${f.key}`===videoUrl);if(idx===-1||idx===videoFiles.length-1)return;const nxt=videoFiles[idx+1];const nxtUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}} style={{display:"block",width:"100%",aspectRatio:"16 / 9",objectFit:"contain",borderRadius:5,background:"#000"}}/>}
+          {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls onLoadedMetadata={onVideoMetadata} onSeeked={onVideoSeeked} onDurationChange={onVideoDurationChange} onEnded={()=>{if(!videoFiles)return;const idx=videoFiles.findIndex(f=>`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${f.key}`===videoUrl);if(idx===-1||idx===videoFiles.length-1)return;const nxt=videoFiles[idx+1];const nxtUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}} style={{display:"block",width:"100%",aspectRatio:"16 / 9",objectFit:"contain",borderRadius:5,background:"#000"}}/>}
         </div>}
         <Panel selMin={selMin} rData={selData} allR={rData} allS={sData} sel={sel} onHL={setHL} metric={metric} tpl={dashTpl}/>
       </div>
