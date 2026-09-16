@@ -67,21 +67,10 @@ const GUIDE_ST_ORDER=["NBN","THK","CTV","CBC","NHK","NHKE","TVA"];
 const VIDEO_STATION_TO_CH={NBN:"ch6",THK:"ch1",CTV:"ch4",CBC:"ch5",NHK:"ch3",NHKE:"ch2",TVA:"ch10"};
 const VIDEO_CH_TO_STATION=Object.fromEntries(Object.entries(VIDEO_STATION_TO_CH).map(([st,ch])=>[ch,st]));
 const VIDEO_CHANNELS=GUIDE_ST_ORDER.map(st=>VIDEO_STATION_TO_CH[st]);
-// 録画チャンクの実際の長さはファイル名からは分からない(start時刻しか無い)。この録画パイプラインは
-// 番組を録画している時間帯だけ断続的にファイルが作られる仕様のため、あるチャンクの開始時刻から
-// 「次のチャンクの開始時刻」までの間隔は、録画が単に行われていない(間が空いている)だけのことも多く、
-// そのチャンク自体の実際の長さとは無関係。そのため間隔を長さの目安にすることはできない
-// (実測: 23:00開始チャンクの次は00:54開始の別チャンクで間隔114分だが、23:00チャンクの実際の長さは
-// ffprobeで確認すると約59分しかない。間隔だけで「次のチャンクの直前まで再生可能」とみなすと、
-// 実際の長さを超えてシークしてしまい、動画が末尾フレームで止まって見える)。
-// 一方、この録画パイプラインのファイルサイズはビットレートがほぼ一定(複数チャンクをffprobeで実測し
-// 約115,700〜117,500 B/sで一致を確認)なので、ファイルサイズから実際の長さを見積もれる。
-// S3一覧取得時点でサイズは既に分かっているため、動画本体を読み込まずに判定できる。
-// 安全のため実測レンジよりやや高めのビットレートを使い、常に実際の長さより短めに見積もる(超過シーク防止)
-const VIDEO_BITRATE_BPS=120000;
-function estimateChunkDurationSec(file){
-  return file.size/VIDEO_BITRATE_BPS;
-}
+// 録画チャンクの実際の長さは分からない(ファイル名にはstart時刻しか無い)ため、クリックした時刻が
+// 一番近いチャンクの開始から明らかに離れすぎている(=そのチャンクがカバーしているはずがない)場合は
+// 「動画なし」として扱う。直前の全く別の時間のチャンクが誤って再生されるのを防ぐための安全マージン
+const MAX_VIDEO_CHUNK_GAP_SEC=60*60;
 // 指定局・指定放送日の動画チャンク一覧をS3から取得する。録画アップロード時にファイルが前後の日付フォルダに
 // 誤って入ってしまうことがあるため、対象日の前後1日ぶんのフォルダも探索し、フォルダ名ではなく
 // ファイル名に埋め込まれた日付・時刻を正として、その放送日に属するチャンクだけを抽出する。
@@ -1176,7 +1165,7 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
     const canExpand=isCorner&&!major;
     const blockKey=`${sid}-${key}`;
     const isHovered=hoveredBlock===blockKey;
-    return <button key={blockKey} onClick={ev=>{ev.stopPropagation();const minute=t2m(item.start);
+    return <button key={blockKey} onClick={ev=>{ev.stopPropagation();const minute=VIDEO_STATION_TO_CH[sid]?t2m(item.start):(isCorner?t2m(item.start):Math.round((s+e)/2));
       // コーナー(分析結果)ブロックを押した場合のみ、分単位ではなくそのコーナーの録画チャンク内の正確な開始秒にシークする
       const exactSeek=(isCorner&&VIDEO_STATION_TO_CH[sid]&&item.objectKey!=null&&item.startSec!=null)?{objectKey:item.objectKey,startSec:item.startSec}:null;
       if(onTimelineBlockClick)onTimelineBlockClick(minute,sid,exactSeek);else onClickMinute(minute);if(isCorner)onHighlight?.({start:t2m(item.start),end:t2m(item.end),stationId:sid});if(canExpand)setExpandedCorner(prev=>prev?.key===blockKey?null:{...item,key:blockKey,sid});}} title={`${item.title} ${wrapClock(t2m(item.start))}–${wrapClock(t2m(item.end))}`}
@@ -1296,16 +1285,13 @@ function SegmentBand({stId,startMin,endMin,height=14,onHover,tpl}){
 function Chart({data,sel,onClick,selMin,hl,metric,onPan}){
   const ref=useRef(null),cRef=useRef(null);
   const[hv,setHv]=useState(null);
-  // 初期値をnullにし、実際のコンテナ幅を測るまでSVGを描画しない。900px固定の初期値のままだと、
-  // 測定が終わるまでの一瞬だけグラフが横に広がり、右側の放送動画パネルにはみ出して表示されてしまう
-  // (ResizeObserverが効く前のチラつき)
-  const[d,setD]=useState(null);
+  const[d,setD]=useState({w:900,h:340});
   const[dragging,setDragging]=useState(false);
   const dragX=useRef(0);
   const hasDragged=useRef(false);
   useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setD({w:e.contentRect.width,h:Math.min(400,Math.max(280,e.contentRect.height))});});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
   // タイムラインの局名列と同じ幅を左に確保し、両者の時刻軸を同じX座標に揃える
-  const p={t:28,r:0,b:38,l:TIMELINE_LABEL_WIDTH},cW=(d?.w??0)-p.l-p.r,cH=(d?.h??340)-p.t-p.b;
+  const p={t:28,r:0,b:38,l:TIMELINE_LABEL_WIDTH},cW=d.w-p.l-p.r,cH=d.h-p.t-p.b;
   // 1分値は「その分の開始位置」に置く。右端は最後の1分が終わる時刻なので、
   // タイムラインの [start, end) と同じ時間スケールになる。
   const mpp=data.length>0?data.length/cW:1;
@@ -1334,7 +1320,6 @@ function Chart({data,sel,onClick,selMin,hl,metric,onPan}){
   const si=data.findIndex(dt=>dt.minute===selMin);
   let hs=-1,he=-1;if(hl){hs=data.findIndex(dt=>dt.minute===hl.start);he=data.findIndex(dt=>dt.minute===hl.end);}
   const hc=(ST.find(s=>s.id===hl?.stationId)||{c:"#888"}).c;
-  if(d==null)return <div ref={cRef} style={{width:"100%",height:"100%",minHeight:280}}/>;
   return <div ref={cRef} style={{width:"100%",height:"100%",minHeight:280}}>
     <svg ref={ref} width={d.w} height={d.h} style={{cursor:onPan?(dragging?"grabbing":"grab"):"crosshair",display:"block",userSelect:"none"}}
       onClick={e=>{if(hasDragged.current){hasDragged.current=false;return;}const i=gi(e.clientX);if(i>=0&&data[i])onClick(data[i].minute);}}
@@ -1369,12 +1354,10 @@ function Chart({data,sel,onClick,selMin,hl,metric,onPan}){
 // 時間軸(winStart-winEnd)を共有し、位置が揃うようにしている
 function InoutFlowChart({points,dayMid,winStart,winEnd}){
   const cRef=useRef(null);
-  // 初期値をnullにし、実際のコンテナ幅を測るまでSVGを描画しない(900px固定だと測定完了までの
-  // 一瞬だけグラフが横に広がって表示されてしまう)
-  const[w,setW]=useState(null);
+  const[w,setW]=useState(900);
   useEffect(()=>{const o=new ResizeObserver(es=>{for(const e of es)setW(e.contentRect.width);});if(cRef.current)o.observe(cRef.current);return()=>o.disconnect();},[]);
   const h=126,p={l:TIMELINE_LABEL_WIDTH,r:0,t:8,b:16};
-  const cW=Math.max(1,(w??0)-p.l-p.r);
+  const cW=Math.max(1,w-p.l-p.r);
   const midY=p.t+(h-p.t-p.b)/2;
   const total=Math.max(1,winEnd-winStart);
   const xAt=absMin=>p.l+((absMin-winStart)/total)*cW;
@@ -1397,7 +1380,6 @@ function InoutFlowChart({points,dayMid,winStart,winEnd}){
   const tickStep=total<=30?5:total<=60?10:total<=120?15:30;
   const timeTicks=useMemo(()=>{const arr=[];for(let m=Math.ceil(winStart/tickStep)*tickStep;m<winEnd;m+=tickStep)arr.push(m);return arr;},[winStart,winEnd,tickStep]);
   if(!visible.length)return null;
-  if(w==null)return <div style={{padding:"0 18px",marginBottom:6}}><div ref={cRef} style={{width:"100%",height:h,background:"#FAFBFC",border:"1px solid #E5E7EB",borderRadius:4}}/></div>;
   return <div style={{padding:"0 18px",marginBottom:6}}>
     <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3,flexWrap:"wrap"}}>
       <span style={{fontSize:10,fontWeight:700,color:"#173b5d"}}>【お試し】NBN流入流出（視聴質パネル実測・分単位）</span>
@@ -3062,13 +3044,14 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
   const handleBlockClick=(m,row,exactSeek,corner)=>{
     setProgSelMin(m);
     setActiveVideoDate(row.date);
-    // objectKeyのファイルが(アップロード時のミスで)前後の日付フォルダに入っていることがあるため、
-    // 取得済みのvideoFiles一覧から実際のキー(正しいフォルダ込み)を探す。見つからない場合、その
-    // objectKeyに対応する動画がそもそも存在しない可能性があるため、URLを推測して再生を試みるのではなく、
-    // 通常の時刻ベースのマッチング(有効性・ギャップ判定込み)に委ねる
-    const matchedFile=exactSeek?(videoFilesByDate[row.date]||[]).find(f=>f.fn===exactSeek.objectKey):null;
-    if(matchedFile){
-      cornerSeekRef.current={url:`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${matchedFile.key}`,sec:exactSeek.startSec};
+    if(exactSeek){
+      // objectKeyのファイルが(アップロード時のミスで)前後の日付フォルダに入っていることがあるため、
+      // 取得済みのvideoFiles一覧から実際のキー(正しいフォルダ込み)を探す。見つからない場合のみ、
+      // 従来通りその日のフォルダを素直に組み立てる(videoFiles未取得時などのフォールバック)
+      const matchedFile=(videoFilesByDate[row.date]||[]).find(f=>f.fn===exactSeek.objectKey);
+      const yyyymmdd=row.date.replace(/-/g,'');
+      const url=matchedFile?`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${matchedFile.key}`:`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/movie/ch6/${yyyymmdd}/${exactSeek.objectKey}`;
+      cornerSeekRef.current={url,sec:exactSeek.startSec};
     }else{
       cornerSeekRef.current=null;
     }
@@ -3090,15 +3073,14 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
     if(!files)return;
     // progSelMinはその日の0時からの分(時刻そのもの)なので、そのまま秒に変換すればよい
     const tgt=progSelMin*60;
-    let matchedIdx=-1;
+    let matched=null;
     for(let i=0;i<files.length;i++){
-      if(files[i].startSec<=tgt&&(i===files.length-1||files[i+1].startSec>tgt)){matchedIdx=i;break;}
+      if(files[i].startSec<=tgt&&(i===files.length-1||files[i+1].startSec>tgt)){matched=files[i];break;}
     }
-    // 「次のチャンクの開始時刻まで」は録画が単に行われていないだけの空白期間のこともあるため、
-    // クリック位置がそのチャンクの実際の長さ(ファイルサイズから見積もり)を超えていないか必ず確認する。
-    // 超えていれば直前の別の時間のチャンクへフォールバックさせず、素直に「この時刻の動画はありません」を表示する
-    const matched=matchedIdx>=0?files[matchedIdx]:null;
-    const found=matched&&(tgt-matched.startSec)<=estimateChunkDurationSec(matched)?matched:null;
+    // 見つかったチャンクが録画失敗等で空(valid:false)の場合や、クリックした時刻がチャンクの開始から
+    // MAX_VIDEO_CHUNK_GAP_SEC以上離れている(=そのチャンクがカバーしているはずがない)場合は、
+    // 直前の全く別の時間のチャンクへフォールバックさせず、素直に「この時刻の動画はありません」を表示する
+    const found=(matched&&(tgt-matched.startSec)<=MAX_VIDEO_CHUNK_GAP_SEC)?matched:null;
     if(!found||!found.valid){setVideoUrl(null);setNoVideoForTime(true);return;}
     setNoVideoForTime(false);
     const offSec=tgt-found.startSec;
@@ -5409,13 +5391,14 @@ export default function App(){
     const mappedCh=VIDEO_STATION_TO_CH[sid];
     if(mappedCh)setVideoCh(mappedCh);
     else if(m!==selMin)suppressVideoSeekRef.current=true;
-    // objectKeyのファイルが(アップロード時のミスで)前後の日付フォルダに入っていることがあるため、
-    // 取得済みのvideoFiles一覧(同じ局を見ている場合は正しく前後日を含めて取得済み)から実際のキーを探す。
-    // 見つからない場合、そのobjectKeyに対応する動画がそもそも存在しない可能性があるため、URLを
-    // 推測して再生を試みるのではなく、通常の時刻ベースのマッチング(有効性・ギャップ判定込み)に委ねる
-    const matchedFile=(exactSeek&&mappedCh&&mappedCh===videoCh)?(videoFiles||[]).find(f=>f.fn===exactSeek.objectKey):null;
-    if(matchedFile){
-      cornerSeekRef.current={url:`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${matchedFile.key}`,sec:exactSeek.startSec};
+    if(exactSeek&&mappedCh){
+      // objectKeyのファイルが(アップロード時のミスで)前後の日付フォルダに入っていることがあるため、
+      // 取得済みのvideoFiles一覧(同じ局を見ている場合は正しく前後日を含めて取得済み)から実際のキーを
+      // 探す。見つからない場合のみ、従来通りその日のフォルダを素直に組み立てる(フォールバック)
+      const matchedFile=mappedCh===videoCh?(videoFiles||[]).find(f=>f.fn===exactSeek.objectKey):null;
+      const yyyymmdd=date.replace(/-/g,'');
+      const url=matchedFile?`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${matchedFile.key}`:`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/movie/${mappedCh}/${yyyymmdd}/${exactSeek.objectKey}`;
+      cornerSeekRef.current={url,sec:exactSeek.startSec};
     }else{
       cornerSeekRef.current=null;
     }
@@ -5437,15 +5420,14 @@ export default function App(){
       return;
     }
     if(!videoFiles||selMin===null)return;
-    const tgt=(selMin-dateMid)*60;let matchedIdx=-1;
+    const tgt=(selMin-dateMid)*60;let matched=null;
     for(let i=0;i<videoFiles.length;i++){
-      if(videoFiles[i].startSec<=tgt&&(i===videoFiles.length-1||videoFiles[i+1].startSec>tgt)){matchedIdx=i;break;}
+      if(videoFiles[i].startSec<=tgt&&(i===videoFiles.length-1||videoFiles[i+1].startSec>tgt)){matched=videoFiles[i];break;}
     }
-    // 「次のチャンクの開始時刻まで」は録画が単に行われていないだけの空白期間のこともあるため、
-    // クリック位置がそのチャンクの実際の長さ(ファイルサイズから見積もり)を超えていないか必ず確認する。
-    // 超えていれば直前の別の時間のチャンクへフォールバックさせず、素直に「この時刻の動画はありません」を表示する
-    const matched=matchedIdx>=0?videoFiles[matchedIdx]:null;
-    const found=matched&&(tgt-matched.startSec)<=estimateChunkDurationSec(matched)?matched:null;
+    // 見つかったチャンクが録画失敗等で空(valid:false)の場合や、クリックした時刻がチャンクの開始から
+    // MAX_VIDEO_CHUNK_GAP_SEC以上離れている(=そのチャンクがカバーしているはずがない)場合は、
+    // 直前の全く別の時間のチャンクへフォールバックさせず、素直に「この時刻の動画はありません」を表示する
+    const found=(matched&&(tgt-matched.startSec)<=MAX_VIDEO_CHUNK_GAP_SEC)?matched:null;
     if(!found||!found.valid){setVideoUrl(null);setNoVideoForTime(true);return;}
     setNoVideoForTime(false);
     const offSec=tgt-found.startSec;
