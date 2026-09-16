@@ -71,11 +71,14 @@ const VIDEO_CHANNELS=GUIDE_ST_ORDER.map(st=>VIDEO_STATION_TO_CH[st]);
 // 一番近いチャンクの開始から明らかに離れすぎている(=そのチャンクがカバーしているはずがない)場合は
 // 「動画なし」として扱う。直前の全く別の時間のチャンクが誤って再生されるのを防ぐための安全マージン
 const MAX_VIDEO_CHUNK_GAP_SEC=60*60;
-// 指定局・指定日の動画チャンク一覧をS3から取得する。録画アップロード時にファイルが前後の日付フォルダに
+// 指定局・指定放送日の動画チャンク一覧をS3から取得する。録画アップロード時にファイルが前後の日付フォルダに
 // 誤って入ってしまうことがあるため、対象日の前後1日ぶんのフォルダも探索し、フォルダ名ではなく
-// ファイル名に埋め込まれた日付を正としてその日に属するチャンクだけを抽出する
+// ファイル名に埋め込まれた日付・時刻を正として、その放送日に属するチャンクだけを抽出する。
+// 放送日は他の箇所(tvt2m等)と同じく05:00始まり〜翌04:59までを1日とする規約なので、
+// 対象日05:00以降のファイルに加えて、翌日05:00未満(深夜〜早朝)のファイルも対象日の深夜帯として含める
 async function fetchVideoFilesForDate(ch,date){
   const yyyymmdd=date.replace(/-/g,'');
+  const nextYmd=shiftDateStr(date,1).replace(/-/g,'');
   const neighborYmds=[shiftDateStr(date,-1),date,shiftDateStr(date,1)].map(d=>d.replace(/-/g,''));
   const lists=await Promise.all(neighborYmds.map(async ymd=>{
     try{
@@ -94,10 +97,14 @@ async function fetchVideoFilesForDate(ch,date){
       const fn=f.key.split('/').pop();
       const m=fn.match(/CH\d+_(\d{8})_(\d{2})(\d{2})(\d{2})\.mp4$/);
       if(!m)return null;
-      // フォルダ名ではなく、ファイル名に埋め込まれた日付を正とする(アップロード時に日付フォルダを
-      // 間違えることがあるため)。対象日と一致しないファイルはここで除外する
-      if(m[1]!==yyyymmdd)return null;
-      return{...f,fn,startSec:parseInt(m[2])*3600+parseInt(m[3])*60+parseInt(m[4]),valid:f.size>1000000};
+      // フォルダ名ではなく、ファイル名に埋め込まれた日付・時刻を正とする(アップロード時に日付フォルダを
+      // 間違えることがあるため)。対象放送日(05:00〜翌04:59)に属さないファイルはここで除外する
+      const fileDate=m[1],rawSec=parseInt(m[2])*3600+parseInt(m[3])*60+parseInt(m[4]);
+      let startSec;
+      if(fileDate===yyyymmdd&&rawSec>=5*3600)startSec=rawSec;
+      else if(fileDate===nextYmd&&rawSec<5*3600)startSec=rawSec+24*3600;
+      else return null;
+      return{...f,fn,startSec,valid:f.size>1000000};
     })
     .filter(Boolean).sort((a,b)=>a.startSec-b.startSec);
 }
