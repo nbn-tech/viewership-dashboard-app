@@ -67,10 +67,6 @@ const GUIDE_ST_ORDER=["NBN","THK","CTV","CBC","NHK","NHKE","TVA"];
 const VIDEO_STATION_TO_CH={NBN:"ch6",THK:"ch1",CTV:"ch4",CBC:"ch5",NHK:"ch3",NHKE:"ch2",TVA:"ch10"};
 const VIDEO_CH_TO_STATION=Object.fromEntries(Object.entries(VIDEO_STATION_TO_CH).map(([st,ch])=>[ch,st]));
 const VIDEO_CHANNELS=GUIDE_ST_ORDER.map(st=>VIDEO_STATION_TO_CH[st]);
-// 録画チャンクの実際の長さは分からない(ファイル名にはstart時刻しか無い)ため、クリックした時刻が
-// 一番近いチャンクの開始から明らかに離れすぎている(=そのチャンクがカバーしているはずがない)場合は
-// 「動画なし」として扱う。直前の全く別の時間のチャンクが誤って再生されるのを防ぐための安全マージン
-const MAX_VIDEO_CHUNK_GAP_SEC=60*60;
 // 指定局・指定放送日の動画チャンク一覧をS3から取得する。録画アップロード時にファイルが前後の日付フォルダに
 // 誤って入ってしまうことがあるため、対象日の前後1日ぶんのフォルダも探索し、フォルダ名ではなく
 // ファイル名に埋め込まれた日付・時刻を正として、その放送日に属するチャンクだけを抽出する。
@@ -3084,10 +3080,7 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
     for(let i=0;i<files.length;i++){
       if(files[i].startSec<=tgt&&(i===files.length-1||files[i+1].startSec>tgt)){matched=files[i];break;}
     }
-    // 見つかったチャンクが録画失敗等で空(valid:false)の場合や、クリックした時刻がチャンクの開始から
-    // MAX_VIDEO_CHUNK_GAP_SEC以上離れている(=そのチャンクがカバーしているはずがない)場合は、
-    // 直前の全く別の時間のチャンクへフォールバックさせず、素直に「この時刻の動画はありません」を表示する
-    const found=(matched&&(tgt-matched.startSec)<=MAX_VIDEO_CHUNK_GAP_SEC)?matched:null;
+    const found=matched;
     if(!found||!found.valid){setVideoUrl(null);setNoVideoForTime(true);return;}
     setNoVideoForTime(false);
     const offSec=tgt-found.startSec;
@@ -5431,10 +5424,7 @@ export default function App(){
     for(let i=0;i<videoFiles.length;i++){
       if(videoFiles[i].startSec<=tgt&&(i===videoFiles.length-1||videoFiles[i+1].startSec>tgt)){matched=videoFiles[i];break;}
     }
-    // 見つかったチャンクが録画失敗等で空(valid:false)の場合や、クリックした時刻がチャンクの開始から
-    // MAX_VIDEO_CHUNK_GAP_SEC以上離れている(=そのチャンクがカバーしているはずがない)場合は、
-    // 直前の全く別の時間のチャンクへフォールバックさせず、素直に「この時刻の動画はありません」を表示する
-    const found=(matched&&(tgt-matched.startSec)<=MAX_VIDEO_CHUNK_GAP_SEC)?matched:null;
+    const found=matched;
     if(!found||!found.valid){setVideoUrl(null);setNoVideoForTime(true);return;}
     setNoVideoForTime(false);
     const offSec=tgt-found.startSec;
