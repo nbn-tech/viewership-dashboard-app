@@ -1165,7 +1165,7 @@ function BroadcastTimeline({tpl,startMin,endMin,selMin,onClickMinute,onTimelineB
     const canExpand=isCorner&&!major;
     const blockKey=`${sid}-${key}`;
     const isHovered=hoveredBlock===blockKey;
-    return <button key={blockKey} onClick={ev=>{ev.stopPropagation();const minute=VIDEO_STATION_TO_CH[sid]?t2m(item.start):(isCorner?t2m(item.start):Math.round((s+e)/2));
+    return <button key={blockKey} onClick={ev=>{ev.stopPropagation();const minute=t2m(item.start);
       // コーナー(分析結果)ブロックを押した場合のみ、分単位ではなくそのコーナーの録画チャンク内の正確な開始秒にシークする
       const exactSeek=(isCorner&&VIDEO_STATION_TO_CH[sid]&&item.objectKey!=null&&item.startSec!=null)?{objectKey:item.objectKey,startSec:item.startSec}:null;
       if(onTimelineBlockClick)onTimelineBlockClick(minute,sid,exactSeek);else onClickMinute(minute);if(isCorner)onHighlight?.({start:t2m(item.start),end:t2m(item.end),stationId:sid});if(canExpand)setExpandedCorner(prev=>prev?.key===blockKey?null:{...item,key:blockKey,sid});}} title={`${item.title} ${wrapClock(t2m(item.start))}–${wrapClock(t2m(item.end))}`}
@@ -3051,14 +3051,13 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
   const handleBlockClick=(m,row,exactSeek,corner)=>{
     setProgSelMin(m);
     setActiveVideoDate(row.date);
-    if(exactSeek){
-      // objectKeyのファイルが(アップロード時のミスで)前後の日付フォルダに入っていることがあるため、
-      // 取得済みのvideoFiles一覧から実際のキー(正しいフォルダ込み)を探す。見つからない場合のみ、
-      // 従来通りその日のフォルダを素直に組み立てる(videoFiles未取得時などのフォールバック)
-      const matchedFile=(videoFilesByDate[row.date]||[]).find(f=>f.fn===exactSeek.objectKey);
-      const yyyymmdd=row.date.replace(/-/g,'');
-      const url=matchedFile?`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${matchedFile.key}`:`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/movie/ch6/${yyyymmdd}/${exactSeek.objectKey}`;
-      cornerSeekRef.current={url,sec:exactSeek.startSec};
+    // objectKeyのファイルが(アップロード時のミスで)前後の日付フォルダに入っていることがあるため、
+    // 取得済みのvideoFiles一覧から実際のキー(正しいフォルダ込み)を探す。見つからない場合、その
+    // objectKeyに対応する動画がそもそも存在しない可能性があるため、URLを推測して再生を試みるのではなく、
+    // 通常の時刻ベースのマッチング(有効性・ギャップ判定込み)に委ねる
+    const matchedFile=exactSeek?(videoFilesByDate[row.date]||[]).find(f=>f.fn===exactSeek.objectKey):null;
+    if(matchedFile){
+      cornerSeekRef.current={url:`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${matchedFile.key}`,sec:exactSeek.startSec};
     }else{
       cornerSeekRef.current=null;
     }
@@ -5398,14 +5397,13 @@ export default function App(){
     const mappedCh=VIDEO_STATION_TO_CH[sid];
     if(mappedCh)setVideoCh(mappedCh);
     else if(m!==selMin)suppressVideoSeekRef.current=true;
-    if(exactSeek&&mappedCh){
-      // objectKeyのファイルが(アップロード時のミスで)前後の日付フォルダに入っていることがあるため、
-      // 取得済みのvideoFiles一覧(同じ局を見ている場合は正しく前後日を含めて取得済み)から実際のキーを
-      // 探す。見つからない場合のみ、従来通りその日のフォルダを素直に組み立てる(フォールバック)
-      const matchedFile=mappedCh===videoCh?(videoFiles||[]).find(f=>f.fn===exactSeek.objectKey):null;
-      const yyyymmdd=date.replace(/-/g,'');
-      const url=matchedFile?`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${matchedFile.key}`:`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/movie/${mappedCh}/${yyyymmdd}/${exactSeek.objectKey}`;
-      cornerSeekRef.current={url,sec:exactSeek.startSec};
+    // objectKeyのファイルが(アップロード時のミスで)前後の日付フォルダに入っていることがあるため、
+    // 取得済みのvideoFiles一覧(同じ局を見ている場合は正しく前後日を含めて取得済み)から実際のキーを探す。
+    // 見つからない場合、そのobjectKeyに対応する動画がそもそも存在しない可能性があるため、URLを
+    // 推測して再生を試みるのではなく、通常の時刻ベースのマッチング(有効性・ギャップ判定込み)に委ねる
+    const matchedFile=(exactSeek&&mappedCh&&mappedCh===videoCh)?(videoFiles||[]).find(f=>f.fn===exactSeek.objectKey):null;
+    if(matchedFile){
+      cornerSeekRef.current={url:`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${matchedFile.key}`,sec:exactSeek.startSec};
     }else{
       cornerSeekRef.current=null;
     }
