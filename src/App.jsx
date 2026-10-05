@@ -5454,6 +5454,32 @@ export default function App(){
   };
   const tog=id=>setSel(p=>p.includes(id)?p.filter(s=>s!==id):[...p,id]);
   const click=m=>{setSelMin(m);const r=rData.find(d=>d.minute===m),s=sData.find(d=>d.minute===m);setSelData({rating:r,share:s});setHL(null);};
+  // ←→キー: 動画をクリックしてフォーカスがある時・全画面時はブラウザ標準のシーク(Chromeは5秒)に任せ、
+  // それ以外はグラフの選択時刻を1分ずつ動かす(視聴率は1分刻み)。動画は選択時刻の変更に追従してシークされる
+  const arrowKeyRef=useRef(null);
+  arrowKeyRef.current=e=>{
+    if(page!=="dashboard"||dashMode!=="chart")return;
+    if(e.key!=="ArrowLeft"&&e.key!=="ArrowRight")return;
+    if(e.altKey||e.ctrlKey||e.metaKey||e.shiftKey)return; // Alt+←(戻る)などブラウザのショートカットは奪わない
+    const ae=document.activeElement;
+    if(document.fullscreenElement||(ae&&(["VIDEO","INPUT","SELECT","TEXTAREA"].includes(ae.tagName)||ae.isContentEditable)))return;
+    // 基準は動画の現在の再生位置(選択後に再生が進んでいても、見ている所から1分ずつ動く)。動画が無ければ選択時刻
+    let base=selMin;
+    const video=videoRef.current;
+    const file=videoUrl&&videoFiles?videoFiles.find(f=>`${VIDEO_CDN_BASE}/${f.key}`===videoUrl):null;
+    if(video&&file&&pendingSeekRef.current===null)base=dateMid+Math.floor((file.startSec+video.currentTime)/60);
+    if(base===null)return;
+    e.preventDefault();
+    const m=Math.max(domainStart,Math.min(domainEnd-1,base+(e.key==="ArrowRight"?1:-1)));
+    if(m<winStart)handlePan(m-winStart);
+    else if(m>=winEnd)handlePan(m-winEnd+1);
+    click(m);
+  };
+  useEffect(()=>{
+    const onKey=e=>arrowKeyRef.current(e);
+    window.addEventListener("keydown",onKey);
+    return()=>window.removeEventListener("keydown",onKey);
+  },[]);
   const timelineBlockClick=(m,sid,exactSeek)=>{
     const mappedCh=VIDEO_STATION_TO_CH[sid];
     if(mappedCh)setVideoCh(mappedCh);
