@@ -67,6 +67,9 @@ const GUIDE_ST_ORDER=["NBN","THK","CTV","CBC","NHK","NHKE","TVA"];
 const VIDEO_STATION_TO_CH={NBN:"ch6",THK:"ch1",CTV:"ch4",CBC:"ch5",NHK:"ch3",NHKE:"ch2",TVA:"ch10"};
 const VIDEO_CH_TO_STATION=Object.fromEntries(Object.entries(VIDEO_STATION_TO_CH).map(([st,ch])=>[ch,st]));
 const VIDEO_CHANNELS=GUIDE_ST_ORDER.map(st=>VIDEO_STATION_TO_CH[st]);
+// 放送動画(movie/)と動画一覧はS3直接ではなくCloudFront経由で取得する(S3のインターネット向け転送料削減のため)。
+// 視聴率Excel・番組表などは上書き更新があり得るので、キャッシュの影響を避けてS3直接のまま
+const VIDEO_CDN_BASE="https://d1hgr51u5pbk6o.cloudfront.net";
 // 指定局・指定放送日の動画チャンク一覧をS3から取得する。録画アップロード時にファイルが前後の日付フォルダに
 // 誤って入ってしまうことがあるため、対象日の前後1日ぶんのフォルダも探索し、フォルダ名ではなく
 // ファイル名に埋め込まれた日付・時刻を正として、その放送日に属するチャンクだけを抽出する。
@@ -78,7 +81,7 @@ async function fetchVideoFilesForDate(ch,date){
   const neighborYmds=[shiftDateStr(date,-1),date,shiftDateStr(date,1)].map(d=>d.replace(/-/g,''));
   const lists=await Promise.all(neighborYmds.map(async ymd=>{
     try{
-      const res=await fetch(`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/?prefix=movie/${ch}/${ymd}/&list-type=2`);
+      const res=await fetch(`${VIDEO_CDN_BASE}/?prefix=movie/${ch}/${ymd}/&list-type=2`);
       if(!res.ok)return[];
       const text=await res.text();
       const xml=new DOMParser().parseFromString(text,'text/xml');
@@ -2389,7 +2392,7 @@ function AnnotationResultModal({result,progName,onClose}){
   const chMatch=result.object_key.match(/^CH(\d+)_/i);
   const yyyymmdd=result.date?result.date.replaceAll("-",""):null;
   const videoUrl=(chMatch&&yyyymmdd)
-    ?`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/movie/ch${chMatch[1]}/${yyyymmdd}/${result.object_key}`
+    ?`${VIDEO_CDN_BASE}/movie/ch${chMatch[1]}/${yyyymmdd}/${result.object_key}`
     :null;
   // 視聴率IN/OUT/DIFF・推移: 視聴率は全時間帯ぶんあるので、朝夕帯に限らず終日データを実行時に取得する。
   // Chart(ダッシュボードと共通)はminuteを絶対分(エポック分)前提でwrapClock表示するため、
@@ -3090,7 +3093,7 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
       // 従来通りその日のフォルダを素直に組み立てる(videoFiles未取得時などのフォールバック)
       const matchedFile=(videoFilesByDate[row.date]||[]).find(f=>f.fn===exactSeek.objectKey);
       const yyyymmdd=row.date.replace(/-/g,'');
-      const url=matchedFile?`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${matchedFile.key}`:`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/movie/ch6/${yyyymmdd}/${exactSeek.objectKey}`;
+      const url=matchedFile?`${VIDEO_CDN_BASE}/${matchedFile.key}`:`${VIDEO_CDN_BASE}/movie/ch6/${yyyymmdd}/${exactSeek.objectKey}`;
       cornerSeekRef.current={url,sec:exactSeek.startSec};
     }else{
       cornerSeekRef.current=null;
@@ -3118,7 +3121,7 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
     const found=matched;
     if(!found||!found.valid){setVideoUrl(null);setNoVideoForTime(true);return;}
     const offSec=tgt-found.startSec;
-    const newUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${found.key}`;
+    const newUrl=`${VIDEO_CDN_BASE}/${found.key}`;
     seekVideo(newUrl,offSec);
   },[progSelMin,activeVideoDate,videoFilesByDate]);
 
@@ -3222,7 +3225,7 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
           {noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この時刻の動画はありません</div>}
           {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls
             onLoadedMetadata={onVideoMetadata} onSeeked={onVideoSeeked} onDurationChange={onVideoDurationChange}
-            onEnded={()=>{const files=videoFilesByDate[activeVideoDate];if(!files)return;const idx=files.findIndex(f=>`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${f.key}`===videoUrl);if(idx===-1||idx===files.length-1)return;const nxt=files[idx+1];const nxtUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}}
+            onEnded={()=>{const files=videoFilesByDate[activeVideoDate];if(!files)return;const idx=files.findIndex(f=>`${VIDEO_CDN_BASE}/${f.key}`===videoUrl);if(idx===-1||idx===files.length-1)return;const nxt=files[idx+1];const nxtUrl=`${VIDEO_CDN_BASE}/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}}
             style={{display:"block",width:"100%",aspectRatio:"16 / 9",objectFit:"contain",borderRadius:5,background:"#000"}}/>}
         </div>
         <ProgramPanel selMin={progSelMin} rows={rows} onOpenCorner={(row,idx)=>setCornerModal({corner:row.corners[idx],idx,navList:row.corners})}/>
@@ -5461,7 +5464,7 @@ export default function App(){
       // 探す。見つからない場合のみ、従来通りその日のフォルダを素直に組み立てる(フォールバック)
       const matchedFile=mappedCh===videoCh?(videoFiles||[]).find(f=>f.fn===exactSeek.objectKey):null;
       const yyyymmdd=date.replace(/-/g,'');
-      const url=matchedFile?`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${matchedFile.key}`:`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/movie/${mappedCh}/${yyyymmdd}/${exactSeek.objectKey}`;
+      const url=matchedFile?`${VIDEO_CDN_BASE}/${matchedFile.key}`:`${VIDEO_CDN_BASE}/movie/${mappedCh}/${yyyymmdd}/${exactSeek.objectKey}`;
       cornerSeekRef.current={url,sec:exactSeek.startSec};
     }else{
       cornerSeekRef.current=null;
@@ -5489,7 +5492,7 @@ export default function App(){
     const found=matched;
     if(!found||!found.valid){setVideoUrl(null);setNoVideoForTime(true);return;}
     const offSec=tgt-found.startSec;
-    const newUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${found.key}`;
+    const newUrl=`${VIDEO_CDN_BASE}/${found.key}`;
     seekVideo(newUrl,offSec);
   },[selMin,date,slot,videoFiles]);
   useEffect(()=>{
@@ -5661,7 +5664,7 @@ export default function App(){
           {!videoFiles.some(f=>f.valid)&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この日の動画データはありません</div>}
           {videoFiles.some(f=>f.valid)&&!videoUrl&&!noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>グラフの時刻をクリックすると動画を表示します</div>}
           {noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この時刻の動画はありません</div>}
-          {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls onLoadedMetadata={onVideoMetadata} onSeeked={onVideoSeeked} onDurationChange={onVideoDurationChange} onEnded={()=>{if(!videoFiles)return;const idx=videoFiles.findIndex(f=>`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${f.key}`===videoUrl);if(idx===-1||idx===videoFiles.length-1)return;const nxt=videoFiles[idx+1];const nxtUrl=`https://bangumi-info.s3.ap-northeast-1.amazonaws.com/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}} style={{display:"block",width:"100%",aspectRatio:"16 / 9",objectFit:"contain",borderRadius:5,background:"#000"}}/>}
+          {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls onLoadedMetadata={onVideoMetadata} onSeeked={onVideoSeeked} onDurationChange={onVideoDurationChange} onEnded={()=>{if(!videoFiles)return;const idx=videoFiles.findIndex(f=>`${VIDEO_CDN_BASE}/${f.key}`===videoUrl);if(idx===-1||idx===videoFiles.length-1)return;const nxt=videoFiles[idx+1];const nxtUrl=`${VIDEO_CDN_BASE}/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}} style={{display:"block",width:"100%",aspectRatio:"16 / 9",objectFit:"contain",borderRadius:5,background:"#000"}}/>}
         </div>}
         <Panel selMin={selMin} rData={selData} allR={rData} allS={sData} sel={sel} onHL={setHL} metric={metric} tpl={dashTpl}/>
       </div>
