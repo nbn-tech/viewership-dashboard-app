@@ -1643,6 +1643,49 @@ const API_CONFIG = {
 
 // 番組アノテーション検索Lambda (Athena経由、video_analyzer.corner_csvを検索)
 const ANNOTATION_SEARCH_URL = "https://htfd3lomkkplj4363w7cczdidy0olqcs.lambda-url.ap-northeast-1.on.aws/";
+// 動画分析リクエスト受付Lambda(lambda/analyze-request)のFunction URL。
+// s3://bangumi-info/requests/analyze_requests.csv に動画キーを追記し、video_analyzerが毎晩18:00に最優先で分析する。
+// デプロイ前は空文字のままにしておく(「分析する」ボタンが無効表示になる)
+const ANALYZE_REQUEST_URL = "";
+
+async function requestVideoAnalysis(key){
+  const res=await fetch(ANALYZE_REQUEST_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key})});
+  const json=await res.json().catch(()=>({}));
+  if(!res.ok)throw new Error(json.error||`HTTP ${res.status}`);
+  return json.status; // "added" | "already_requested"
+}
+
+// 再生中の録画チャンクを動画分析システムにリクエストするボタン。videoUrl が変わるたびに key で作り直して状態をリセットする
+function AnalyzeRequestButton({videoUrl}){
+  const[state,setState]=useState("idle"); // idle | sending | added | already_requested | error
+  const[err,setErr]=useState("");
+  // 動画URLは VIDEO_CDN_BASE(CloudFront)/movie/... の形なので、その後ろがそのままS3キーになる
+  const key=videoUrl?.startsWith(`${VIDEO_CDN_BASE}/`)?videoUrl.slice(VIDEO_CDN_BASE.length+1):null;
+  if(!key)return null;
+  const done=state==="added"||state==="already_requested";
+  const disabled=!ANALYZE_REQUEST_URL||state==="sending"||done;
+  const send=async()=>{
+    setState("sending");setErr("");
+    try{setState(await requestVideoAnalysis(key));}
+    catch(e){setErr(e.message);setState("error");}
+  };
+  return <div style={{marginTop:8}}>
+    <div style={{display:"flex",alignItems:"center",gap:8}}>
+      <button onClick={send} disabled={disabled}
+        style={{padding:"5px 16px",border:"none",borderRadius:9999,background:disabled?"#e0e0e0":"#0066cc",color:disabled?"#7a7a7a":"#fff",fontSize:11,fontWeight:600,cursor:disabled?"default":"pointer",flexShrink:0}}>
+        {state==="sending"?"送信中…":done?"リクエスト済み":"分析する"}
+      </button>
+      <span style={{fontSize:9.5,color:"#7a7a7a",fontFamily:"monospace",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={key}>{key.split('/').pop()}</span>
+    </div>
+    <div style={{marginTop:4,fontSize:9.5,lineHeight:1.5,color:state==="error"?"#DC2626":"#7a7a7a"}}>
+      {!ANALYZE_REQUEST_URL?"分析リクエストの受付先が未設定です"
+        :state==="added"?"リクエストしました。次回18:00の分析で最優先で処理されます"
+        :state==="already_requested"?"この動画は既にリクエストされています"
+        :state==="error"?`送信に失敗しました: ${err}`
+        :"この動画を動画分析システムにリクエストします(毎晩18:00に処理)"}
+    </div>
+  </div>;
+}
 
 // Anthropic API直叩き(モック実装で共通利用)
 async function _callClaudeDirect(messages, maxTokens){
@@ -3227,6 +3270,7 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
             onLoadedMetadata={onVideoMetadata} onSeeked={onVideoSeeked} onDurationChange={onVideoDurationChange}
             onEnded={()=>{const files=videoFilesByDate[activeVideoDate];if(!files)return;const idx=files.findIndex(f=>`${VIDEO_CDN_BASE}/${f.key}`===videoUrl);if(idx===-1||idx===files.length-1)return;const nxt=files[idx+1];const nxtUrl=`${VIDEO_CDN_BASE}/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}}
             style={{display:"block",width:"100%",aspectRatio:"16 / 9",objectFit:"contain",borderRadius:5,background:"#000"}}/>}
+          {videoUrl&&<AnalyzeRequestButton key={videoUrl} videoUrl={videoUrl}/>}
         </div>
         <ProgramPanel selMin={progSelMin} rows={rows} onOpenCorner={(row,idx)=>setCornerModal({corner:row.corners[idx],idx,navList:row.corners})}/>
       </div>
@@ -5691,6 +5735,7 @@ export default function App(){
           {videoFiles.some(f=>f.valid)&&!videoUrl&&!noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>グラフの時刻をクリックすると動画を表示します</div>}
           {noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この時刻の動画はありません</div>}
           {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls onLoadedMetadata={onVideoMetadata} onSeeked={onVideoSeeked} onDurationChange={onVideoDurationChange} onEnded={()=>{if(!videoFiles)return;const idx=videoFiles.findIndex(f=>`${VIDEO_CDN_BASE}/${f.key}`===videoUrl);if(idx===-1||idx===videoFiles.length-1)return;const nxt=videoFiles[idx+1];const nxtUrl=`${VIDEO_CDN_BASE}/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}} style={{display:"block",width:"100%",aspectRatio:"16 / 9",objectFit:"contain",borderRadius:5,background:"#000"}}/>}
+          {videoUrl&&<AnalyzeRequestButton key={videoUrl} videoUrl={videoUrl}/>}
         </div>}
         <Panel selMin={selMin} rData={selData} allR={rData} allS={sData} sel={sel} onHL={setHL} metric={metric} tpl={dashTpl}/>
       </div>
