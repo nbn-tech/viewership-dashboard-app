@@ -3270,7 +3270,7 @@ function ProgramTrackerPage({progKey,weatherData,metric}){
             onLoadedMetadata={onVideoMetadata} onSeeked={onVideoSeeked} onDurationChange={onVideoDurationChange}
             onEnded={()=>{const files=videoFilesByDate[activeVideoDate];if(!files)return;const idx=files.findIndex(f=>`${VIDEO_CDN_BASE}/${f.key}`===videoUrl);if(idx===-1||idx===files.length-1)return;const nxt=files[idx+1];const nxtUrl=`${VIDEO_CDN_BASE}/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}}
             style={{display:"block",width:"100%",aspectRatio:"16 / 9",objectFit:"contain",borderRadius:5,background:"#000"}}/>}
-          {videoUrl&&<AnalyzeRequestButton key={videoUrl} videoUrl={videoUrl}/>}
+          {videoUrl&&<AnalyzeRequestButton key={`analyze-${videoUrl}`} videoUrl={videoUrl}/>}
         </div>
         <ProgramPanel selMin={progSelMin} rows={rows} onOpenCorner={(row,idx)=>setCornerModal({corner:row.corners[idx],idx,navList:row.corners})}/>
       </div>
@@ -5735,7 +5735,7 @@ export default function App(){
           {videoFiles.some(f=>f.valid)&&!videoUrl&&!noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>グラフの時刻をクリックすると動画を表示します</div>}
           {noVideoForTime&&<div style={{padding:"24px 6px",textAlign:"center",fontSize:11,color:"#9CA3AF",background:"#EEF5F9",borderRadius:5}}>この時刻の動画はありません</div>}
           {videoUrl&&<video key={videoUrl} ref={videoRef} src={videoUrl} controls onLoadedMetadata={onVideoMetadata} onSeeked={onVideoSeeked} onDurationChange={onVideoDurationChange} onEnded={()=>{if(!videoFiles)return;const idx=videoFiles.findIndex(f=>`${VIDEO_CDN_BASE}/${f.key}`===videoUrl);if(idx===-1||idx===videoFiles.length-1)return;const nxt=videoFiles[idx+1];const nxtUrl=`${VIDEO_CDN_BASE}/${nxt.key}`;pendingSeekRef.current=0;prevVideoUrlRef.current=nxtUrl;setVideoUrl(nxtUrl);}} style={{display:"block",width:"100%",aspectRatio:"16 / 9",objectFit:"contain",borderRadius:5,background:"#000"}}/>}
-          {videoUrl&&<AnalyzeRequestButton key={videoUrl} videoUrl={videoUrl}/>}
+          {videoUrl&&<AnalyzeRequestButton key={`analyze-${videoUrl}`} videoUrl={videoUrl}/>}
         </div>}
         <Panel selMin={selMin} rData={selData} allR={rData} allS={sData} sel={sel} onHL={setHL} metric={metric} tpl={dashTpl}/>
       </div>
