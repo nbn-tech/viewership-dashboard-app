@@ -20,6 +20,8 @@ CSVの仕様(ワーカー側):
 - Lambda ランタイム: Python 3.13 (boto3 同梱)
 - 実行ロールに以下を許可:
     s3:GetObject / s3:PutObject on arn:aws:s3:::bangumi-info/requests/*
+    s3:ListBucket on arn:aws:s3:::bangumi-info (条件 s3:prefix=requests/*)
+      ※無いとCSV未作成時に NoSuchKey ではなく AccessDenied が返り、追記に失敗する
 - Lambda Function URL で公開し、CORSの許可オリジンをダッシュボードのドメインに限定する
   (既存の /api/search/annotation と同じ構成)
 """

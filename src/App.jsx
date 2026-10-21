@@ -1645,8 +1645,8 @@ const API_CONFIG = {
 const ANNOTATION_SEARCH_URL = "https://htfd3lomkkplj4363w7cczdidy0olqcs.lambda-url.ap-northeast-1.on.aws/";
 // 動画分析リクエスト受付Lambda(lambda/analyze-request)のFunction URL。
 // s3://bangumi-info/requests/analyze_requests.csv に動画キーを追記し、video_analyzerが毎晩18:00に最優先で分析する。
-// デプロイ前は空文字のままにしておく(「分析する」ボタンが無効表示になる)
-const ANALYZE_REQUEST_URL = "";
+// 空文字にすると「分析する」ボタンが無効表示になる
+const ANALYZE_REQUEST_URL = "https://xwthfnl3mtqpwxfer3fxh7ok640nzjvn.lambda-url.ap-northeast-1.on.aws/";
 
 async function requestVideoAnalysis(key){
   const res=await fetch(ANALYZE_REQUEST_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key})});
