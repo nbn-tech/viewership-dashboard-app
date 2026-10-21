@@ -401,6 +401,34 @@ https://fecc7uq4uapxx37bmockq3gyvi0ibsdf.lambda-url.ap-northeast-1.amazonaws.com
 
 ---
 
+## 7. 動画分析リクエスト
+
+### 概要
+ダッシュボード右側の放送動画プレイヤー下の「分析する」ボタンから、再生中の録画チャンクを動画分析システム(video_analyzer)にリクエストする。
+
+```
+ダッシュボード「分析する」
+    ↓ POST {"key": "movie/ch6/20261021/CH6_20261021_154000.mp4"}
+Lambda Function URL (lambda/analyze-request/handler.py)
+    ↓ 既存CSVを読み込み→キーを1行追記(条件付き書き込みで同時押しにも対応)
+s3://bangumi-info/requests/analyze_requests.csv
+    ↓ 毎晩18:00の起動時(または再起動時)に読み込み
+video-analyzer-worker (通常ルールを無視して最優先で分析。分析済みは自動スキップ)
+```
+
+### デプロイ手順
+1. Lambda を Python 3.13 で作成し、`lambda/analyze-request/handler.py` を配置(ハンドラ: `handler.lambda_handler`)
+2. 実行ロールに `s3:GetObject` / `s3:PutObject` on `arn:aws:s3:::bangumi-info/requests/*` と、`s3:ListBucket` on `arn:aws:s3:::bangumi-info`(条件 `s3:prefix` = `requests/*`)を付与。ListBucket が無いと、CSVが未作成の時に NoSuchKey ではなく AccessDenied が返り追記に失敗する。タイムアウトは10秒
+3. Function URL を作成し、CORS の許可オリジンをダッシュボードのドメインに限定、メソッドは POST、ヘッダは `content-type` を許可
+4. 発行された URL を `src/App.jsx` の `ANALYZE_REQUEST_URL` に設定(空文字の間はボタンが無効表示になる)
+
+### 入力チェック
+- `movie/ch{N}/{YYYYMMDD}/CH{N}_{YYYYMMDD}_{HHMMSS}.mp4` 形式以外のキーは 400 で拒否
+- 同じキーが既にCSVにあれば追記せず `already_requested` を返す
+- CSVが 5000 行(環境変数 `MAX_LINES`)に達したら 429 で拒否
+
+---
+
 ## AWSサービス一覧まとめ
 
 | サービス | 用途 |
