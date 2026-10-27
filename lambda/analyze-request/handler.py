@@ -92,8 +92,13 @@ def is_requested(key):
 
 def add_request(key):
     """キーをCSVに追記する。戻り値は "added" / "already_requested" / "already_analyzed" / "full"。"""
-    if is_analyzed(key):
-        return "already_analyzed"
+    # 分析済みの判定に失敗しても(results/* の ListBucket 権限が無い等)、追記は止めない。
+    # ワーカー側も分析済みの動画は自動でスキップするので、二重に分析されることはない
+    try:
+        if is_analyzed(key):
+            return "already_analyzed"
+    except ClientError as exc:
+        print(f"is_analyzed failed, skip check: {exc}")
     for _ in range(MAX_RETRIES):
         lines, etag = _read_requests()
         if key in (line.strip() for line in lines):
