@@ -408,8 +408,11 @@ https://fecc7uq4uapxx37bmockq3gyvi0ibsdf.lambda-url.ap-northeast-1.amazonaws.com
 
 ```
 ダッシュボード「分析する」
-    ↓ POST {"key": "movie/ch6/20261021/CH6_20261021_154000.mp4"}
-Lambda Function URL (lambda/analyze-request/handler.py)
+    ↓ POST {"key": "movie/ch6/20261021/CH6_20261021_154000.mp4"}  (x-amz-content-sha256 に本文のハッシュを付ける)
+CloudFront d35sa9kheanqxa.cloudfront.net (E2SSDRRUNIQR7S)
+    ├ WAF gogoreframe-WAF: 社内(iboss)のIPのみ許可、それ以外は403
+    ↓ OAC(analyze-request-oac)で署名して転送
+Lambda Function URL (lambda/analyze-request/handler.py, 認証タイプ AWS_IAM: CloudFront以外からの直接呼び出しは拒否)
     ↓ 既存CSVを読み込み→キーを1行追記(条件付き書き込みで同時押しにも対応)
 s3://bangumi-info/requests/analyze_requests.csv
     ↓ 毎晩18:00の起動時(または再起動時)に読み込み
@@ -419,8 +422,21 @@ video-analyzer-worker (通常ルールを無視して最優先で分析。分析
 ### デプロイ手順
 1. Lambda を Python 3.13 で作成し、`lambda/analyze-request/handler.py` を配置(ハンドラ: `handler.lambda_handler`)
 2. 実行ロールに `s3:GetObject` / `s3:PutObject` on `arn:aws:s3:::bangumi-info/requests/*` と、`s3:ListBucket` on `arn:aws:s3:::bangumi-info`(条件 `s3:prefix` = `requests/*`)を付与。ListBucket が無いと、CSVが未作成の時に NoSuchKey ではなく AccessDenied が返り追記に失敗する。タイムアウトは10秒
-3. Function URL を作成し、CORS の許可オリジンをダッシュボードのドメインに限定、メソッドは POST、ヘッダは `content-type` を許可
-4. 発行された URL を `src/App.jsx` の `ANALYZE_REQUEST_URL` に設定(空文字の間はボタンが無効表示になる)
+3. Function URL を作成。CORS の許可オリジンをダッシュボードのドメインに限定、メソッドは POST、ヘッダは `content-type` と `x-amz-content-sha256` を許可
+4. CloudFront を作成(従量課金)。オリジン=Function URL のドメイン、HTTPS のみ、OAC(オリジンタイプ Lambda・常に署名)、
+   許可メソッドは GET〜DELETE の7種、キャッシュポリシー CachingDisabled、オリジンリクエストポリシー AllViewerExceptHostHeader、
+   WAF は既存の `gogoreframe-WAF`(ダッシュボードと同じ社内IP許可)
+5. CloudFront のドメインを `src/App.jsx` の `ANALYZE_REQUEST_URL` に設定(空文字の間はボタンが無効表示になる)
+6. Function URL の認証タイプを AWS_IAM にし、CloudFront にだけ呼び出しを許可する(`<ARN>` は CloudFront のディストリビューションARN)
+   ```
+   aws lambda add-permission --function-name analyze-request --statement-id cf-url --action lambda:InvokeFunctionUrl --principal cloudfront.amazonaws.com --source-arn <ARN> --function-url-auth-type AWS_IAM
+   aws lambda add-permission --function-name analyze-request --statement-id cf-invoke --action lambda:InvokeFunction --principal cloudfront.amazonaws.com --source-arn <ARN>
+   ```
+   認証タイプ NONE のときに付いた公開許可 `FunctionURLAllowPublicAccess` はリソースベースのポリシーから削除する
+
+### 注意
+- OAC は POST の本文のハッシュを計算しないため、呼び出し側で `x-amz-content-sha256`(本文の SHA-256 を16進小文字)を付ける必要がある。無い・一致しない場合は Lambda 側で署名エラー(403)になる
+- WAF は IP で判定するため、社内でも iboss を通らない経路(curl 等)からは 403 になる
 
 ### 入力チェック
 - `movie/ch{N}/{YYYYMMDD}/CH{N}_{YYYYMMDD}_{HHMMSS}.mp4` 形式以外のキーは 400 で拒否
