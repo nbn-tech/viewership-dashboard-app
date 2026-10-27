@@ -1641,8 +1641,9 @@ const API_CONFIG = {
   baseUrl: "https://fecc7uq4uapxx37bmockq3gyvi0ibsdf.lambda-url.ap-northeast-1.on.aws",
 };
 
-// 番組アノテーション検索Lambda (Athena経由、video_analyzer.corner_csvを検索)
-const ANNOTATION_SEARCH_URL = "https://htfd3lomkkplj4363w7cczdidy0olqcs.lambda-url.ap-northeast-1.on.aws/";
+// 番組アノテーション検索Lambda (Athena経由、video_analyzer.daily_cornersを検索)。
+// 分析ボタンと同じく、WAF(社内IPのみ許可)付きのCloudFront経由で呼ぶ(OACで署名してLambdaに転送)
+const ANNOTATION_SEARCH_URL = "https://djd6xitv9d7tx.cloudfront.net/";
 // 動画分析リクエスト受付Lambda(lambda/analyze-request)の呼び出し先。
 // s3://bangumi-info/requests/analyze_requests.csv に動画キーを追記し、video_analyzerが毎晩18:00に最優先で分析する。
 // Lambdaを直接呼ばせないよう、WAF(社内IPのみ許可)付きのCloudFront経由で呼ぶ。CloudFrontはOACで署名してLambdaに転送する
@@ -1654,11 +1655,16 @@ async function sha256Hex(text){
   return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("");
 }
 
+// CloudFront(OAC)経由でLambdaにJSONをPOSTする。OACはPOSTの本文のハッシュを自分では計算しないため、
+// 呼び出し側で x-amz-content-sha256 に付ける。これが無い(または本文と一致しない)と、
+// Lambda側(認証タイプAWS_IAM)で署名エラーになる
+async function postJsonViaOac(url,payload){
+  const body=JSON.stringify(payload);
+  return fetch(url,{method:"POST",headers:{"Content-Type":"application/json","x-amz-content-sha256":await sha256Hex(body)},body});
+}
+
 async function requestVideoAnalysis(key){
-  const body=JSON.stringify({key});
-  // CloudFrontのOACはPOSTの本文のハッシュを自分では計算しないため、呼び出し側で x-amz-content-sha256 に付ける。
-  // これが無い(または本文と一致しない)と、Lambda側(認証タイプAWS_IAM)で署名エラーになる
-  const res=await fetch(ANALYZE_REQUEST_URL,{method:"POST",headers:{"Content-Type":"application/json","x-amz-content-sha256":await sha256Hex(body)},body});
+  const res=await postJsonViaOac(ANALYZE_REQUEST_URL,{key});
   const json=await res.json().catch(()=>({}));
   if(!res.ok)throw new Error(json.error||`HTTP ${res.status}`);
   return json.status; // "added" | "already_requested"
@@ -1721,16 +1727,12 @@ async function _callBackend(path,body){
 
 // アノテーション検索APIへの共通リクエスト（部分一致・AI意味検索の両方から使う）
 async function _annotationSearchRequest({ query, keywords, dateFrom, dateTo }) {
-  const res = await fetch(ANNOTATION_SEARCH_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      query,
-      keywords,
-      limit: 200,
-      date_from: dateFrom ? dateFrom.replaceAll("-", "") : undefined,
-      date_to: dateTo ? dateTo.replaceAll("-", "") : undefined,
-    }),
+  const res = await postJsonViaOac(ANNOTATION_SEARCH_URL, {
+    query,
+    keywords,
+    limit: 200,
+    date_from: dateFrom ? dateFrom.replaceAll("-", "") : undefined,
+    date_to: dateTo ? dateTo.replaceAll("-", "") : undefined,
   });
   if (!res.ok) throw new Error(`アノテーション検索API error: ${res.status}`);
   const { results = [] } = await res.json();
@@ -1742,14 +1744,10 @@ async function _annotationSearchRequest({ query, keywords, dateFrom, dateTo }) {
 
 // キーワードなしで局・日付だけに絞った実分析コーナーの全件取得（Dashboardの実データ表示用）
 async function _annotationListRequest({ dateFrom, dateTo, limit = 1000 }) {
-  const res = await fetch(ANNOTATION_SEARCH_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      limit,
-      date_from: dateFrom ? dateFrom.replaceAll("-", "") : undefined,
-      date_to: dateTo ? dateTo.replaceAll("-", "") : undefined,
-    }),
+  const res = await postJsonViaOac(ANNOTATION_SEARCH_URL, {
+    limit,
+    date_from: dateFrom ? dateFrom.replaceAll("-", "") : undefined,
+    date_to: dateTo ? dateTo.replaceAll("-", "") : undefined,
   });
   if (!res.ok) throw new Error(`アノテーション取得API error: ${res.status}`);
   const { results = [] } = await res.json();

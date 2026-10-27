@@ -399,6 +399,20 @@ AWS Lambda + Anthropic Claude API で構成。
 https://fecc7uq4uapxx37bmockq3gyvi0ibsdf.lambda-url.ap-northeast-1.amazonaws.com
 ```
 
+### 番組アノテーション検索（annotation-search）
+`lambda/annotation-search/handler.py`。Athena で `video_analyzer.daily_corners`（動画分析のコーナー情報）を検索する。
+「番組・放送内容検索」画面と、ダッシュボードの放送内容タイムラインのコーナー表示から呼ばれる。
+
+```
+ダッシュボード → CloudFront djd6xitv9d7tx.cloudfront.net (E1XDGFIECT5NZ)
+                   ├ WAF gogoreframe-WAF: 社内(iboss)のIPのみ許可
+                   ↓ OAC(annotation-search-oac)で署名して転送
+                 Lambda Function URL (認証タイプ AWS_IAM: CloudFront以外からの直接呼び出しは拒否)
+```
+- CloudFront の設定は 7章（動画分析リクエスト）と同じ。ただし Athena の結果を最大30秒待つため、オリジンの応答タイムアウトを 60 秒にしている
+- CORS: 許可オリジンはダッシュボードのドメインのみ、許可ヘッダーは `content-type` と `x-amz-content-sha256`
+- Lambda コンソールで認証タイプ NONE のまま関数 URL を保存すると「statement id (FunctionURLAllowInvokeAction) already exists」で失敗することがある。CORS だけ変える場合は `aws lambda update-function-url-config --cors ...` を使う
+
 ---
 
 ## 7. 動画分析リクエスト
