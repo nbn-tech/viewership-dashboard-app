@@ -443,7 +443,7 @@ video-analyzer-worker (通常ルールを無視して最優先で分析。分析
 
 ### デプロイ手順
 1. Lambda を Python 3.13 で作成し、`lambda/analyze-request/handler.py` を配置(ハンドラ: `handler.lambda_handler`)
-2. 実行ロールに `s3:GetObject` / `s3:PutObject` on `arn:aws:s3:::bangumi-info/requests/*` と、`s3:ListBucket` on `arn:aws:s3:::bangumi-info`(条件 `s3:prefix` = `requests/*`)を付与。ListBucket が無いと、CSVが未作成の時に NoSuchKey ではなく AccessDenied が返り追記に失敗する。タイムアウトは10秒
+2. 実行ロールに `s3:GetObject` / `s3:PutObject` on `arn:aws:s3:::bangumi-info/requests/*` と、`s3:ListBucket` on `arn:aws:s3:::bangumi-info`(条件 `s3:prefix` = `requests/*` と `results/*`)を付与。requests/* の ListBucket が無いと、CSVが未作成の時に NoSuchKey ではなく AccessDenied が返り追記に失敗する。results/* は分析済みの判定に使う。タイムアウトは10秒
 3. Function URL を作成。CORS の許可オリジンをダッシュボードのドメインに限定、メソッドは POST、ヘッダは `content-type` と `x-amz-content-sha256` を許可
 4. CloudFront を作成(従量課金)。オリジン=Function URL のドメイン、HTTPS のみ、OAC(オリジンタイプ Lambda・常に署名)、
    許可メソッドは GET〜DELETE の7種、キャッシュポリシー CachingDisabled、オリジンリクエストポリシー AllViewerExceptHostHeader、
@@ -459,6 +459,11 @@ video-analyzer-worker (通常ルールを無視して最優先で分析。分析
 ### 注意
 - OAC は POST の本文のハッシュを計算しないため、呼び出し側で `x-amz-content-sha256`(本文の SHA-256 を16進小文字)を付ける必要がある。無い・一致しない場合は Lambda 側で署名エラー(403)になる
 - WAF は IP で判定するため、社内でも iboss を通らない経路(curl 等)からは 403 になる
+
+### 分析済み・リクエスト済みの表示
+- ボタンを表示した時に `{"action":"status","key":...}` を送り、`{"analyzed","requested"}` を受け取る。分析済みなら灰色の「分析済み」、リクエスト済みなら「リクエスト済み」にして押せなくする
+- 分析済みの判定は `results/{channel}/{YYYYMMDD}/{ファイル名}_corners.csv` の有無(`movie/`→`results/`、`.mp4`→`_corners.csv`)
+- 分析済みの動画を追加しようとした場合は、追記せず `already_analyzed` を返す
 
 ### 入力チェック
 - `movie/ch{N}/{YYYYMMDD}/CH{N}_{YYYYMMDD}_{HHMMSS}.mp4` 形式以外のキーは 400 で拒否
