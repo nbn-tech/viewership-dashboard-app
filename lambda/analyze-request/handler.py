@@ -12,6 +12,11 @@ CSVの仕様(ワーカー側):
 - 分析済み(results/ 配下にCSVがある)動画は書かれたままでも自動スキップされるので、
   処理済みのキーを消す必要はない
 
+{"action": "status", "key": ...} を送ると、追記はせずに
+{"analyzed": 分析済みか, "requested": リクエスト済みか} を返す(ボタンの表示切り替え用)。
+分析済みの判定は、results/{channel}/{YYYYMMDD}/{ファイル名}_corners.csv があるかで行う。
+分析済みの動画は追記せず "already_analyzed" を返す。
+
 複数人がほぼ同時にボタンを押しても互いの追記を上書きしないよう、S3の条件付き書き込み
 (既存ファイルは If-Match=ETag、新規作成は If-None-Match=*)で読み込み→追記→書き込みを行い、
 競合した場合は読み直して再試行する。
@@ -20,10 +25,11 @@ CSVの仕様(ワーカー側):
 - Lambda ランタイム: Python 3.13 (boto3 同梱)
 - 実行ロールに以下を許可:
     s3:GetObject / s3:PutObject on arn:aws:s3:::bangumi-info/requests/*
-    s3:ListBucket on arn:aws:s3:::bangumi-info (条件 s3:prefix=requests/*)
-      ※無いとCSV未作成時に NoSuchKey ではなく AccessDenied が返り、追記に失敗する
-- Lambda Function URL で公開し、CORSの許可オリジンをダッシュボードのドメインに限定する
-  (既存の /api/search/annotation と同じ構成)
+    s3:ListBucket on arn:aws:s3:::bangumi-info (条件 s3:prefix=requests/* と results/*)
+      ※requests/* が無いとCSV未作成時に NoSuchKey ではなく AccessDenied が返り、追記に失敗する
+      ※results/* は分析済みの判定(該当キーの有無の一覧取得)に使う
+- Function URL は認証タイプ AWS_IAM とし、WAF付きCloudFront(OAC)経由でのみ呼ばせる
+  (INFRASTRUCTURE.md 7章)
 """
 
 import base64
@@ -67,8 +73,27 @@ def _read_requests():
     return text.splitlines(), obj["ETag"]
 
 
+def _results_key(key):
+    """movie/ch6/20261020/CH6_20261020_060000.mp4 → results/ch6/20261020/CH6_20261020_060000_corners.csv"""
+    return "results/" + key[len("movie/"):-len(".mp4")] + "_corners.csv"
+
+
+def is_analyzed(key):
+    """分析結果のCSVがあるか。HeadObjectだとGetObject権限が要るため、ListBucket(完全一致の接頭辞)で調べる。"""
+    rkey = _results_key(key)
+    res = s3.list_objects_v2(Bucket=BUCKET, Prefix=rkey, MaxKeys=1)
+    return any(o["Key"] == rkey for o in res.get("Contents", []))
+
+
+def is_requested(key):
+    lines, _ = _read_requests()
+    return key in (line.strip() for line in lines)
+
+
 def add_request(key):
-    """キーをCSVに追記する。戻り値は "added" / "already_requested" / "full"。"""
+    """キーをCSVに追記する。戻り値は "added" / "already_requested" / "already_analyzed" / "full"。"""
+    if is_analyzed(key):
+        return "already_analyzed"
     for _ in range(MAX_RETRIES):
         lines, etag = _read_requests()
         if key in (line.strip() for line in lines):
@@ -108,6 +133,12 @@ def lambda_handler(event, context):
     # フォルダのチャンネル番号とファイル名のチャンネル番号が一致しないキーも不正として弾く
     if not m or m.group(1) != m.group(2):
         return _response(400, {"error": "動画のS3キーの形式が正しくありません", "key": key})
+
+    if body.get("action") == "status":
+        try:
+            return _response(200, {"key": key, "analyzed": is_analyzed(key), "requested": is_requested(key)})
+        except ClientError as exc:
+            return _response(502, {"error": str(exc)})
 
     try:
         status = add_request(key)
