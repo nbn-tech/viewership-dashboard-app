@@ -4,8 +4,8 @@ const client = new BedrockRuntimeClient({ region: "ap-northeast-1" });
 
 const headers = {
   "Content-Type": "application/json",
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Origin": "https://main.d2xmfuzs3pq3do.amplifyapp.com",
+  "Access-Control-Allow-Headers": "Content-Type,x-amz-content-sha256",
   "Access-Control-Allow-Methods": "POST,OPTIONS",
 };
 
