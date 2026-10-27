@@ -1636,9 +1636,12 @@ function computeCornerStats(corner,cache,metric){
 //   baseUrl: "",    // 本番例: "https://api.your-domain.com"
 //   mockDelayMs: 0, // 疑似レイテンシ
 // };
+// AI分析・検索Lambda(lambda/search-bedrock)。分析ボタン・アノテーション検索と同じく、
+// WAF(社内IPのみ許可)付きのCloudFront経由で呼ぶ(OACで署名してLambdaに転送)。
+// AI分析は1回で最長2分程度かかるため、CloudFrontの応答タイムアウトは120秒にしている
 const API_CONFIG = {
   useMock: false,
-  baseUrl: "https://fecc7uq4uapxx37bmockq3gyvi0ibsdf.lambda-url.ap-northeast-1.on.aws",
+  baseUrl: "https://d909qr158try5.cloudfront.net",
 };
 
 // 番組アノテーション検索Lambda (Athena経由、video_analyzer.daily_cornersを検索)。
@@ -1716,11 +1719,7 @@ async function _callClaudeDirect(messages, maxTokens){
 
 // 自社バックエンド呼び出し(本番実装で共通利用)
 async function _callBackend(path,body){
-  const res=await fetch(`${API_CONFIG.baseUrl}${path}`,{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify(body),
-  });
+  const res=await postJsonViaOac(`${API_CONFIG.baseUrl}${path}`,body);
   if(!res.ok)throw new Error(`Backend API error: ${res.status}`);
   return await res.json();
 }
