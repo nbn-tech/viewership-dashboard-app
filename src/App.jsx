@@ -1643,13 +1643,22 @@ const API_CONFIG = {
 
 // 番組アノテーション検索Lambda (Athena経由、video_analyzer.corner_csvを検索)
 const ANNOTATION_SEARCH_URL = "https://htfd3lomkkplj4363w7cczdidy0olqcs.lambda-url.ap-northeast-1.on.aws/";
-// 動画分析リクエスト受付Lambda(lambda/analyze-request)のFunction URL。
+// 動画分析リクエスト受付Lambda(lambda/analyze-request)の呼び出し先。
 // s3://bangumi-info/requests/analyze_requests.csv に動画キーを追記し、video_analyzerが毎晩18:00に最優先で分析する。
+// Lambdaを直接呼ばせないよう、WAF(社内IPのみ許可)付きのCloudFront経由で呼ぶ。CloudFrontはOACで署名してLambdaに転送する
 // 空文字にすると「分析する」ボタンが無効表示になる
-const ANALYZE_REQUEST_URL = "https://xwthfnl3mtqpwxfer3fxh7ok640nzjvn.lambda-url.ap-northeast-1.on.aws/";
+const ANALYZE_REQUEST_URL = "https://d35sa9kheanqxa.cloudfront.net/";
+
+async function sha256Hex(text){
+  const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("");
+}
 
 async function requestVideoAnalysis(key){
-  const res=await fetch(ANALYZE_REQUEST_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key})});
+  const body=JSON.stringify({key});
+  // CloudFrontのOACはPOSTの本文のハッシュを自分では計算しないため、呼び出し側で x-amz-content-sha256 に付ける。
+  // これが無い(または本文と一致しない)と、Lambda側(認証タイプAWS_IAM)で署名エラーになる
+  const res=await fetch(ANALYZE_REQUEST_URL,{method:"POST",headers:{"Content-Type":"application/json","x-amz-content-sha256":await sha256Hex(body)},body});
   const json=await res.json().catch(()=>({}));
   if(!res.ok)throw new Error(json.error||`HTTP ${res.status}`);
   return json.status; // "added" | "already_requested"
