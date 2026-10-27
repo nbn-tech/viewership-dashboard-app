@@ -394,10 +394,18 @@ AWS Lambda + Anthropic Claude API で構成。
 ### 使用外部API
 - **Anthropic Claude API** (`claude-sonnet-4-20250514`) — 自然言語による番組分析・検索
 
-### Lambda Function URL
+### 呼び出し先（search_bedrock）
+`lambda/search-bedrock/index.mjs`。Bedrock 経由で Claude を呼ぶ。
+
 ```
-https://fecc7uq4uapxx37bmockq3gyvi0ibsdf.lambda-url.ap-northeast-1.amazonaws.com
+ダッシュボード → CloudFront d909qr158try5.cloudfront.net (E1FSU1HNRUWAM5)
+                   ├ WAF gogoreframe-WAF: 社内(iboss)のIPのみ許可
+                   ↓ OAC(search-bedrock-oac)で署名して転送
+                 Lambda Function URL https://fecc7uq4uapxx37bmockq3gyvi0ibsdf.lambda-url.ap-northeast-1.on.aws
+                 (認証タイプ AWS_IAM: CloudFront以外からの直接呼び出しは拒否)
 ```
+- AI 分析は1回の呼び出しで最長2分程度かかる(過去3か月の最長は約138秒)。CloudFront の応答タイムアウトは画面で設定できる上限の 120 秒にしている。120 秒を超えると CloudFront が 504 を返す
+- CORS は Function URL の設定ではなく、プログラム内の `headers`(許可オリジン=ダッシュボードのみ、許可ヘッダー=`Content-Type,x-amz-content-sha256`)で返している
 
 ### 番組アノテーション検索（annotation-search）
 `lambda/annotation-search/handler.py`。Athena で `video_analyzer.daily_corners`（動画分析のコーナー情報）を検索する。
