@@ -472,6 +472,43 @@ video-analyzer-worker (通常ルールを無視して最優先で分析。分析
 
 ---
 
+## 8. 分単位コーナーCSV（minutes/）
+
+### 概要
+動画分析の結果（`results/`）がアップロードされたら、同じ動画の内容を1分ごとにまとめた CSV を `minutes/` に自動で作る。
+ダッシュボードからは使わない。他の人が S3 から参照する用途。
+
+```
+video_analyzer が results/{ch}/{YYYYMMDD}/{ファイル名}_corners.csv を保存
+    ↓ S3 → EventBridge(Object Created。バケットの EventBridge 通知は有効化済み)
+EventBridge ルール(key が results/ で始まり _corners.csv で終わるもの)
+    ↓
+Lambda minutes-csv (lambda/minutes-csv/handler.py)
+    ↓
+minutes/{ch}/{YYYYMMDD}/{ファイル名}_minutes.csv
+```
+- S3 バケットの通知設定（分析ワーカー用の SQS 通知）には触らない。`put-bucket-notification-configuration` は全体を置き換えるので使わないこと
+
+### 出力形式
+UTF-8（BOM付き、Excel でそのまま開ける）、列は `日時,項目,内容`。
+```
+日時,項目,内容
+2026年10月20日6時9分,スポーツ,佐藤輝明選手、MLB挑戦へ
+2026年10月20日6時11分,CM,CM中
+```
+- 項目: 分析結果の `segment` をダッシュボードと同じ表示名にしたもの（スポーツ・天気予報・CM など）
+- 内容: コーナー名（`title`）。CM は「CM中」
+- 1分ごとに、その1分間に一番長く重なっているコーナーを採用（同じ長さなら先に始まった方）
+- その1分間のうちコーナーで埋まっているのが30秒未満の分は出力しない（動画の切れ目は、長く映っている側の動画で出力される）
+- `segment` 列が無い古い形式（2026年7月ごろ）の CSV は対象外
+- 2026年9月以降の既存の分析結果は、仕組みの作成時に一括で変換した
+
+### 必要な権限（実行ロール）
+- `s3:GetObject` on `arn:aws:s3:::bangumi-info/results/*`
+- `s3:PutObject` on `arn:aws:s3:::bangumi-info/minutes/*`
+
+---
+
 ## AWSサービス一覧まとめ
 
 | サービス | 用途 |
