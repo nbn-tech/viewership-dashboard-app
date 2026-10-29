@@ -112,11 +112,17 @@ def build_minutes(corners_csv_text, start):
     return rows
 
 
+def _excel_safe(value):
+    """Excelで開いた時に = + - @ 等で始まる値が数式として扱われないよう、先頭に ' を付ける。
+    コーナー名は放送内容からAIが作るので、「-台風情報-」のような値もありうる"""
+    return "'" + value if value[:1] in ("=", "+", "-", "@", "\t", "\r") else value
+
+
 def to_csv_bytes(rows):
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\r\n")
     w.writerow(["日時", "項目", "内容"])
-    w.writerows(rows)
+    w.writerows([_excel_safe(c) for c in row] for row in rows)
     return ("﻿" + buf.getvalue()).encode("utf-8")
 
 
